@@ -120,11 +120,13 @@ Execution protocol per module: (a) Read source, (b) write failure-mode checklist
 - [x] 4.3.6 — `.env.example` updated: `CSRF_ENABLED`, `SESSION_COOKIE_*`, `SESSION_LIFETIME_SECONDS`, plus T4.2 rate-limit + validator-cap examples
 
 ### T4.4 — Structured logging + audit trail  *(~4 h)*
-- [ ] 4.4.1 — Replace raw `logger.info(f"...{patient_id}...")` with structured logger that redacts IDs outside debug mode
-- [ ] 4.4.2 — JSON log format to stdout (for container log collection)
-- [ ] 4.4.3 — `data_cache/audit/*.jsonl` append-only compliance trail
-- [ ] 4.4.4 — `request_id` middleware: `request.headers.get('X-Request-ID') or uuid4().hex`
-- [ ] 4.4.5 — Every log line tagged with `request_id`
+- [x] 4.4.1 — `logging_config.py:PatientIdRedactor` — logging.Filter that scrubs four PII patterns (`patient_id=...`, `Patient_ID: ...`, 10-digit NHS numbers, UK postcodes) → `[REDACTED]` before any handler sees the record; active by default, disable via `LOG_PATIENT_IDS=true` for targeted debug sessions
+- [x] 4.4.2 — `logging_config.py:JsonFormatter` + `install_json_logging()`: opt-in via `LOG_FORMAT=json` (text remains dev default for human reading); emits `{ts, level, logger, message, request_id, exc_info}` one object per line
+- [x] 4.4.3 — `logging_config.py:audit_event(actor, action, ...)` + `read_audit_tail(n)`: append-only JSONL under `AUDIT_LOG_DIR` (default `data_cache/audit/`), one file per UTC day, `fsync` on every write, module-level lock for thread safety. Wired into `/auth/login` (4 branches: success, missing creds, unknown user, bad password) and `/auth/logout`.
+- [x] 4.4.4 — `logging_config.py:attach_request_id(app)` — `before_request` hook reads `X-Request-ID` header or calls `generate_request_id()` (UUID4 hex); stores on `flask.g.request_id` + thread-local; `after_request` echoes back `X-Request-ID` on response
+- [x] 4.4.5 — `logging_config.py:RequestIdFilter` attaches `record.request_id` to every LogRecord (fallback `"-"` outside a request). Installed at module import so both text + JSON handlers carry it.
+- [x] 4.4.6 — `tests/test_logging_config.py` — 35 tests across 7 classes: JsonFormatter shape, PII redaction per pattern + env gating + args-tuple scrubbing, thread-isolation of request_id context, filter attachment, Flask client verifies header propagation, audit writer (round-trip, append, metadata, concurrent 20-thread stress, explicit vs. ctx rid precedence, read_tail paging), installer idempotency + env gating. Full suite 539 → 574 green.
+- [x] 4.4.7 — `.env.example` updated: `LOG_FORMAT`, `LOG_PATIENT_IDS`, `AUDIT_LOG_DIR`
 
 ### T4.5 — Observability  *(~4 h)*
 - [ ] 4.5.1 — `/metrics` Prometheus endpoint (request_count, latency histogram, optimisation_solve_time, ML prediction latency)

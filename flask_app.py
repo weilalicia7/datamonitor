@@ -190,6 +190,29 @@ else:
     logger.info("csrf: disabled (CSRF_ENABLED=false or flask_wtf missing)")
 
 
+# -----------------------------------------------------------------------------
+# T4.4 — Structured logging + audit trail
+# -----------------------------------------------------------------------------
+from logging_config import (
+    attach_request_id as _attach_request_id,
+    audit_event as _audit_event,
+    install_json_logging as _install_json_logging,
+    install_patient_id_redactor as _install_patient_id_redactor,
+    install_request_id_filter as _install_request_id_filter,
+    log_format as _log_format,
+    log_redact_patient_ids as _log_redact_patient_ids,
+)
+
+_install_request_id_filter()
+_install_patient_id_redactor()
+_json_logging_on = _install_json_logging()
+_attach_request_id(app)
+logger.info(
+    "logging: format=%s, redact_patient_ids=%s, json_handler=%s",
+    _log_format(), _log_redact_patient_ids(), _json_logging_on,
+)
+
+
 @app.route('/auth/login', methods=['POST'])
 def auth_login():
     """Session auth for browser clients.
@@ -206,23 +229,37 @@ def auth_login():
     username = str(data.get('username', '')).strip()
     password = str(data.get('password', ''))
     if not username or not password:
+        _audit_event(actor=username or 'anonymous', action='auth.login',
+                     outcome='failure',
+                     metadata={'reason': 'missing_credentials'})
         return jsonify({'success': False,
                         'error': 'username + password required'}), 400
     user = _auth_get_user(username)
     if user is None or user.password_hash is None or user.password_salt is None:
+        _audit_event(actor=username, action='auth.login', outcome='failure',
+                     metadata={'reason': 'unknown_user'})
         return jsonify({'success': False, 'error': 'invalid credentials'}), 401
     if not _auth_verify_password(password, user.password_hash, user.password_salt):
+        _audit_event(actor=username, action='auth.login', outcome='failure',
+                     metadata={'reason': 'bad_password'})
         return jsonify({'success': False, 'error': 'invalid credentials'}), 401
     if _FLASK_LOGIN_AVAILABLE:
         _flask_login_user(user, remember=False)
+    _audit_event(actor=user.username, action='auth.login', outcome='success',
+                 metadata={'role': user.role})
     return jsonify({'success': True, 'username': user.username, 'role': user.role})
 
 
 @app.route('/auth/logout', methods=['POST'])
 def auth_logout():
     """End the current session.  No-op if no session."""
+    user = _auth_current_identity() if _auth_enabled() else None
     if _auth_enabled() and _FLASK_LOGIN_AVAILABLE:
         _flask_logout_user()
+    _audit_event(
+        actor=(user.username if user is not None else 'anonymous'),
+        action='auth.logout', outcome='success',
+    )
     return jsonify({'success': True})
 
 
