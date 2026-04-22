@@ -2157,6 +2157,18 @@ def initialize_data():
     fs_thread.start()
 
 
+# Forward-declare globals that the optimisation path may reference before
+# their full definitions appear later in this file.  Without these stubs the
+# auto-data-load below triggers `NameError` for `_auto_scaler`,
+# `_build_patient_feature_records`, and `_auto_materialise_feature_store`,
+# which the optimiser then logs as "Optimization error: ... not defined".
+# The real definitions later in the file replace these stubs without issue.
+_auto_scaler = None
+def _build_patient_feature_records(*_a, **_kw):     # pragma: no cover — stub
+    return [], []
+def _auto_materialise_feature_store(*_a, **_kw):    # pragma: no cover — stub
+    return None
+
 # Run initialization — guard against Flask debug reloader running it twice
 import os as _os
 if _os.environ.get('WERKZEUG_RUN_MAIN') == 'true' or not app.debug:

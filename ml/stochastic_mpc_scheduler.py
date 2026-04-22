@@ -129,12 +129,18 @@ class ChairState:
     status: ChairStatus
     patient_id: Optional[str] = None
     remaining_minutes: int = 0
+    # T2.1 fix: priority of the patient assigned to this chair, captured at
+    # assignment time so the reward function can credit completions by
+    # priority even after the queue entry has been removed.  None when the
+    # chair is IDLE.
+    priority_at_assignment: Optional[int] = None
 
     def copy(self) -> "ChairState":
         return ChairState(
             chair_id=self.chair_id, site_code=self.site_code,
             status=self.status, patient_id=self.patient_id,
             remaining_minutes=self.remaining_minutes,
+            priority_at_assignment=self.priority_at_assignment,
         )
 
 
@@ -414,8 +420,10 @@ def compute_immediate_reward(
             for bc in state_before.chairs
         )
     ]
-    # Credit completions by priority — we don't carry priority after finish,
-    # so look it up via the assigned patient pre-step
+    # Credit completions by priority — we now stash priority on the chair at
+    # assignment time (T2.1) so the reward correctly favours urgent cases.
+    # Multiplier (6 - priority) gives priority 1 (most urgent) the largest
+    # reward and priority 5 the smallest, matching the §S-1.4 formulation.
     for fc in finished:
         prio_pre = next(
             (bc for bc in state_before.chairs if bc.chair_id == fc.chair_id),
@@ -423,8 +431,13 @@ def compute_immediate_reward(
         )
         if prio_pre is None:
             continue
-        # Patient-in-queue records priority; here use 3 as a safe mid.
-        r += priority_complete_base  # base credit per completion
+        priority = prio_pre.priority_at_assignment
+        if priority is None:
+            # Pre-existing OCCUPIED chair from initial state — assume mid (3).
+            priority = 3
+        # Clamp to [1, 5] so a misbehaving caller doesn't crater the reward.
+        priority = max(1, min(5, int(priority)))
+        r += priority_complete_base * (6 - priority)
 
     # Waiting cost (capped at 2 hours / patient per epoch)
     for p in state_after.queue:
@@ -569,7 +582,11 @@ class RolloutPlanner:
             before = s.copy()
             # advance clock
             s.time_min += self.step_minutes
-            # Decrement remaining time on busy chairs; free those that finish
+            # Decrement remaining time on busy chairs; free those that finish.
+            # NOTE: priority_at_assignment intentionally PRESERVED across the
+            # OCCUPIED→IDLE transition for the duration of this step so the
+            # reward function (compute_reward_step) can credit completions by
+            # patient priority.  The next assignment overwrites it.
             for c in s.chairs:
                 if c.status == ChairStatus.OCCUPIED:
                     c.remaining_minutes = max(0, c.remaining_minutes - self.step_minutes)
@@ -644,6 +661,8 @@ class RolloutPlanner:
             chair.status = ChairStatus.OCCUPIED
             chair.patient_id = patient.patient_id
             chair.remaining_minutes = int(patient.expected_duration)
+            # Capture priority so the reward formula can credit by urgency.
+            chair.priority_at_assignment = int(patient.priority)
             assigned_patient_ids.append(patient.patient_id)
         # Remove assigned patients from queue
         if assigned_patient_ids:
@@ -899,6 +918,8 @@ class MPCController:
                         c.remaining_minutes = max(0, c.remaining_minutes - step)
                         if c.remaining_minutes <= 0:
                             c.status = ChairStatus.IDLE
+                            # priority_at_assignment kept until the next assign;
+                            # see note in step() above.
                             c.patient_id = None
                             metrics["completed"] += 1
                     else:

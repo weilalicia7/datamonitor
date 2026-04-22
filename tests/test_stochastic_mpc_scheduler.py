@@ -316,6 +316,112 @@ class TestReward:
 
 
 # --------------------------------------------------------------------------- #
+# T2.1 regression: priority must drive completion reward
+# --------------------------------------------------------------------------- #
+
+
+class TestPriorityWeightedReward:
+    """Without the T2.1 fix the reward function awarded the same credit
+    regardless of patient priority, so the planner had no incentive to
+    prefer urgent patients.  These tests pin the corrected behaviour."""
+
+    def _build_completion(self, priority: int):
+        before = MDPState(
+            time_min=60,
+            chairs=[ChairState(
+                chair_id="C1", site_code="WC",
+                status=ChairStatus.OCCUPIED,
+                patient_id="P1", remaining_minutes=15,
+                priority_at_assignment=priority,
+            )],
+            queue=[],
+        )
+        after = MDPState(
+            time_min=75,
+            chairs=[ChairState(
+                chair_id="C1", site_code="WC",
+                status=ChairStatus.IDLE,
+                patient_id="P1", remaining_minutes=0,
+                # priority_at_assignment intentionally preserved across
+                # OCCUPIED→IDLE so the reward function can read it.
+                priority_at_assignment=priority,
+            )],
+            queue=[],
+        )
+        return before, after
+
+    def test_p1_reward_strictly_greater_than_p5(self):
+        before1, after1 = self._build_completion(priority=1)
+        before5, after5 = self._build_completion(priority=5)
+        action = ScheduleAction(assignments={})
+        r1 = compute_immediate_reward(before1, action, after1, step_minutes=15)
+        r5 = compute_immediate_reward(before5, action, after5, step_minutes=15)
+        assert r1 > r5, (
+            f"Priority-1 reward ({r1}) must exceed priority-5 reward ({r5}) — "
+            "if these are equal the multiplier regressed."
+        )
+
+    def test_priority_multiplier_is_monotone(self):
+        action = ScheduleAction(assignments={})
+        rewards = []
+        for p in (1, 2, 3, 4, 5):
+            before, after = self._build_completion(priority=p)
+            rewards.append(
+                compute_immediate_reward(before, action, after, step_minutes=15)
+            )
+        # Strictly decreasing as priority number grows (1 = most urgent).
+        for a, b in zip(rewards, rewards[1:]):
+            assert a > b, f"reward sequence not monotone: {rewards}"
+
+    def test_missing_priority_defaults_to_mid(self):
+        # A pre-existing OCCUPIED chair (e.g. day starts mid-treatment) won't
+        # have priority_at_assignment set; the reward should still fire,
+        # treating it as priority 3.
+        before = MDPState(
+            time_min=60,
+            chairs=[ChairState("C1", "WC", ChairStatus.OCCUPIED,
+                               patient_id="P1", remaining_minutes=10)],
+            queue=[],
+        )
+        after = MDPState(
+            time_min=70,
+            chairs=[ChairState("C1", "WC", ChairStatus.IDLE,
+                               patient_id="P1", remaining_minutes=0)],
+            queue=[],
+        )
+        r = compute_immediate_reward(before, ScheduleAction({}), after,
+                                     step_minutes=10)
+        # priority=3 → multiplier 3 → r = 3 * priority_complete_base
+        # The exact value depends on DEFAULT_PRIORITY_COMPLETE_BASE; just
+        # assert positive (would be zero with the old broken comment-only path).
+        assert r > 0
+
+    def test_chairstate_copy_preserves_priority(self):
+        c = ChairState("C1", "WC", ChairStatus.OCCUPIED,
+                       patient_id="P1", remaining_minutes=20,
+                       priority_at_assignment=2)
+        c2 = c.copy()
+        assert c2.priority_at_assignment == 2
+
+    def test_assigning_chair_captures_priority(self):
+        # End-to-end: feed a queued patient through the planner's apply path
+        # and verify the chair now carries that priority.
+        from ml.stochastic_mpc_scheduler import RolloutPlanner
+        planner = RolloutPlanner(value_fn=TerminalValueFunction())
+        state = MDPState(
+            time_min=0,
+            chairs=[ChairState("C1", "WC", ChairStatus.IDLE)],
+            queue=[QueuedPatient("P9", priority=2, expected_duration=60,
+                                 arrival_time_min=0)],
+        )
+        action = ScheduleAction(assignments={"C1": "P9"})
+        new_state = planner._apply_action(state, action)
+        assigned = new_state.chairs[0]
+        assert assigned.status == ChairStatus.OCCUPIED
+        assert assigned.priority_at_assignment == 2
+
+
+# --------------------------------------------------------------------------- #
 # 8. state_from_app_state
 # --------------------------------------------------------------------------- #
 
