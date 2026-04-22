@@ -95,12 +95,13 @@ Execution protocol per module: (a) Read source, (b) write failure-mode checklist
 
 ## Tier 4 — Production hardening  *(~30 h, can ship to real users after)*
 
-### T4.1 — Authentication + authorisation  *(~6 h)*
-- [ ] 4.1.1 — Flask-Login session auth for browser users
-- [ ] 4.1.2 — `@api_key_required` decorator for machine-to-machine
-- [ ] 4.1.3 — Three roles: `viewer`, `operator`, `admin`
-- [ ] 4.1.4 — Gate every mutating endpoint (`/api/optimize*`, `/api/mpc/*`, `/api/fairness/*/config`, `/api/sact/adapt`)
-- [ ] 4.1.5 — Tests covering 401/403 on protected routes
+### T4.1 — Authentication + authorisation  *(~6 h)* ✅ **complete**
+- [x] 4.1.1 — Flask-Login session auth wired via `init_login_manager(app)` + `/auth/login` / `/auth/logout` / `/auth/whoami` endpoints (`auth.py` + `flask_app.py:103-219`)
+- [x] 4.1.2 — `@api_key_required` decorator + `X-API-Key` header recognised by `_current_identity()` (`auth.py:219-253`)
+- [x] 4.1.3 — Three roles with cascade (admin ⊇ operator ⊇ viewer) via `_has_role()` + `role_required(...)` decorator (`auth.py:55-72, 201-219`)
+- [x] 4.1.4 — `before_request` gate in `flask_app.py:174-219` applies role rules across all ~60 endpoints via a cascade: `/auth/*` + `/health/*` + `/metrics` open; `POST .../config` = admin; all other POST/PUT/PATCH/DELETE = operator; GET = viewer. No need to touch individual routes.
+- [x] 4.1.5 — `tests/test_auth.py` — 39 tests: password hashing, role hierarchy, registration, env-seeding, Flask endpoints, route-role mapping, before_request enforcement. Full suite 441 → 480 green.
+- [x] 4.1.6 — `.env.example` + `requirements.txt` updated with Flask-Login / Flask-WTF / Flask-Limiter / python-dotenv
 
 ### T4.2 — Input caps + rate limits  *(~3 h)*
 - [ ] 4.2.1 — `Flask-Limiter` default `60/min`

@@ -11,7 +11,7 @@ Runs on port 1421.
 from flask import Flask, render_template, request, jsonify, redirect, url_for
 from datetime import datetime, timedelta
 from dataclasses import asdict
-from typing import Dict as _Dict
+from typing import Dict as _Dict, Optional
 import json
 
 # Fallback trial rate (also defined in ml/rct_randomization.py).  Kept here as
@@ -99,6 +99,153 @@ if not os.environ.get('FLASK_SECRET_KEY'):
         "random key. Sessions will not survive a restart. Set FLASK_SECRET_KEY "
         "before running in production."
     )
+
+# -----------------------------------------------------------------------------
+# T4.1 — Authentication + authorisation
+# -----------------------------------------------------------------------------
+# When AUTH_ENABLED=true in the environment, every mutating endpoint enforces
+# role-based access (admin >= operator >= viewer). When unset/false, the
+# decorators in `auth.py` are no-ops so the 441 existing tests keep passing.
+from auth import (
+    auth_enabled as _auth_enabled,
+    init_login_manager as _init_login_manager,
+    login_required as auth_login_required,
+    role_required as auth_role_required,
+    seed_from_environment as _auth_seed_from_env,
+    ROLE_ADMIN, ROLE_OPERATOR, ROLE_VIEWER,
+    _current_identity as _auth_current_identity,
+    hash_password as _auth_hash_password,
+    verify_password as _auth_verify_password,
+    get_user as _auth_get_user,
+)
+try:
+    from flask_login import login_user as _flask_login_user, logout_user as _flask_logout_user
+    _FLASK_LOGIN_AVAILABLE = True
+except Exception:                                                  # pragma: no cover
+    _FLASK_LOGIN_AVAILABLE = False
+
+_login_manager = _init_login_manager(app)
+_auth_seed_from_env(logger=logger)
+if _auth_enabled():
+    logger.info("auth: AUTH_ENABLED=true — role-based access control active")
+else:
+    logger.info("auth: AUTH_ENABLED=false (default) — decorators no-op")
+
+
+@app.route('/auth/login', methods=['POST'])
+def auth_login():
+    """Session auth for browser clients.
+
+    Body: ``{"username": "...", "password": "..."}``.  Returns 200 with
+    ``{"success": true, "role": "..."}`` on success.  401 otherwise.
+    """
+    if not _auth_enabled():
+        return jsonify({
+            'success': True,
+            'note': 'AUTH_ENABLED=false; session cookie is a no-op',
+        })
+    data = request.json or {}
+    username = str(data.get('username', '')).strip()
+    password = str(data.get('password', ''))
+    if not username or not password:
+        return jsonify({'success': False,
+                        'error': 'username + password required'}), 400
+    user = _auth_get_user(username)
+    if user is None or user.password_hash is None or user.password_salt is None:
+        return jsonify({'success': False, 'error': 'invalid credentials'}), 401
+    if not _auth_verify_password(password, user.password_hash, user.password_salt):
+        return jsonify({'success': False, 'error': 'invalid credentials'}), 401
+    if _FLASK_LOGIN_AVAILABLE:
+        _flask_login_user(user, remember=False)
+    return jsonify({'success': True, 'username': user.username, 'role': user.role})
+
+
+@app.route('/auth/logout', methods=['POST'])
+def auth_logout():
+    """End the current session.  No-op if no session."""
+    if _auth_enabled() and _FLASK_LOGIN_AVAILABLE:
+        _flask_logout_user()
+    return jsonify({'success': True})
+
+
+@app.route('/auth/whoami', methods=['GET'])
+def auth_whoami():
+    """Report the caller's identity + role (null if unauthenticated)."""
+    user = _auth_current_identity() if _auth_enabled() else None
+    if user is None:
+        return jsonify({
+            'auth_enabled': _auth_enabled(),
+            'authenticated': False,
+            'username': None,
+            'role': None,
+        })
+    return jsonify({
+        'auth_enabled': True,
+        'authenticated': True,
+        'username': user.username,
+        'role': user.role,
+    })
+
+
+# Path prefixes that are always open (no auth needed even when AUTH_ENABLED=true).
+# Keep this list tiny — every entry is a public surface-area concession.
+_AUTH_PUBLIC_PATHS = (
+    '/auth/login',
+    '/auth/logout',
+    '/auth/whoami',
+    '/health/live',
+    '/health/ready',
+    '/metrics',
+    '/static/',
+    '/favicon.ico',
+)
+
+
+def _route_required_role(method: str, path: str) -> Optional[str]:
+    """Return the role required for ``(method, path)``, or None if open.
+
+    Rule cascade (first match wins):
+      1. Paths in _AUTH_PUBLIC_PATHS → None (open)
+      2. Any ``.../config`` POST → admin
+      3. Any POST / PUT / PATCH / DELETE → operator
+      4. Everything else (GETs, HEAD, OPTIONS) → viewer
+    """
+    for prefix in _AUTH_PUBLIC_PATHS:
+        if path == prefix or path.startswith(prefix):
+            return None
+    if method in ('POST', 'PUT', 'PATCH', 'DELETE'):
+        if path.endswith('/config'):
+            return ROLE_ADMIN
+        return ROLE_OPERATOR
+    return ROLE_VIEWER
+
+
+@app.before_request
+def _auth_before_request():
+    """Enforce role-based access before the view runs.
+
+    When ``AUTH_ENABLED`` is false (default), this is a no-op so existing
+    tests and the public dev dashboard keep working.
+    """
+    if not _auth_enabled():
+        return None
+    required = _route_required_role(request.method, request.path)
+    if required is None:
+        return None
+    user = _auth_current_identity()
+    if user is None:
+        return jsonify({
+            'success': False,
+            'error': 'authentication required',
+            'path': request.path,
+        }), 401
+    if not user.has_role(required):
+        return jsonify({
+            'success': False,
+            'error': f"role '{required}' required (current: '{user.role}')",
+            'path': request.path,
+        }), 403
+    return None
 
 # =============================================================================
 # DATA SOURCE CONFIGURATION
