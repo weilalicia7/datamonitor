@@ -59,6 +59,13 @@ Flask-WTF>=1.2.1
 Flask-Limiter>=3.5.0
 python-dotenv>=1.0.0
 
+# Observability (T4.5) — Prometheus metrics + OpenTelemetry tracing.
+# OTel extras are OPTIONAL; uncomment only when you run an OTLP collector.
+prometheus_client>=0.20.0
+# opentelemetry-api>=1.25.0
+# opentelemetry-sdk>=1.25.0
+# opentelemetry-exporter-otlp-proto-http>=1.25.0
+
 # =============================================================================
 # Utilities
 # =============================================================================

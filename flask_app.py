@@ -213,6 +213,28 @@ logger.info(
 )
 
 
+# -----------------------------------------------------------------------------
+# T4.5 — Observability (Prometheus + /health/* + OTel)
+# -----------------------------------------------------------------------------
+from observability import (
+    attach_observability as _attach_observability,
+    mark_app_ready as _mark_app_ready,
+    metrics_enabled as _metrics_enabled,
+    otel_enabled as _otel_enabled,
+    register_readiness_check as _register_readiness_check,
+)
+
+_attach_observability(app)
+# Readiness: core subsystems must be loaded.  These checks run on every
+# /health/ready probe, so keep them cheap (no I/O).
+_register_readiness_check("pandas_available", lambda: bool(PANDAS_AVAILABLE))
+_register_readiness_check("ml_available", lambda: bool(ML_AVAILABLE))
+logger.info(
+    "observability: metrics=%s, otel=%s",
+    _metrics_enabled(), _otel_enabled(),
+)
+
+
 @app.route('/auth/login', methods=['POST'])
 def auth_login():
     """Session auth for browser clients.
@@ -12557,6 +12579,10 @@ def api_drift_attribution_last():
 _csrf_exempted = _exempt_json_api_routes(app, _csrf)
 if _csrf is not None:
     logger.info(f"csrf: exempted {len(_csrf_exempted)} JSON API routes from CSRF token check")
+
+# Final readiness signal — app has finished wiring.  Flipped here (not inside
+# a lazy callback) so /health/ready stays cheap.
+_mark_app_ready()
 
 
 # =============================================================================

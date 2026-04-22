@@ -129,10 +129,12 @@ Execution protocol per module: (a) Read source, (b) write failure-mode checklist
 - [x] 4.4.7 — `.env.example` updated: `LOG_FORMAT`, `LOG_PATIENT_IDS`, `AUDIT_LOG_DIR`
 
 ### T4.5 — Observability  *(~4 h)*
-- [ ] 4.5.1 — `/metrics` Prometheus endpoint (request_count, latency histogram, optimisation_solve_time, ML prediction latency)
-- [ ] 4.5.2 — `/health/live` + `/health/ready`
-- [ ] 4.5.3 — OpenTelemetry traces on CP-SAT + MPC hot paths
-- [ ] 4.5.4 — Sample Grafana dashboard JSON in `docs/observability/`
+- [x] 4.5.1 — `observability.py` exports Prometheus metrics: `sact_http_requests_total{method,endpoint,status}`, `sact_http_request_duration_seconds`, `sact_optimizer_solve_seconds{solver}`, `sact_ml_prediction_seconds{model}`, `sact_app_ready`. `/metrics` returns exposition format; 503 when `METRICS_ENABLED=false`. Flask `before_request`/`after_request` hooks auto-instrument every route with endpoint = rule template (bounded cardinality).
+- [x] 4.5.2 — `/health/live` always 200 (liveness) and `/health/ready` 200/503 (aggregates registered readiness checks; auth-public). `register_readiness_check(name, fn)` seeded with `pandas_available`, `ml_available`; extensible at runtime.
+- [x] 4.5.3 — `observe_optimizer_solve(solver)` + `observe_ml_prediction(model)` context managers record to the histograms AND, when `OTEL_ENABLED=true` + OTel SDK present, start an OTel span with attributes `sact.solver` / `sact.model`. `_try_init_otel()` lazily wires `TracerProvider` + OTLP HTTP exporter gated on `OTEL_EXPORTER_OTLP_ENDPOINT`. Solver/ML modules aren't modified here — the helpers are ready for adoption per-caller without a breaking change.
+- [x] 4.5.4 — `docs/observability/grafana_dashboard.json` — 6 panels: app_ready stat, req/s by status, p95 latency by endpoint, 5xx error ratio, optimiser p95 by solver, ML p95 by model. Committed as Grafana schema 39.
+- [x] 4.5.5 — `tests/test_observability.py` — 19 tests across 6 classes: env gating, readiness check registration / snapshot / failure paths, Flask health+metrics endpoints (200/503), hot-path histogram recording (incl. exception-inside-block path), app_ready gauge flip, Grafana JSON parses and names every metric. Full suite 574 → 593 green.
+- [x] 4.5.6 — `requirements.txt` pins `prometheus_client>=0.20.0`; OTel packages commented as opt-in; `.env.example` adds `METRICS_ENABLED`, `OTEL_ENABLED`, `OTEL_SERVICE_NAME`.
 
 ### T4.6 — Deployment assets  *(~4 h)*
 - [ ] 4.6.1 — Multi-stage `Dockerfile` (Python 3.12, non-root user, pinned deps)
