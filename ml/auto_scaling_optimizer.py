@@ -288,9 +288,16 @@ class AutoScalingOptimizer:
         method; tests can pass any mock.
     set_weights:
         Optional callable ``(weights_dict) -> None`` used to swap
-        weight vectors between parallel workers.  If None, weights
-        are not mutated (the parallel race still runs but each worker
-        solves the same problem — useful for testing).
+        weight vectors between parallel workers.  Legacy hook —
+        suffers from a race when multiple workers share one optimiser
+        instance, so the T2.2 fix forces serialisation when this is
+        the only weight injection mechanism.  Prefer ``solve_with_weights``.
+    solve_with_weights:
+        Preferred T2.2 callable
+        ``(patients, weights_dict, time_limit_s) -> OptimizationResult``
+        that returns a result computed with the given weights without
+        mutating shared state.  When provided, the parallel race runs
+        truly in parallel + correctly.
     cascade_budgets:
         Ordered tuple of time limits (seconds).  Matches §5.1 brief.
     parallel_configs:
@@ -309,6 +316,9 @@ class AutoScalingOptimizer:
         *,
         base_optimizer: Optional[Callable[..., Any]] = None,
         set_weights: Optional[Callable[[Dict[str, float]], None]] = None,
+        solve_with_weights: Optional[
+            Callable[[List[Any], Dict[str, float], float], Any]
+        ] = None,
         cascade_budgets: Sequence[float] = DEFAULT_CASCADE_BUDGETS,
         parallel_configs: int = DEFAULT_PARALLEL_CONFIGS,
         parallel_time_limit_s: float = DEFAULT_PARALLEL_TIME_LIMIT_S,
@@ -321,6 +331,8 @@ class AutoScalingOptimizer:
     ):
         self._base_optimizer = base_optimizer
         self._set_weights = set_weights
+        # T2.2: prefer the per-call API over the legacy mutate-then-solve.
+        self._solve_with_weights = solve_with_weights
         self.cascade_budgets = tuple(float(b) for b in cascade_budgets)
         self.parallel_configs = int(parallel_configs)
         self.parallel_time_limit_s = float(parallel_time_limit_s)
@@ -336,6 +348,8 @@ class AutoScalingOptimizer:
         self._lock = threading.Lock()
         self._last: Optional[AutoScalingReport] = None
         self._n_runs: int = 0
+        # Logged once when we degrade the parallel race to serial.
+        self._race_degrade_warned: bool = False
 
     # ----------------------------------------------------------- API ---- #
 
@@ -446,6 +460,52 @@ class AutoScalingOptimizer:
 
     # --------------------------------------------------------- Internals - #
 
+    def _attempt_from_result(
+        self,
+        result: Any,
+        *,
+        stage: str,
+        config_name: str,
+        time_budget_s: float,
+        solve_time: float,
+    ) -> AttemptRecord:
+        """Build an AttemptRecord from a base-optimiser result."""
+        success = bool(getattr(result, 'success', False))
+        appts = getattr(result, 'appointments', []) or []
+        uns = getattr(result, 'unscheduled', []) or []
+        metrics = getattr(result, 'metrics', None) or {}
+        obj_score = (
+            metrics.get('objective_score') if isinstance(metrics, dict) else None
+        )
+        return AttemptRecord(
+            stage=stage,
+            config_name=config_name,
+            time_budget_s=float(time_budget_s),
+            solve_time_s=float(solve_time),
+            status=str(getattr(result, 'status', 'UNKNOWN')),
+            success=success,
+            n_scheduled=len(appts),
+            n_unscheduled=len(uns),
+            objective_score=float(obj_score) if obj_score is not None else None,
+            early_stopped=solve_time < 0.9 * time_budget_s and success,
+        )
+
+    def _failed_attempt(
+        self, config_name: str, time_budget_s: float, exc: Exception,
+    ) -> AttemptRecord:
+        return AttemptRecord(
+            stage='parallel',
+            config_name=config_name,
+            time_budget_s=float(time_budget_s),
+            solve_time_s=0.0,
+            status=f'EXCEPTION:{type(exc).__name__}',
+            success=False,
+            n_scheduled=0,
+            n_unscheduled=0,
+            objective_score=None,
+            early_stopped=False,
+        )
+
     def _single_solve(
         self,
         patients: List[Any],
@@ -464,30 +524,31 @@ class AutoScalingOptimizer:
                 patients, time_limit=max(int(time_budget_s), 1),
             )
         solve_time = time.perf_counter() - t0
-
-        success = bool(getattr(result, 'success', False))
-        appts = getattr(result, 'appointments', []) or []
-        uns = getattr(result, 'unscheduled', []) or []
-        metrics = getattr(result, 'metrics', None) or {}
-        obj_score = metrics.get('objective_score') if isinstance(metrics, dict) else None
-        attempt = AttemptRecord(
-            stage=stage,
-            config_name=config_name,
-            time_budget_s=float(time_budget_s),
-            solve_time_s=float(solve_time),
-            status=str(getattr(result, 'status', 'UNKNOWN')),
-            success=success,
-            n_scheduled=len(appts),
-            n_unscheduled=len(uns),
-            objective_score=float(obj_score) if obj_score is not None else None,
-            early_stopped=solve_time < 0.9 * time_budget_s and success,
+        attempt = self._attempt_from_result(
+            result, stage=stage, config_name=config_name,
+            time_budget_s=time_budget_s, solve_time=solve_time,
         )
         return attempt, result
 
     def _parallel_race(
         self, patients: List[Any], attempts_sink: List[AttemptRecord]
     ) -> Optional[Tuple[AttemptRecord, Any]]:
-        """Race ``self.parallel_configs`` weight configurations."""
+        """Race ``self.parallel_configs`` weight configurations.
+
+        T2.2 race fix: previously each worker called ``self._set_weights(cfg)``
+        under a lock held only for the assignment, then released the lock and
+        ran the solve.  Worker B could overwrite worker A's weights mid-solve,
+        so worker A returned a result computed with the wrong config.  Two
+        correct paths now exist:
+
+        1. ``self._solve_with_weights`` (preferred) — caller injects a callable
+           ``(patients, weights_dict, time_limit_s) -> result`` that internally
+           clones / threads the weights through to a fresh optimiser.  Each
+           worker is fully independent; true parallelism is preserved.
+        2. ``self._set_weights`` (legacy) — held under the lock for the WHOLE
+           worker (set + solve), so workers serialise.  Correct, but no
+           speed-up.  A warning is logged the first time we degrade.
+        """
         if self.parallel_configs <= 1 or not self.weight_configs:
             return None
         budget = self.parallel_time_limit_s
@@ -496,22 +557,42 @@ class AutoScalingOptimizer:
 
         def _worker(cfg: Dict[str, float]) -> Tuple[AttemptRecord, Any]:
             cfg_name = str(cfg.get('name', 'custom'))
-            if self._set_weights is not None:
+            weights_only = {k: v for k, v in cfg.items() if k != 'name'}
+
+            # Path 1: per-call weights — race correctly + truly in parallel.
+            if self._solve_with_weights is not None:
+                t0 = time.perf_counter()
                 try:
-                    # Strip the 'name' key before pushing to the optimiser.
-                    weights_only = {k: v for k, v in cfg.items() if k != 'name'}
-                    with lock:
-                        self._set_weights(weights_only)
+                    res = self._solve_with_weights(patients, weights_only, budget)
+                except Exception as exc:                  # pragma: no cover
+                    logger.warning(f"solve_with_weights failed for {cfg_name}: {exc}")
+                    return self._failed_attempt(cfg_name, budget, exc), None
+                solve_time = time.perf_counter() - t0
+                ar = self._attempt_from_result(
+                    res, stage='parallel', config_name=cfg_name,
+                    time_budget_s=budget, solve_time=solve_time,
+                )
+                return ar, res
+
+            # Path 2: legacy set_weights — must hold the lock across the
+            # entire solve so workers can't trample each other's weights.
+            if self._set_weights is not None:
+                with lock:
+                    if not self._race_degrade_warned:
+                        logger.warning(
+                            "auto-scaling parallel race degraded to serial — "
+                            "inject solve_with_weights to restore parallelism"
+                        )
+                        self._race_degrade_warned = True
+                    self._set_weights(weights_only)
                     ar, res = self._single_solve(
                         patients, budget, 'parallel', cfg_name,
                     )
-                finally:
-                    pass
-            else:
-                ar, res = self._single_solve(
-                    patients, budget, 'parallel', cfg_name,
-                )
-            return ar, res
+                return ar, res
+
+            # No weight injection mechanism — every worker just races on the
+            # same balanced config; pointless but not incorrect.
+            return self._single_solve(patients, budget, 'parallel', cfg_name)
 
         with concurrent.futures.ThreadPoolExecutor(
             max_workers=self.parallel_configs
