@@ -88,7 +88,17 @@ logger = get_logger(__name__)
 
 # Initialize Flask app
 app = Flask(__name__)
-app.secret_key = 'sact_scheduler_secret_key'
+# Flask session secret: ALWAYS read from environment in production; fall back
+# to a per-process random key in dev so a missing env var doesn't silently
+# downgrade to a guessable literal.  Any deployment must set FLASK_SECRET_KEY
+# in its environment (see .env.example + docs/PRODUCTION_READINESS_PLAN.md).
+app.secret_key = os.environ.get('FLASK_SECRET_KEY') or os.urandom(32).hex()
+if not os.environ.get('FLASK_SECRET_KEY'):
+    logger.warning(
+        "FLASK_SECRET_KEY not set in environment; using ephemeral per-process "
+        "random key. Sessions will not survive a restart. Set FLASK_SECRET_KEY "
+        "before running in production."
+    )
 
 # =============================================================================
 # DATA SOURCE CONFIGURATION

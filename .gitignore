@@ -28,11 +28,48 @@ env/
 .ipynb_checkpoints/
 
 # =============================================================================
-# Secrets (.env files may carry real API keys)
+# Secrets — never commit
 # =============================================================================
 .env
 .env.local
 .env.*.local
+secrets.yml
+credentials.json
+config_local.py
+
+# =============================================================================
+# Runtime artefacts (regenerated on each run; may contain patient IDs when
+# Channel 2 real data is active — do NOT track in git)
+# =============================================================================
+*.log
+*.log.*
+sact_scheduler.log
+data_cache/
+output/schedules/
+output/reports/
+
+# =============================================================================
+# ML model pickles / binaries (opaque blobs; code-exec risk if loaded from
+# untrusted source; regenerate via train.py on first boot)
+# =============================================================================
+*.pkl
+*.pt
+*.pth
+*.joblib
+*.onnx
+*.bin
+models/*.pkl
+models/*.pt
+models/*.joblib
+
+# =============================================================================
+# Smoke-test / scratch artefacts (filenames starting with underscore in
+# data_cache and project root) — catch strays even if data_cache/ rule
+# slips during future refactors
+# =============================================================================
+_*.json
+_*.jsonl
+_smoketest_*
 
 # =============================================================================
 # OS junk
@@ -40,3 +77,13 @@ env/
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# =============================================================================
+# NHS real-data pathways — safety net in case Channel 2 file-drop ever lands
+# =============================================================================
+datasets/real_data/*.xlsx
+datasets/real_data/*.csv
+datasets/real_data/*.json
+datasets/real_data/*.parquet
+!datasets/real_data/.gitkeep
+!datasets/real_data/README.md
