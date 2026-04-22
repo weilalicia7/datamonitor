@@ -145,7 +145,12 @@ Execution protocol per module: (a) Read source, (b) write failure-mode checklist
 - [x] 4.6.6 — `.gitignore` extended to `nginx/certs/*.pem|*.crt|*.key`; `nginx/certs/.gitkeep` placeholder ensures directory lives in VCS without exposing material.
 
 ### T4.7 — Secrets management  *(~2 h)*
-- [ ] 4.7.1 — `.env.example` template (no real values)
+- [x] 4.7.1 — `.env.example` template (no real values) — covers FLASK_SECRET_KEY, AUTH_*, TOMTOM_API_KEY, SECRETS_BACKEND, AWS_*, VAULT_*, SACT_PROD_MODE, LOG_*, METRICS_*, OTEL_*, CSRF_*, SESSION_COOKIE_*
+- [x] 4.7.2 — `secrets_manager.py` with `get_secret(name, default=, required=)` + `assert_required_secrets_set([])` + `load_dotenv_if_present()` + `is_production_like()` + `MissingSecretError`. Resolution order: env > .env > backend > default. `SECRETS_BACKEND={env,aws,vault}` picks the remote layer; boto3/hvac imports are lazy so the app boots without them.
+- [x] 4.7.3 — `flask_app.py` migrated: `_load_dotenv_if_present()` at module import; `_get_secret('FLASK_SECRET_KEY')` with `_is_production_like()` guard (raises `MissingSecretError` in prod if absent; minted ephemerally in dev with a warning). All other secrets (auth passwords, API keys, TomTom) flow through env → `os.environ.get()` as before, now reliably populated by the dotenv autoloader.
+- [x] 4.7.4 — `docs/SECRETS_ROTATION.md` — 9-entry inventory (blast radius + cadence), 4 rotation procedures (FLASK_SECRET_KEY, seed passwords, API keys, TOMTOM), post-rotation verification checklist, incident-response playbook for suspected leak, backend choice matrix (dev/staging/prod).
+- [x] 4.7.5 — `scripts/pre-commit.sh` adds inline-diff secret scanner: AWS AKIA/ASIA access keys, 40-char AWS secret keys, private-key PEM blocks, Slack xox* tokens, Stripe sk_live_, GitHub ghp_/github_pat_, literal `FLASK_SECRET_KEY=`/`_API_KEY=`/`_PASSWORD=` assignments ≥32 chars. Blocked commits point to `docs/SECRETS_ROTATION.md`.
+- [x] 4.7.6 — `tests/test_secrets_manager.py` — 22 tests across 7 classes: .env load / missing / override, env-wins resolution, default / required / MissingSecretError, backend selector parsing, assert_required_secrets_set success + failure, is_production_like() with 4 env-hint paths, SECRETS_BACKEND=env short-circuits AWS/Vault, AWS+Vault stubs exercised when selected. Full suite 593 → 615 green.
 - [ ] 4.7.2 — `python-dotenv` integration
 - [ ] 4.7.3 — Document production-secrets backends (AWS Secrets Manager / Vault / K8s Secrets)
 

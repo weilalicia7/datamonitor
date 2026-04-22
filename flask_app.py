@@ -86,14 +86,37 @@ except ImportError:
 
 logger = get_logger(__name__)
 
+# T4.7 — Secrets: autoload .env for dev convenience, then use a single
+# resolver for every secret.  In production the operator provisions env
+# via AWS Secrets Manager / Vault / k8s Secrets; locally the .env file
+# (gitignored; pre-commit blocked) serves the same role.
+from secrets_manager import (
+    assert_required_secrets_set as _assert_required_secrets_set,
+    get_secret as _get_secret,
+    is_production_like as _is_production_like,
+    load_dotenv_if_present as _load_dotenv_if_present,
+    MissingSecretError as _MissingSecretError,
+)
+
+_dotenv_loaded = _load_dotenv_if_present()
+if _dotenv_loaded:
+    logger.info("secrets: .env loaded for development")
+
 # Initialize Flask app
 app = Flask(__name__)
-# Flask session secret: ALWAYS read from environment in production; fall back
-# to a per-process random key in dev so a missing env var doesn't silently
-# downgrade to a guessable literal.  Any deployment must set FLASK_SECRET_KEY
-# in its environment (see .env.example + docs/PRODUCTION_READINESS_PLAN.md).
-app.secret_key = os.environ.get('FLASK_SECRET_KEY') or os.urandom(32).hex()
-if not os.environ.get('FLASK_SECRET_KEY'):
+# Flask session secret: in production FLASK_SECRET_KEY MUST be set.  In dev we
+# tolerate a missing value and mint an ephemeral key so developers aren't
+# forced through the secrets flow for a quick local run.
+_flask_secret = _get_secret('FLASK_SECRET_KEY')
+if _flask_secret:
+    app.secret_key = _flask_secret
+else:
+    if _is_production_like():
+        raise _MissingSecretError(
+            "FLASK_SECRET_KEY is required in production environments. "
+            "See docs/SECRETS_ROTATION.md."
+        )
+    app.secret_key = os.urandom(32).hex()
     logger.warning(
         "FLASK_SECRET_KEY not set in environment; using ephemeral per-process "
         "random key. Sessions will not survive a restart. Set FLASK_SECRET_KEY "
