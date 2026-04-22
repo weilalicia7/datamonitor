@@ -1,0 +1,134 @@
+{% extends "base.html" %}
+{% block title %}About | SACT Scheduler{% endblock %}
+{% block content %}
+<div class="page-header fade-in">
+    <h1>About This Project</h1>
+    <p class="page-subtitle">SACT Intelligent Scheduling System - MSc Data Science Dissertation</p>
+</div>
+
+<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 28px; margin-bottom: 28px;">
+    <!-- Healthcare Partner -->
+    <div class="card fade-in delay-1">
+        <div class="card-header">
+            <h3><i class="fas fa-hospital"></i>Healthcare Partner</h3>
+        </div>
+        <div class="card-body">
+            <div style="display: flex; align-items: center; gap: 20px; margin-bottom: 24px;">
+                <div style="width: 80px; height: 80px; background: linear-gradient(135deg, #00a86b 0%, #059669 100%); border-radius: 20px; display: flex; align-items: center; justify-content: center; font-size: 2.5rem; color: white; box-shadow: 0 8px 30px rgba(0, 168, 107, 0.3);">
+                    <i class="fas fa-ribbon"></i>
+                </div>
+                <div>
+                    <h2 style="font-size: 1.8rem; margin-bottom: 4px;">Velindre Cancer Centre</h2>
+                    <p style="color: var(--gray-400); font-size: 1rem;">NHS Wales Trust</p>
+                </div>
+            </div>
+            <p style="color: var(--gray-300); line-height: 1.8; margin-bottom: 20px;">
+                Velindre Cancer Centre is a specialist NHS cancer treatment centre serving South East Wales.
+                The centre provides systemic anti-cancer therapy (SACT), radiotherapy, and supportive care
+                to thousands of patients annually.
+            </p>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+                <div style="padding: 16px; background: rgba(255,255,255,0.02); border-radius: 12px; border: 1px solid rgba(255,255,255,0.06);">
+                    <div style="font-size: 1.5rem; font-weight: 700; color: var(--white); margin-bottom: 4px;">4</div>
+                    <div style="font-size: 0.75rem; color: var(--gray-500); text-transform: uppercase; letter-spacing: 0.08em;">Treatment Sites</div>
+                </div>
+                <div style="padding: 16px; background: rgba(255,255,255,0.02); border-radius: 12px; border: 1px solid rgba(255,255,255,0.06);">
+                    <div style="font-size: 1.5rem; font-weight: 700; color: var(--white); margin-bottom: 4px;">26</div>
+                    <div style="font-size: 0.75rem; color: var(--gray-500); text-transform: uppercase; letter-spacing: 0.08em;">Treatment Chairs</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Academic Institution -->
+    <div class="card fade-in delay-2">
+        <div class="card-header">
+            <h3><i class="fas fa-graduation-cap"></i>Academic Institution</h3>
+        </div>
+        <div class="card-body">
+            <div style="display: flex; align-items: center; gap: 20px; margin-bottom: 24px;">
+                <div style="width: 80px; height: 80px; background: linear-gradient(135deg, #dc2626 0%, #b91c1c 100%); border-radius: 20px; display: flex; align-items: center; justify-content: center; font-size: 2.5rem; color: white; font-weight: 700; font-family: 'Playfair Display', Georgia, serif; box-shadow: 0 8px 30px rgba(220, 38, 38, 0.3);">
+                    C
+                </div>
+                <div>
+                    <h2 style="font-size: 1.8rem; margin-bottom: 4px;">Cardiff University</h2>
+                    <p style="color: var(--gray-400); font-size: 1rem;">School of Mathematics</p>
+                </div>
+            </div>
+            <p style="color: var(--gray-300); line-height: 1.8; margin-bottom: 20px;">
+                This system was developed as part of an MSc Data Science dissertation project
+                at Cardiff University's School of Mathematics, combining advanced optimization
+                techniques with machine learning for healthcare scheduling.
+            </p>
+            <div style="padding: 20px; background: linear-gradient(135deg, rgba(220, 38, 38, 0.1) 0%, transparent 100%); border: 1px solid rgba(220, 38, 38, 0.2); border-radius: 16px;">
+                <div style="font-size: 0.75rem; color: var(--gray-500); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 8px;">Programme</div>
+                <div style="font-size: 1.1rem; color: var(--white); font-weight: 600;">MSc Data Science & Analytics</div>
+                <div style="font-size: 0.85rem; color: var(--gray-400); margin-top: 4px;">Dissertation Project 2025-2026</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- System Features -->
+<div class="card fade-in delay-3">
+    <div class="card-header">
+        <h3><i class="fas fa-cogs"></i>System Features & Capabilities</h3>
+    </div>
+    <div class="card-body">
+        <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 24px;">
+            <div style="text-align: center; padding: 28px 20px; background: rgba(255,255,255,0.02); border-radius: 16px; border: 1px solid rgba(255,255,255,0.06); transition: all 0.3s ease;" onmouseover="this.style.transform='translateY(-4px)'; this.style.borderColor='rgba(59, 130, 246, 0.3)';" onmouseout="this.style.transform='translateY(0)'; this.style.borderColor='rgba(255,255,255,0.06)';">
+                <div style="width: 60px; height: 60px; margin: 0 auto 16px; background: linear-gradient(135deg, rgba(37, 99, 235, 0.2) 0%, rgba(37, 99, 235, 0.1) 100%); border-radius: 16px; display: flex; align-items: center; justify-content: center;">
+                    <i class="fas fa-brain" style="font-size: 1.5rem; color: #60a5fa;"></i>
+                </div>
+                <h4 style="font-family: 'Inter', sans-serif; font-size: 1rem; margin-bottom: 8px; color: var(--white);">ML Optimization</h4>
+                <p style="font-size: 0.8rem; color: var(--gray-500); line-height: 1.5;">OR-Tools CP-SAT solver with multi-objective optimization for appointment scheduling</p>
+            </div>
+
+            <div style="text-align: center; padding: 28px 20px; background: rgba(255,255,255,0.02); border-radius: 16px; border: 1px solid rgba(255,255,255,0.06); transition: all 0.3s ease;" onmouseover="this.style.transform='translateY(-4px)'; this.style.borderColor='rgba(5, 150, 105, 0.3)';" onmouseout="this.style.transform='translateY(0)'; this.style.borderColor='rgba(255,255,255,0.06)';">
+                <div style="width: 60px; height: 60px; margin: 0 auto 16px; background: linear-gradient(135deg, rgba(5, 150, 105, 0.2) 0%, rgba(5, 150, 105, 0.1) 100%); border-radius: 16px; display: flex; align-items: center; justify-content: center;">
+                    <i class="fas fa-satellite-dish" style="font-size: 1.5rem; color: #34d399;"></i>
+                </div>
+                <h4 style="font-family: 'Inter', sans-serif; font-size: 1rem; margin-bottom: 8px; color: var(--white);">Real-Time Monitoring</h4>
+                <p style="font-size: 0.8rem; color: var(--gray-500); line-height: 1.5;">Weather, traffic, and news event monitoring with NLP sentiment analysis</p>
+            </div>
+
+            <div style="text-align: center; padding: 28px 20px; background: rgba(255,255,255,0.02); border-radius: 16px; border: 1px solid rgba(255,255,255,0.06); transition: all 0.3s ease;" onmouseover="this.style.transform='translateY(-4px)'; this.style.borderColor='rgba(217, 119, 6, 0.3)';" onmouseout="this.style.transform='translateY(0)'; this.style.borderColor='rgba(255,255,255,0.06)';">
+                <div style="width: 60px; height: 60px; margin: 0 auto 16px; background: linear-gradient(135deg, rgba(217, 119, 6, 0.2) 0%, rgba(217, 119, 6, 0.1) 100%); border-radius: 16px; display: flex; align-items: center; justify-content: center;">
+                    <i class="fas fa-chart-pie" style="font-size: 1.5rem; color: #fbbf24;"></i>
+                </div>
+                <h4 style="font-family: 'Inter', sans-serif; font-size: 1rem; margin-bottom: 8px; color: var(--white);">Predictive Analytics</h4>
+                <p style="font-size: 0.8rem; color: var(--gray-500); line-height: 1.5;">No-show prediction and treatment duration estimation using XGBoost models</p>
+            </div>
+
+            <div style="text-align: center; padding: 28px 20px; background: rgba(255,255,255,0.02); border-radius: 16px; border: 1px solid rgba(255,255,255,0.06); transition: all 0.3s ease;" onmouseover="this.style.transform='translateY(-4px)'; this.style.borderColor='rgba(124, 58, 237, 0.3)';" onmouseout="this.style.transform='translateY(0)'; this.style.borderColor='rgba(255,255,255,0.06)';">
+                <div style="width: 60px; height: 60px; margin: 0 auto 16px; background: linear-gradient(135deg, rgba(124, 58, 237, 0.2) 0%, rgba(124, 58, 237, 0.1) 100%); border-radius: 16px; display: flex; align-items: center; justify-content: center;">
+                    <i class="fas fa-bolt" style="font-size: 1.5rem; color: #a78bfa;"></i>
+                </div>
+                <h4 style="font-family: 'Inter', sans-serif; font-size: 1rem; margin-bottom: 8px; color: var(--white);">Urgent Squeeze-In</h4>
+                <p style="font-size: 0.8rem; color: var(--gray-500); line-height: 1.5;">ML-powered emergency insertion using no-show predictions for intelligent double-booking</p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Technical Stack -->
+<div class="card fade-in delay-4" style="margin-top: 28px;">
+    <div class="card-header">
+        <h3><i class="fas fa-layer-group"></i>Technical Stack</h3>
+    </div>
+    <div class="card-body">
+        <div style="display: flex; flex-wrap: wrap; gap: 12px;">
+            <span style="padding: 10px 20px; background: rgba(59, 130, 246, 0.1); border: 1px solid rgba(59, 130, 246, 0.2); border-radius: 30px; font-size: 0.85rem; color: #60a5fa;">Python 3.12</span>
+            <span style="padding: 10px 20px; background: rgba(5, 150, 105, 0.1); border: 1px solid rgba(5, 150, 105, 0.2); border-radius: 30px; font-size: 0.85rem; color: #34d399;">Flask</span>
+            <span style="padding: 10px 20px; background: rgba(217, 119, 6, 0.1); border: 1px solid rgba(217, 119, 6, 0.2); border-radius: 30px; font-size: 0.85rem; color: #fbbf24;">OR-Tools</span>
+            <span style="padding: 10px 20px; background: rgba(124, 58, 237, 0.1); border: 1px solid rgba(124, 58, 237, 0.2); border-radius: 30px; font-size: 0.85rem; color: #a78bfa;">XGBoost</span>
+            <span style="padding: 10px 20px; background: rgba(236, 72, 153, 0.1); border: 1px solid rgba(236, 72, 153, 0.2); border-radius: 30px; font-size: 0.85rem; color: #f472b6;">scikit-learn</span>
+            <span style="padding: 10px 20px; background: rgba(20, 184, 166, 0.1); border: 1px solid rgba(20, 184, 166, 0.2); border-radius: 30px; font-size: 0.85rem; color: #2dd4bf;">Pandas</span>
+            <span style="padding: 10px 20px; background: rgba(244, 63, 94, 0.1); border: 1px solid rgba(244, 63, 94, 0.2); border-radius: 30px; font-size: 0.85rem; color: #fb7185;">NLTK/VADER</span>
+            <span style="padding: 10px 20px; background: rgba(99, 102, 241, 0.1); border: 1px solid rgba(99, 102, 241, 0.2); border-radius: 30px; font-size: 0.85rem; color: #818cf8;">Chart.js</span>
+            <span style="padding: 10px 20px; background: rgba(251, 146, 60, 0.1); border: 1px solid rgba(251, 146, 60, 0.2); border-radius: 30px; font-size: 0.85rem; color: #fb923c;">Folium Maps</span>
+            <span style="padding: 10px 20px; background: rgba(34, 197, 94, 0.1); border: 1px solid rgba(34, 197, 94, 0.2); border-radius: 30px; font-size: 0.85rem; color: #4ade80;">Open-Meteo API</span>
+        </div>
+    </div>
+</div>
+{% endblock %}

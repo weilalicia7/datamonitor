@@ -1,0 +1,213 @@
+{% extends "base.html" %}
+{% block title %}Analytics | SACT Scheduler{% endblock %}
+{% block content %}
+<div class="page-header fade-in">
+    <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+        <div>
+            <h1>Analytics & ML Insights</h1>
+            <p class="page-subtitle">12 ML Models | Multi-Objective Optimization | Fairness Audit | NHS Data Pipeline</p>
+        </div>
+        <div style="display: flex; gap: 12px; align-items: center;">
+            <div id="refresh-status" style="display: flex; align-items: center; gap: 8px; padding: 8px 16px; background: rgba(5, 150, 105, 0.1); border: 1px solid rgba(5, 150, 105, 0.2); border-radius: 20px; font-size: 0.75rem; color: #34d399;">
+                <span style="width: 8px; height: 8px; border-radius: 50%; background: #34d399; animation: pulse 2s infinite;"></span>
+                <span id="status-text">Connected</span>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Live Metrics -->
+<div class="metrics-grid">
+    <div class="metric-card fade-in delay-1"><div class="metric-icon blue"><i class="fas fa-percentage"></i></div><div class="metric-value" id="m-util">--</div><div class="metric-label">Chair Utilization</div></div>
+    <div class="metric-card fade-in delay-2"><div class="metric-icon green"><i class="fas fa-calendar-check"></i></div><div class="metric-value" id="m-sched">--</div><div class="metric-label">Scheduled Today</div></div>
+    <div class="metric-card fade-in delay-3"><div class="metric-icon orange"><i class="fas fa-user-clock"></i></div><div class="metric-value" id="m-pending">--</div><div class="metric-label">Pending Patients</div></div>
+    <div class="metric-card fade-in delay-4"><div class="metric-icon red"><i class="fas fa-user-times"></i></div><div class="metric-value" id="m-noshow">--</div><div class="metric-label">No-Show Rate</div></div>
+</div>
+
+<!-- Optimization & ML Predictions -->
+<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 28px; margin-bottom: 28px;">
+    <div class="card fade-in">
+        <div class="card-header"><h3><i class="fas fa-cogs"></i> Optimization Results</h3><button class="btn btn-success btn-sm" onclick="fetch('/api/optimize/run',{method:'POST'}).then(r=>r.json()).then(d=>{alert(d.message);loadAll();})"><i class="fas fa-magic"></i> Optimize</button></div>
+        <div class="card-body">
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+                <div style="padding: 20px; background: rgba(255,255,255,0.02); border-radius: 12px; border: 1px solid rgba(255,255,255,0.06);"><div style="font-size: 2rem; font-weight: 700; color: var(--white);" id="opt-s">--</div><div style="font-size: 0.75rem; color: var(--gray-500); text-transform: uppercase;">Scheduled</div></div>
+                <div style="padding: 20px; background: rgba(255,255,255,0.02); border-radius: 12px; border: 1px solid rgba(255,255,255,0.06);"><div style="font-size: 2rem; font-weight: 700; color: #34d399;" id="opt-u">--</div><div style="font-size: 0.75rem; color: var(--gray-500); text-transform: uppercase;">Utilization</div></div>
+                <div style="padding: 20px; background: rgba(255,255,255,0.02); border-radius: 12px; border: 1px solid rgba(255,255,255,0.06);"><div style="font-size: 2rem; font-weight: 700; color: var(--warning);" id="opt-w">--</div><div style="font-size: 0.75rem; color: var(--gray-500); text-transform: uppercase;">Avg Wait (days)</div></div>
+                <div style="padding: 20px; background: rgba(255,255,255,0.02); border-radius: 12px; border: 1px solid rgba(255,255,255,0.06);"><div style="font-size: 2rem; font-weight: 700; color: #8b5cf6;" id="opt-r">--</div><div style="font-size: 0.75rem; color: var(--gray-500); text-transform: uppercase;">Robustness</div></div>
+            </div>
+        </div>
+    </div>
+    <div class="card fade-in">
+        <div class="card-header"><h3><i class="fas fa-brain"></i> ML Predictions</h3><span id="ml-st" style="font-size: 0.7rem; padding: 4px 10px; background: rgba(124,58,237,0.2); color: #a78bfa; border-radius: 10px;">Active</span></div>
+        <div class="card-body"><div style="max-height: 250px; overflow-y: auto;"><table style="width: 100%;"><thead><tr><th style="padding: 10px; font-size: 0.7rem;">Patient</th><th style="padding: 10px; font-size: 0.7rem;">No-Show Risk</th><th style="padding: 10px; font-size: 0.7rem;">Duration</th></tr></thead><tbody id="ml-tb"><tr><td colspan="3" style="text-align:center;padding:40px;color:var(--gray-500);">Loading...</td></tr></tbody></table></div></div>
+    </div>
+</div>
+
+<!-- ============================================================= -->
+<!-- ADVANCED ML MODELS (12 Models)                                 -->
+<!-- ============================================================= -->
+<h2 style="font-size: 1.1rem; color: var(--white); margin-bottom: 20px;"><i class="fas fa-flask" style="color: #8b5cf6;"></i> Advanced ML Models (12 Active)</h2>
+<div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 20px;">
+    <div class="card fade-in" style="border-left: 3px solid #06b6d4;"><div class="card-body" style="padding: 16px;"><div style="font-size: 0.65rem; color: #06b6d4; text-transform: uppercase; margin-bottom: 6px;">5.1 Conformal Prediction</div><div style="font-size: 1.3rem; font-weight: 700; color: var(--white);" id="a-conf">--</div><div style="font-size: 0.65rem; color: var(--gray-500);">Coverage P(Y in C) >= 90%</div></div></div>
+    <div class="card fade-in" style="border-left: 3px solid #8b5cf6;"><div class="card-body" style="padding: 16px;"><div style="font-size: 0.65rem; color: #8b5cf6; text-transform: uppercase; margin-bottom: 6px;">5.2 MC Dropout</div><div style="font-size: 1.3rem; font-weight: 700; color: var(--white);" id="a-mc">--</div><div style="font-size: 0.65rem; color: var(--gray-500);">Bayesian Uncertainty</div></div></div>
+    <div class="card fade-in" style="border-left: 3px solid #f59e0b;"><div class="card-body" style="padding: 16px;"><div style="font-size: 0.65rem; color: #f59e0b; text-transform: uppercase; margin-bottom: 6px;">4.2 IV Estimation</div><div style="font-size: 1.3rem; font-weight: 700; color: var(--white);" id="a-iv">--</div><div style="font-size: 0.65rem; color: var(--gray-500);">Weather -> Traffic -> NoShow</div></div></div>
+    <div class="card fade-in" style="border-left: 3px solid #ec4899;"><div class="card-body" style="padding: 16px;"><div style="font-size: 0.65rem; color: #ec4899; text-transform: uppercase; margin-bottom: 6px;">4.3 Double ML</div><div style="font-size: 1.3rem; font-weight: 700; color: var(--white);" id="a-dml">--</div><div style="font-size: 0.65rem; color: var(--gray-500);">Treatment Effect (ATE)</div></div></div>
+</div>
+<div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 28px;">
+    <div class="card fade-in" style="border-left: 3px solid #10b981;"><div class="card-body" style="padding: 16px;"><div style="font-size: 0.65rem; color: #10b981; text-transform: uppercase; margin-bottom: 6px;">3.3 Hierarchical Bayesian</div><div style="font-size: 1.3rem; font-weight: 700; color: var(--white);" id="a-hier">--</div><div style="font-size: 0.65rem; color: var(--gray-500);">Patient Random Effects</div></div></div>
+    <div class="card fade-in" style="border-left: 3px solid #ef4444;"><div class="card-body" style="padding: 16px;"><div style="font-size: 0.65rem; color: #ef4444; text-transform: uppercase; margin-bottom: 6px;">4.4 Event Impact</div><div style="font-size: 1.3rem; font-weight: 700; color: var(--white);" id="a-evt">--</div><div style="font-size: 0.65rem; color: var(--gray-500);">Baseline + Event Adjust</div></div></div>
+    <div class="card fade-in" style="border-left: 3px solid #3b82f6;"><div class="card-body" style="padding: 16px;"><div style="font-size: 0.65rem; color: #3b82f6; text-transform: uppercase; margin-bottom: 6px;">2.2 Survival (Cox PH)</div><div style="font-size: 1.3rem; font-weight: 700; color: var(--white);" id="a-surv">--</div><div style="font-size: 0.65rem; color: var(--gray-500);">Hazard Ratios</div></div></div>
+    <div class="card fade-in" style="border-left: 3px solid #f97316;"><div class="card-body" style="padding: 16px;"><div style="font-size: 0.65rem; color: #f97316; text-transform: uppercase; margin-bottom: 6px;">2.3 Uplift (S+T Learner)</div><div style="font-size: 1.3rem; font-weight: 700; color: var(--white);" id="a-upl">--</div><div style="font-size: 0.65rem; color: var(--gray-500);">Best Intervention</div></div></div>
+</div>
+
+<!-- MULTI-OBJECTIVE & FAIRNESS -->
+<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 28px; margin-bottom: 28px;">
+    <div class="card fade-in">
+        <div class="card-header"><h3><i class="fas fa-sliders-h" style="color: #6366f1;"></i> Multi-Objective (6 Objectives)</h3><button class="btn btn-primary btn-sm" onclick="runPareto()"><i class="fas fa-project-diagram"></i> Pareto</button></div>
+        <div class="card-body">
+            <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 12px;">
+                <div style="text-align:center;padding:8px;background:rgba(255,255,255,0.02);border-radius:6px;"><div style="font-size:0.6rem;color:var(--gray-500);">PRIORITY</div><div style="font-size:1rem;font-weight:700;color:#3b82f6;" id="w-p">0.30</div></div>
+                <div style="text-align:center;padding:8px;background:rgba(255,255,255,0.02);border-radius:6px;"><div style="font-size:0.6rem;color:var(--gray-500);">UTIL</div><div style="font-size:1rem;font-weight:700;color:#10b981;" id="w-u">0.25</div></div>
+                <div style="text-align:center;padding:8px;background:rgba(255,255,255,0.02);border-radius:6px;"><div style="font-size:0.6rem;color:var(--gray-500);">RISK</div><div style="font-size:1rem;font-weight:700;color:#ef4444;" id="w-n">0.15</div></div>
+                <div style="text-align:center;padding:8px;background:rgba(255,255,255,0.02);border-radius:6px;"><div style="font-size:0.6rem;color:var(--gray-500);">WAIT</div><div style="font-size:1rem;font-weight:700;color:#f59e0b;" id="w-w">0.15</div></div>
+                <div style="text-align:center;padding:8px;background:rgba(255,255,255,0.02);border-radius:6px;"><div style="font-size:0.6rem;color:var(--gray-500);">ROBUST</div><div style="font-size:1rem;font-weight:700;color:#8b5cf6;" id="w-r">0.10</div></div>
+                <div style="text-align:center;padding:8px;background:rgba(255,255,255,0.02);border-radius:6px;"><div style="font-size:0.6rem;color:var(--gray-500);">TRAVEL</div><div style="font-size:1rem;font-weight:700;color:#06b6d4;" id="w-t">0.05</div></div>
+            </div>
+            <div id="pareto-out" style="font-size:0.75rem;color:var(--gray-400);text-align:center;">5 profiles available. Click Pareto to generate frontier.</div>
+        </div>
+    </div>
+    <div class="card fade-in">
+        <div class="card-header"><h3><i class="fas fa-balance-scale" style="color: #10b981;"></i> Fairness Audit</h3><button class="btn btn-success btn-sm" onclick="runFairness()"><i class="fas fa-check-double"></i> Audit</button></div>
+        <div class="card-body">
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px;">
+                <div style="text-align:center;padding:12px;background:rgba(255,255,255,0.02);border-radius:8px;"><div style="font-size:0.6rem;color:var(--gray-500);">DEMOGRAPHIC PARITY</div><div style="font-size:1.2rem;font-weight:700;" id="f-dp">--</div><div style="font-size:0.6rem;color:var(--gray-500);">Threshold &lt; 0.15</div></div>
+                <div style="text-align:center;padding:12px;background:rgba(255,255,255,0.02);border-radius:8px;"><div style="font-size:0.6rem;color:var(--gray-500);">DISPARATE IMPACT</div><div style="font-size:1.2rem;font-weight:700;" id="f-di">--</div><div style="font-size:0.6rem;color:var(--gray-500);">Four-Fifths &ge; 0.80</div></div>
+            </div>
+            <div id="fair-out" style="font-size:0.75rem;color:var(--gray-400);text-align:center;">Checks: Age, Gender, Distance (Equality Act 2010)</div>
+        </div>
+    </div>
+</div>
+
+<!-- NHS DATA & AUTO-LEARNING -->
+<div class="card fade-in" style="margin-bottom: 28px;">
+    <div class="card-header">
+        <h3><i class="fas fa-database" style="color: #06b6d4;"></i> NHS Open Data & Auto-Learning Pipeline</h3>
+        <div style="display:flex;gap:8px;align-items:center;">
+            <span id="sact-phase-badge" style="padding:3px 10px;border-radius:12px;font-size:0.7rem;font-weight:600;background:rgba(251,191,36,0.15);color:#fbbf24;border:1px solid rgba(251,191,36,0.3);">Loading...</span>
+            <button class="btn btn-primary btn-sm" onclick="checkNHS()"><i class="fas fa-cloud-download-alt"></i> Check Updates</button>
+        </div>
+    </div>
+    <div class="card-body">
+        <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom:12px;">
+            <div style="padding:14px;background:rgba(255,255,255,0.02);border-radius:8px;">
+                <div style="font-size:0.65rem;color:var(--gray-500);text-transform:uppercase;margin-bottom:6px;">Cancer Waiting Times</div>
+                <div style="font-size:0.8rem;color:var(--white);">Monthly CSV</div>
+                <div style="font-size:0.65rem;color:#34d399;margin-top:4px;"><i class="fas fa-circle" style="font-size:5px;"></i> Available Now</div>
+            </div>
+            <div style="padding:14px;background:rgba(255,255,255,0.02);border-radius:8px;">
+                <div style="font-size:0.65rem;color:var(--gray-500);text-transform:uppercase;margin-bottom:6px;">SACT v4.0 Quality</div>
+                <div style="font-size:1.1rem;font-weight:700;color:var(--white);" id="sact-score-val">--</div>
+                <div style="font-size:0.65rem;margin-top:4px;" id="sact-score-label">Schema score / 100</div>
+            </div>
+            <div style="padding:14px;background:rgba(255,255,255,0.02);border-radius:8px;">
+                <div style="font-size:0.65rem;color:var(--gray-500);text-transform:uppercase;margin-bottom:6px;">Recalib. Level</div>
+                <div style="font-size:1.1rem;font-weight:700;color:var(--white);" id="sact-recal-level">--</div>
+                <div style="font-size:0.65rem;color:#a78bfa;margin-top:4px;" id="sact-quality-label">Quality phase</div>
+            </div>
+            <div style="padding:14px;background:rgba(255,255,255,0.02);border-radius:8px;">
+                <div style="font-size:0.65rem;color:var(--gray-500);text-transform:uppercase;margin-bottom:6px;">Model Recalibration</div>
+                <div style="font-size:0.8rem;color:var(--white);" id="nhs-m">-- Models</div>
+                <div style="font-size:0.65rem;color:#34d399;margin-top:4px;" id="nhs-v"><i class="fas fa-circle" style="font-size:5px;"></i> Loading...</div>
+            </div>
+        </div>
+        <div id="nhs-out" style="margin-top:10px;font-size:0.75rem;color:var(--gray-400);display:none;"></div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.addEventListener('DOMContentLoaded', function() { loadAll(); setInterval(loadAll, 900000); });
+
+function loadAll() {
+    fetch('/api/status').then(r=>r.json()).then(d=>{
+        if(d.metrics){document.getElementById('m-util').textContent=d.metrics.chair_utilization+'%';document.getElementById('m-sched').textContent=d.metrics.scheduled_today;document.getElementById('m-pending').textContent=d.metrics.pending_patients;document.getElementById('m-noshow').textContent=d.metrics.no_show_rate+'%';}
+    }).catch(()=>{});
+    fetch('/api/metrics').then(r=>r.json()).then(d=>{
+        if(d.optimization_results){document.getElementById('opt-s').textContent=d.optimization_results.patients_scheduled||0;document.getElementById('opt-u').textContent=(d.optimization_results.utilization_achieved||0)+'%';document.getElementById('opt-w').textContent=d.optimization_results.avg_waiting_days||'--';document.getElementById('opt-r').textContent=d.optimization_results.robustness_score||'--';}
+    }).catch(()=>{});
+    fetch('/api/ml/predictions').then(r=>r.json()).then(d=>{
+        document.getElementById('ml-st').textContent=d.model_status==='active'?'Active':'Simulated';
+        const tb=document.getElementById('ml-tb');
+        if(d.noshow_predictions&&d.noshow_predictions.length>0){tb.innerHTML=d.noshow_predictions.slice(0,15).map((p,i)=>{const dur=d.duration_predictions?d.duration_predictions[i]:null;const c=p.risk_level==='high'?'#f87171':p.risk_level==='medium'?'#fbbf24':'#34d399';return `<tr><td style="padding:10px;color:var(--white);">${p.patient_id}</td><td style="padding:10px;"><span style="color:${c};">${(p.probability*100).toFixed(1)}%</span></td><td style="padding:10px;">${dur?dur.predicted_duration:'--'} min</td></tr>`;}).join('');}
+    }).catch(()=>{});
+    loadAdvML();
+}
+
+function loadAdvML() {
+    fetch('/api/ml/conformal').then(r=>r.json()).then(d=>{document.getElementById('a-conf').textContent=d.guarantee||'P(Y in C)>=90%';}).catch(()=>{});
+    fetch('/api/ml/mc-dropout').then(r=>r.json()).then(d=>{document.getElementById('a-mc').textContent=d.n_forward_passes?d.n_forward_passes+' passes':'100 passes';}).catch(()=>{});
+    fetch('/api/ml/causal/iv').then(r=>r.json()).then(d=>{document.getElementById('a-iv').textContent=d.causal_effect?(d.causal_effect*100).toFixed(2)+'%':'Pending';}).catch(()=>{});
+    fetch('/api/ml/dml').then(r=>r.json()).then(d=>{document.getElementById('a-dml').textContent=d.summary?.treatment_effect?(d.summary.treatment_effect*100).toFixed(1)+'%':'Pending';}).catch(()=>{});
+    fetch('/api/ml/hierarchical').then(r=>r.json()).then(d=>{document.getElementById('a-hier').textContent=d.n_patients?d.n_patients+' patients':'Fitted';}).catch(()=>{});
+    fetch('/api/ml/events').then(r=>r.json()).then(d=>{document.getElementById('a-evt').textContent=d.baseline_noshow_rate?(d.baseline_noshow_rate*100).toFixed(1)+'%':'--';}).catch(()=>{});
+    fetch('/api/ml/survival').then(r=>r.json()).then(d=>{document.getElementById('a-surv').textContent=d.c_index?d.c_index.toFixed(3):'Fitted';}).catch(()=>{});
+    fetch('/api/ml/uplift').then(r=>r.json()).then(d=>{document.getElementById('a-upl').textContent=d.best_intervention||'phone_call';}).catch(()=>{});
+    fetch('/api/optimize/weights').then(r=>r.json()).then(d=>{if(d.weights){document.getElementById('w-p').textContent=d.weights.priority;document.getElementById('w-u').textContent=d.weights.utilization;document.getElementById('w-n').textContent=d.weights.noshow_risk;document.getElementById('w-w').textContent=d.weights.waiting_time;document.getElementById('w-r').textContent=d.weights.robustness;document.getElementById('w-t').textContent=d.weights.travel;}}).catch(()=>{});
+    fetch('/api/ml/recalibration/status').then(r=>r.json()).then(d=>{
+        document.getElementById('nhs-m').textContent=(d.n_models||'--')+' Models';
+        const ver=d.current_version||'v1.0';
+        const lastRun=d.last_recalibration?new Date(d.last_recalibration).toLocaleDateString('en-GB',{day:'numeric',month:'short'}):'Never';
+        document.getElementById('nhs-v').innerHTML='<i class="fas fa-circle" style="font-size:5px;color:#34d399;"></i> '+ver+' · '+lastRun;
+    }).catch(()=>{document.getElementById('nhs-v').innerHTML='<i class="fas fa-circle" style="font-size:5px;color:#fbbf24;"></i> Unavailable';});
+    // SACT v4.0 live status
+    fetch('/api/data/sact-v4/status').then(r=>r.json()).then(d=>{
+        const phaseMap={'not_started':'Not Started','rollout_partial':'Rollout','full_conformance':'Conformance','first_complete':'Complete'};
+        const colorMap={'not_started':['rgba(156,163,175,0.15)','#9ca3af','rgba(156,163,175,0.3)'],'rollout_partial':['rgba(251,191,36,0.15)','#fbbf24','rgba(251,191,36,0.3)'],'full_conformance':['rgba(59,130,246,0.15)','#60a5fa','rgba(59,130,246,0.3)'],'first_complete':['rgba(34,197,94,0.15)','#34d399','rgba(34,197,94,0.3)']};
+        const badge=document.getElementById('sact-phase-badge');
+        const c=colorMap[d.phase]||colorMap['not_started'];
+        badge.textContent=phaseMap[d.phase]||d.phase;
+        badge.style.background=c[0];badge.style.color=c[1];badge.style.borderColor=c[2];
+        const lvl=d.recommended_recalibration_level||1;
+        const hasData=d.local_file_count>0;
+        document.getElementById('sact-recal-level').textContent='Level '+lvl+(hasData?''+'':' (synthetic)');
+        document.getElementById('sact-quality-label').textContent=d.quality+' quality · '+(hasData?d.local_file_count+' CSV files':'no real data yet');
+    }).catch(()=>{document.getElementById('sact-phase-badge').textContent='API error';});
+    // SACT v4.0 schema validation score
+    fetch('/api/data/sact-v4/validate').then(r=>r.json()).then(d=>{
+        if(d.validation){
+            const score=d.validation.score;
+            const grade=d.validation.grade;
+            const ready=d.validation.ready_for_ml;
+            const col=score>=90?'#34d399':score>=70?'#fbbf24':'#f87171';
+            document.getElementById('sact-score-val').textContent=score+' ('+grade+')';
+            document.getElementById('sact-score-val').style.color=col;
+            document.getElementById('sact-score-label').textContent=(ready?'ML-ready · ':'Not ML-ready · ')+d.rows+' rows';
+            document.getElementById('sact-score-label').style.color=ready?'#34d399':'#f87171';
+        }
+    }).catch(()=>{document.getElementById('sact-score-val').textContent='--';});
+}
+
+function runPareto() {
+    document.getElementById('pareto-out').innerHTML='<i class="fas fa-spinner fa-spin"></i> Running 5 profiles...';
+    fetch('/api/optimize/pareto',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({time_limit_per_run:30})}).then(r=>r.json()).then(d=>{
+        if(d.pareto_frontier){let h='<strong style="color:var(--white);">Frontier: '+d.frontier_size+' solutions</strong><br>';d.pareto_frontier.forEach(s=>{h+='<span style="color:#a78bfa;">'+s.name+'</span>: '+s.scheduled+' sched, '+(s.utilization*100).toFixed(0)+'% util<br>';});document.getElementById('pareto-out').innerHTML=h;}
+        else document.getElementById('pareto-out').innerHTML='<span style="color:#f87171;">'+(d.error||'No patients')+'</span>';
+    }).catch(()=>{document.getElementById('pareto-out').innerHTML='Error';});
+}
+
+function runFairness() {
+    document.getElementById('fair-out').innerHTML='<i class="fas fa-spinner fa-spin"></i> Auditing...';
+    fetch('/api/fairness/audit',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({})}).then(r=>r.json()).then(d=>{
+        if(d.results){const ok=d.passes_all;document.getElementById('f-dp').textContent=ok?'PASS':'FAIL';document.getElementById('f-dp').style.color=ok?'#34d399':'#f87171';document.getElementById('f-di').textContent=ok?'\u2265 0.80':'< 0.80';document.getElementById('f-di').style.color=ok?'#34d399':'#f87171';let det='';Object.entries(d.results).forEach(([g,r])=>{det+=(r.passes?'\u2713':'\u2717')+' '+g+' ';});document.getElementById('fair-out').innerHTML=det;}
+    }).catch(()=>{document.getElementById('fair-out').innerHTML='Error';});
+}
+
+function checkNHS() {
+    const r=document.getElementById('nhs-out');r.style.display='block';r.innerHTML='<i class="fas fa-spinner fa-spin"></i> Checking NHS sources...';
+    fetch('/api/data/nhs/check-updates',{method:'POST'}).then(r=>r.json()).then(d=>{
+        let h='';d.results.forEach(s=>{h+=(s.success?'\u2713':'\u2717')+' '+s.source+': '+(s.is_new_data?s.records+' new':'up to date')+'<br>';});document.getElementById('nhs-out').innerHTML=h;
+    }).catch(()=>{document.getElementById('nhs-out').innerHTML='Failed to check';});
+}
+</script>
+{% endblock %}

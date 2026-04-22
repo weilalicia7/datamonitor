@@ -1,0 +1,416 @@
+{
+  "package": "secondary-care-medicines-data-indicative-price",
+  "description": "NHS hospital secondary care prescribing with indicative prices (replaces retired SCMD dataset, June 2022 onwards)",
+  "total_resources": 58,
+  "latest_resource": "SCMD_PROVISIONAL_202601",
+  "latest_url": "https://opendata.nhsbsa.net/dataset/74f3e468-095b-44c0-b957-f3766a92514e/resource/098edebd-eeac-42c5-ae41-a23ad49d26aa/download/scmd_provisional_202601.csv",
+  "fetched_at": "2026-04-19T20:56:56.123896",
+  "resources": [
+    {
+      "name": "SCMD_PROVISIONAL_202104",
+      "url": "https://opendata.nhsbsa.net/dataset/74f3e468-095b-44c0-b957-f3766a92514e/resource/47a9ce83-f0e1-4bd8-b489-3cd3067e7655/download/scmd_provisional_202104.csv",
+      "format": "CSV",
+      "created": "2025-03-19T13:46:19.307607",
+      "id": "47a9ce83-f0e1-4bd8-b489-3cd3067e7655"
+    },
+    {
+      "name": "SCMD_PROVISIONAL_202105",
+      "url": "https://opendata.nhsbsa.net/dataset/74f3e468-095b-44c0-b957-f3766a92514e/resource/51b66447-079b-41dd-b0f7-9453e554bab1/download/scmd_provisional_202105.csv",
+      "format": "CSV",
+      "created": "2025-03-19T13:50:22.754191",
+      "id": "51b66447-079b-41dd-b0f7-9453e554bab1"
+    },
+    {
+      "name": "SCMD_PROVISIONAL_202106",
+      "url": "https://opendata.nhsbsa.net/dataset/74f3e468-095b-44c0-b957-f3766a92514e/resource/5aad2a40-8e30-4a88-899d-ad5b93cca745/download/scmd_provisional_202106.csv",
+      "format": "CSV",
+      "created": "2025-03-19T13:52:20.601763",
+      "id": "5aad2a40-8e30-4a88-899d-ad5b93cca745"
+    },
+    {
+      "name": "SCMD_PROVISIONAL_202107",
+      "url": "https://opendata.nhsbsa.net/dataset/74f3e468-095b-44c0-b957-f3766a92514e/resource/8e39c31a-b15d-4e7d-b5f3-f2d6a53e3961/download/scmd_provisional_202107.csv",
+      "format": "CSV",
+      "created": "2025-03-19T13:53:49.054792",
+      "id": "8e39c31a-b15d-4e7d-b5f3-f2d6a53e3961"
+    },
+    {
+      "name": "SCMD_PROVISIONAL_202108",
+      "url": "https://opendata.nhsbsa.net/dataset/74f3e468-095b-44c0-b957-f3766a92514e/resource/f9c8b65a-53c5-471a-8d9b-7b852970d09a/download/scmd_provisional_202108.csv",
+      "format": "CSV",
+      "created": "2025-03-19T13:59:41.528773",
+      "id": "f9c8b65a-53c5-471a-8d9b-7b852970d09a"
+    },
+    {
+      "name": "SCMD_PROVISIONAL_202109",
+      "url": "https://opendata.nhsbsa.net/dataset/74f3e468-095b-44c0-b957-f3766a92514e/resource/2c342925-f265-49ad-8a7d-8f85421e6b08/download/scmd_provisional_202109.csv",
+      "format": "CSV",
+      "created": "2025-03-19T14:00:55.609914",
+      "id": "2c342925-f265-49ad-8a7d-8f85421e6b08"
+    },
+    {
+      "name": "SCMD_PROVISIONAL_202110",
+      "url": "https://opendata.nhsbsa.net/dataset/74f3e468-095b-44c0-b957-f3766a92514e/resource/0b963c8c-67bc-4d8a-8f23-6832b1c50ab5/download/scmd_provisional_202110.csv",
+      "format": "CSV",
+      "created": "2025-03-19T14:02:18.049115",
+      "id": "0b963c8c-67bc-4d8a-8f23-6832b1c50ab5"
+    },
+    {
+      "name": "SCMD_PROVISIONAL_202111",
+      "url": "https://opendata.nhsbsa.net/dataset/74f3e468-095b-44c0-b957-f3766a92514e/resource/7229c60c-8b71-436f-9192-af6ddd059488/download/scmd_provisional_202111.csv",
+      "format": "CSV",
+      "created": "2025-03-19T14:03:22.549581",
+      "id": "7229c60c-8b71-436f-9192-af6ddd059488"
+    },
+    {
+      "name": "SCMD_PROVISIONAL_202112",
+      "url": "https://opendata.nhsbsa.net/dataset/74f3e468-095b-44c0-b957-f3766a92514e/resource/0fc6f026-ed2c-47ce-94be-d03035d0dd05/download/scmd_provisional_202112.csv",
+      "format": "CSV",
+      "created": "2025-03-19T14:04:48.069091",
+      "id": "0fc6f026-ed2c-47ce-94be-d03035d0dd05"
+    },
+    {
+      "name": "SCMD_PROVISIONAL_202201",
+      "url": "https://opendata.nhsbsa.net/dataset/74f3e468-095b-44c0-b957-f3766a92514e/resource/8850a8d4-cb1d-4775-b7ea-2b3cfa2796f8/download/scmd_provisional_202201.csv",
+      "format": "CSV",
+      "created": "2025-03-19T14:07:14.565191",
+      "id": "8850a8d4-cb1d-4775-b7ea-2b3cfa2796f8"
+    },
+    {
+      "name": "SCMD_PROVISIONAL_202202",
+      "url": "https://opendata.nhsbsa.net/dataset/74f3e468-095b-44c0-b957-f3766a92514e/resource/82f7a55d-96d2-4500-9f21-acb23d971435/download/scmd_provisional_202202.csv",
+      "format": "CSV",
+      "created": "2025-03-19T14:10:33.502456",
+      "id": "82f7a55d-96d2-4500-9f21-acb23d971435"
+    },
+    {
+      "name": "SCMD_PROVISIONAL_202203",
+      "url": "https://opendata.nhsbsa.net/dataset/74f3e468-095b-44c0-b957-f3766a92514e/resource/a74b7935-6bc0-4dd4-a683-d45cbf6dab48/download/scmd_provisional_202203.csv",
+      "format": "CSV",
+      "created": "2025-03-19T14:12:52.322649",
+      "id": "a74b7935-6bc0-4dd4-a683-d45cbf6dab48"
+    },
+    {
+      "name": "SCMD_WIP_202204",
+      "url": "https://opendata.nhsbsa.net/dataset/74f3e468-095b-44c0-b957-f3766a92514e/resource/11e8ff47-884d-4b9f-b2c1-35b3359d7f47/download/scmd_wip_202204.csv",
+      "format": "CSV",
+      "created": "2022-06-18T06:28:26.469339",
+      "id": "11e8ff47-884d-4b9f-b2c1-35b3359d7f47"
+    },
+    {
+      "name": "SCMD_WIP_202205",
+      "url": "https://opendata.nhsbsa.net/dataset/74f3e468-095b-44c0-b957-f3766a92514e/resource/63c6638f-1d1b-4f19-82da-0ffb0092d814/download/scmd_wip_202205.csv",
+      "format": "CSV",
+      "created": "2022-07-16T06:32:35.981489",
+      "id": "63c6638f-1d1b-4f19-82da-0ffb0092d814"
+    },
+    {
+      "name": "SCMD_WIP_202206",
+      "url": "https://opendata.nhsbsa.net/dataset/74f3e468-095b-44c0-b957-f3766a92514e/resource/186284b6-444d-4b2a-bf1e-12d0fea413b3/download/scmd_wip_202206.csv",
+      "format": "CSV",
+      "created": "2022-08-24T12:08:30.410243",
+      "id": "186284b6-444d-4b2a-bf1e-12d0fea413b3"
+    },
+    {
+      "name": "SCMD_WIP_202207",
+      "url": "https://opendata.nhsbsa.net/dataset/74f3e468-095b-44c0-b957-f3766a92514e/resource/bfed8840-ea76-475f-ab4f-0f3cc04e37ff/download/scmd_wip_202207.csv",
+      "format": "CSV",
+      "created": "2022-09-21T06:37:31.918103",
+      "id": "bfed8840-ea76-475f-ab4f-0f3cc04e37ff"
+    },
+    {
+      "name": "SCMD_WIP_202208",
+      "url": "https://opendata.nhsbsa.net/dataset/74f3e468-095b-44c0-b957-f3766a92514e/resource/ff070317-a9cd-48e1-9c2e-83bf5c10e69a/download/scmd_wip_202208.csv",
+      "format": "CSV",
+      "created": "2022-10-18T13:21:41.163022",
+      "id": "ff070317-a9cd-48e1-9c2e-83bf5c10e69a"
+    },
+    {
+      "name": "SCMD_WIP_202209",
+      "url": "https://opendata.nhsbsa.net/dataset/74f3e468-095b-44c0-b957-f3766a92514e/resource/3858ee0d-b342-4963-bf24-044a6d47e6e9/download/scmd_wip_202209.csv",
+      "format": "CSV",
+      "created": "2022-11-16T07:34:17.247527",
+      "id": "3858ee0d-b342-4963-bf24-044a6d47e6e9"
+    },
+    {
+      "name": "SCMD_WIP_202210",
+      "url": "https://opendata.nhsbsa.net/dataset/74f3e468-095b-44c0-b957-f3766a92514e/resource/707b9d2f-960d-46ad-aa8d-734e95de33f7/download/scmd_wip_202210.csv",
+      "format": "CSV",
+      "created": "2022-12-20T07:42:05.318247",
+      "id": "707b9d2f-960d-46ad-aa8d-734e95de33f7"
+    },
+    {
+      "name": "SCMD_WIP_202211",
+      "url": "https://opendata.nhsbsa.net/dataset/74f3e468-095b-44c0-b957-f3766a92514e/resource/405a251c-b21c-4365-94bf-cc22aef54c37/download/scmd_wip_202211.csv",
+      "format": "CSV",
+      "created": "2023-01-21T07:30:48.163364",
+      "id": "405a251c-b21c-4365-94bf-cc22aef54c37"
+    },
+    {
+      "name": "SCMD_WIP_202212",
+      "url": "https://opendata.nhsbsa.net/dataset/74f3e468-095b-44c0-b957-f3766a92514e/resource/6b5d0d41-ab9a-4897-add8-d9b86e0cde26/download/scmd_wip_202212.csv",
+      "format": "CSV",
+      "created": "2023-02-17T07:30:59.259279",
+      "id": "6b5d0d41-ab9a-4897-add8-d9b86e0cde26"
+    },
+    {
+      "name": "SCMD_PROVISIONAL_202301",
+      "url": "https://opendata.nhsbsa.net/dataset/74f3e468-095b-44c0-b957-f3766a92514e/resource/97a34588-b5b0-4c87-9515-34c2796cd9f0/download/scmd_provisional_202301.csv",
+      "format": "CSV",
+      "created": "2023-03-22T07:36:43.738853",
+      "id": "97a34588-b5b0-4c87-9515-34c2796cd9f0"
+    },
+    {
+      "name": "SCMD_PROVISIONAL_202302",
+      "url": "https://opendata.nhsbsa.net/dataset/74f3e468-095b-44c0-b957-f3766a92514e/resource/1baf14b1-7213-4f45-a70a-b8f965265976/download/scmd_provisional_202302.csv",
+      "format": "CSV",
+      "created": "2023-05-15T06:29:33.147090",
+      "id": "1baf14b1-7213-4f45-a70a-b8f965265976"
+    },
+    {
+      "name": "SCMD_PROVISIONAL_202303",
+      "url": "https://opendata.nhsbsa.net/dataset/74f3e468-095b-44c0-b957-f3766a92514e/resource/31830d0c-e0bb-4efe-9916-551fb7a9b70a/download/scmd_provisional_202303.csv",
+      "format": "CSV",
+      "created": "2023-05-18T06:29:32.436917",
+      "id": "31830d0c-e0bb-4efe-9916-551fb7a9b70a"
+    },
+    {
+      "name": "SCMD_PROVISIONAL_202304",
+      "url": "https://opendata.nhsbsa.net/dataset/74f3e468-095b-44c0-b957-f3766a92514e/resource/a80422a6-f0fd-40c3-9a1b-93aaba9cdad7/download/scmd_provisional_202304.csv",
+      "format": "CSV",
+      "created": "2023-06-21T06:26:32.803919",
+      "id": "a80422a6-f0fd-40c3-9a1b-93aaba9cdad7"
+    },
+    {
+      "name": "SCMD_PROVISIONAL_202305",
+      "url": "https://opendata.nhsbsa.net/dataset/74f3e468-095b-44c0-b957-f3766a92514e/resource/cd1740a7-74b5-474b-a3d6-fb8b025f7dcf/download/scmd_provisional_202305.csv",
+      "format": "CSV",
+      "created": "2023-07-19T06:29:06.243809",
+      "id": "cd1740a7-74b5-474b-a3d6-fb8b025f7dcf"
+    },
+    {
+      "name": "SCMD_PROVISIONAL_202306",
+      "url": "https://opendata.nhsbsa.net/dataset/74f3e468-095b-44c0-b957-f3766a92514e/resource/164beafa-018f-408f-a83b-faad6c0524a7/download/scmd_provisional_202306.csv",
+      "format": "CSV",
+      "created": "2023-08-19T06:29:39.914794",
+      "id": "164beafa-018f-408f-a83b-faad6c0524a7"
+    },
+    {
+      "name": "SCMD_PROVISIONAL_202307",
+      "url": "https://opendata.nhsbsa.net/dataset/74f3e468-095b-44c0-b957-f3766a92514e/resource/883f610a-d8bc-4c86-83ec-7366da158f19/download/scmd_provisional_202307.csv",
+      "format": "CSV",
+      "created": "2023-09-20T06:29:55.486498",
+      "id": "883f610a-d8bc-4c86-83ec-7366da158f19"
+    },
+    {
+      "name": "SCMD_PROVISIONAL_202308",
+      "url": "https://opendata.nhsbsa.net/dataset/74f3e468-095b-44c0-b957-f3766a92514e/resource/aaba07fa-bec4-436e-8fc6-ca7e756dee42/download/scmd_provisional_202308.csv",
+      "format": "CSV",
+      "created": "2023-10-17T14:28:34.752137",
+      "id": "aaba07fa-bec4-436e-8fc6-ca7e756dee42"
+    },
+    {
+      "name": "SCMD_PROVISIONAL_202309",
+      "url": "https://opendata.nhsbsa.net/dataset/74f3e468-095b-44c0-b957-f3766a92514e/resource/9ad945bd-c4ca-42e0-b590-9221cdbc2630/download/scmd_provisional_202309.csv",
+      "format": "CSV",
+      "created": "2023-11-20T13:38:26.193814",
+      "id": "9ad945bd-c4ca-42e0-b590-9221cdbc2630"
+    },
+    {
+      "name": "SCMD_PROVISIONAL_202310",
+      "url": "https://opendata.nhsbsa.net/dataset/74f3e468-095b-44c0-b957-f3766a92514e/resource/3ce28089-9a5f-416d-87f1-b991ad3a6a8e/download/scmd_provisional_202310.csv",
+      "format": "CSV",
+      "created": "2023-12-16T07:29:27.311164",
+      "id": "3ce28089-9a5f-416d-87f1-b991ad3a6a8e"
+    },
+    {
+      "name": "SCMD_PROVISIONAL_202311",
+      "url": "https://opendata.nhsbsa.net/dataset/74f3e468-095b-44c0-b957-f3766a92514e/resource/22233dc9-307b-4f78-8c5f-1a0fd0d8bae6/download/scmd_provisional_202311.csv",
+      "format": "CSV",
+      "created": "2024-01-17T11:52:03.817177",
+      "id": "22233dc9-307b-4f78-8c5f-1a0fd0d8bae6"
+    },
+    {
+      "name": "SCMD_PROVISIONAL_202312",
+      "url": "https://opendata.nhsbsa.net/dataset/74f3e468-095b-44c0-b957-f3766a92514e/resource/e23f3262-0cd8-4c50-b28b-469d66fbf677/download/scmd_provisional_202312.csv",
+      "format": "CSV",
+      "created": "2024-02-17T07:31:15.099200",
+      "id": "e23f3262-0cd8-4c50-b28b-469d66fbf677"
+    },
+    {
+      "name": "SCMD_PROVISIONAL_202401",
+      "url": "https://opendata.nhsbsa.net/dataset/74f3e468-095b-44c0-b957-f3766a92514e/resource/062f67bf-eb8e-41e6-84e4-14a3276f1947/download/scmd_provisional_202401.csv",
+      "format": "CSV",
+      "created": "2024-03-19T07:29:29.747660",
+      "id": "062f67bf-eb8e-41e6-84e4-14a3276f1947"
+    },
+    {
+      "name": "SCMD_PROVISIONAL_202402",
+      "url": "https://opendata.nhsbsa.net/dataset/74f3e468-095b-44c0-b957-f3766a92514e/resource/eca8cd61-6afc-4571-b377-5a9c9a56c1a8/download/scmd_provisional_202402.csv",
+      "format": "CSV",
+      "created": "2024-04-25T06:27:28.997908",
+      "id": "eca8cd61-6afc-4571-b377-5a9c9a56c1a8"
+    },
+    {
+      "name": "SCMD_PROVISIONAL_202403",
+      "url": "https://opendata.nhsbsa.net/dataset/74f3e468-095b-44c0-b957-f3766a92514e/resource/bd34e7b2-67f9-499c-850d-39f64fa96664/download/scmd_provisional_202403.csv",
+      "format": "CSV",
+      "created": "2024-05-16T06:27:58.317356",
+      "id": "bd34e7b2-67f9-499c-850d-39f64fa96664"
+    },
+    {
+      "name": "SCMD_PROVISIONAL_202404",
+      "url": "https://opendata.nhsbsa.net/dataset/74f3e468-095b-44c0-b957-f3766a92514e/resource/b65209e0-27c0-4f28-85cf-063737fccd68/download/scmd_provisional_202404.csv",
+      "format": "CSV",
+      "created": "2024-06-18T06:28:51.699505",
+      "id": "b65209e0-27c0-4f28-85cf-063737fccd68"
+    },
+    {
+      "name": "SCMD_PROVISIONAL_202405",
+      "url": "https://opendata.nhsbsa.net/dataset/74f3e468-095b-44c0-b957-f3766a92514e/resource/870576ac-8828-4a9c-bd66-6c251f64a49f/download/scmd_provisional_202405.csv",
+      "format": "CSV",
+      "created": "2024-07-20T06:27:13.226199",
+      "id": "870576ac-8828-4a9c-bd66-6c251f64a49f"
+    },
+    {
+      "name": "SCMD_PROVISIONAL_202406",
+      "url": "https://opendata.nhsbsa.net/dataset/74f3e468-095b-44c0-b957-f3766a92514e/resource/a39c844f-8b04-4b06-acbb-8293269e260f/download/scmd_provisional_202406.csv",
+      "format": "CSV",
+      "created": "2024-08-16T06:29:20.099963",
+      "id": "a39c844f-8b04-4b06-acbb-8293269e260f"
+    },
+    {
+      "name": "SCMD_PROVISIONAL_202407",
+      "url": "https://opendata.nhsbsa.net/dataset/74f3e468-095b-44c0-b957-f3766a92514e/resource/a8bcace7-602a-4c2c-af12-be49b9763835/download/scmd_provisional_202407.csv",
+      "format": "CSV",
+      "created": "2024-09-19T06:27:35.286771",
+      "id": "a8bcace7-602a-4c2c-af12-be49b9763835"
+    },
+    {
+      "name": "SCMD_PROVISIONAL_202408",
+      "url": "https://opendata.nhsbsa.net/dataset/74f3e468-095b-44c0-b957-f3766a92514e/resource/a3b9e83b-4f37-4f73-9821-b8ba8cbf826b/download/scmd_provisional_202408.csv",
+      "format": "CSV",
+      "created": "2024-10-17T06:28:22.237000",
+      "id": "a3b9e83b-4f37-4f73-9821-b8ba8cbf826b"
+    },
+    {
+      "name": "SCMD_PROVISIONAL_202409",
+      "url": "https://opendata.nhsbsa.net/dataset/74f3e468-095b-44c0-b957-f3766a92514e/resource/12859bea-899a-417d-b7ae-9bb5cf163d9b/download/scmd_provisional_202409.csv",
+      "format": "CSV",
+      "created": "2024-11-16T07:27:35.544467",
+      "id": "12859bea-899a-417d-b7ae-9bb5cf163d9b"
+    },
+    {
+      "name": "SCMD_PROVISIONAL_202410",
+      "url": "https://opendata.nhsbsa.net/dataset/74f3e468-095b-44c0-b957-f3766a92514e/resource/207278a2-aa9c-45d4-a5a6-2bbf484324cb/download/scmd_provisional_202410.csv",
+      "format": "CSV",
+      "created": "2024-12-18T07:27:05.732457",
+      "id": "207278a2-aa9c-45d4-a5a6-2bbf484324cb"
+    },
+    {
+      "name": "SCMD_PROVISIONAL_202411",
+      "url": "https://opendata.nhsbsa.net/dataset/74f3e468-095b-44c0-b957-f3766a92514e/resource/6fb9c002-9513-40a0-b5aa-975b989692cd/download/scmd_provisional_202411.csv",
+      "format": "CSV",
+      "created": "2025-01-21T07:28:42.598293",
+      "id": "6fb9c002-9513-40a0-b5aa-975b989692cd"
+    },
+    {
+      "name": "SCMD_PROVISIONAL_202412",
+      "url": "https://opendata.nhsbsa.net/dataset/74f3e468-095b-44c0-b957-f3766a92514e/resource/5e3006c1-3ef7-4122-a2aa-1bdfc4d72138/download/scmd_provisional_202412.csv",
+      "format": "CSV",
+      "created": "2025-02-20T07:28:45.781607",
+      "id": "5e3006c1-3ef7-4122-a2aa-1bdfc4d72138"
+    },
+    {
+      "name": "SCMD_PROVISIONAL_202501",
+      "url": "https://opendata.nhsbsa.net/dataset/74f3e468-095b-44c0-b957-f3766a92514e/resource/0adfaa61-a96a-4ca2-a709-023cd0f96bea/download/scmd_provisional_202501.csv",
+      "format": "CSV",
+      "created": "2025-03-18T07:31:48.427982",
+      "id": "0adfaa61-a96a-4ca2-a709-023cd0f96bea"
+    },
+    {
+      "name": "SCMD_PROVISIONAL_202502",
+      "url": "https://opendata.nhsbsa.net/dataset/74f3e468-095b-44c0-b957-f3766a92514e/resource/35796fc2-15d4-43cd-9a1a-594002906b8c/download/scmd_provisional_202502.csv",
+      "format": "CSV",
+      "created": "2025-04-17T06:33:39.780671",
+      "id": "35796fc2-15d4-43cd-9a1a-594002906b8c"
+    },
+    {
+      "name": "SCMD_PROVISIONAL_202503",
+      "url": "https://opendata.nhsbsa.net/dataset/74f3e468-095b-44c0-b957-f3766a92514e/resource/75fbb008-677c-4905-9223-74aa6739ad5e/download/scmd_provisional_202503.csv",
+      "format": "CSV",
+      "created": "2025-05-17T06:33:22.605600",
+      "id": "75fbb008-677c-4905-9223-74aa6739ad5e"
+    },
+    {
+      "name": "SCMD_PROVISIONAL_202504",
+      "url": "https://opendata.nhsbsa.net/dataset/74f3e468-095b-44c0-b957-f3766a92514e/resource/759e51d7-be49-4aa3-8136-339cc34928e2/download/scmd_provisional_202504.csv",
+      "format": "CSV",
+      "created": "2025-06-23T11:42:33.276238",
+      "id": "759e51d7-be49-4aa3-8136-339cc34928e2"
+    },
+    {
+      "name": "SCMD_PROVISIONAL_202505",
+      "url": "https://opendata.nhsbsa.net/dataset/74f3e468-095b-44c0-b957-f3766a92514e/resource/a33328db-540d-4a08-a809-d31faf4f3e40/download/scmd_provisional_202505.csv",
+      "format": "CSV",
+      "created": "2025-07-22T06:27:34.093251",
+      "id": "a33328db-540d-4a08-a809-d31faf4f3e40"
+    },
+    {
+      "name": "SCMD_PROVISIONAL_202506",
+      "url": "https://opendata.nhsbsa.net/dataset/74f3e468-095b-44c0-b957-f3766a92514e/resource/18c08542-8dba-4ca4-b799-81ac1df496f4/download/scmd_provisional_202506.csv",
+      "format": "CSV",
+      "created": "2025-08-22T06:27:20.131981",
+      "id": "18c08542-8dba-4ca4-b799-81ac1df496f4"
+    },
+    {
+      "name": "SCMD_PROVISIONAL_202507",
+      "url": "https://opendata.nhsbsa.net/dataset/74f3e468-095b-44c0-b957-f3766a92514e/resource/c7aba5b6-274c-4b36-8f7e-9d8467354591/download/scmd_provisional_202507.csv",
+      "format": "CSV",
+      "created": "2025-09-20T06:28:07.101230",
+      "id": "c7aba5b6-274c-4b36-8f7e-9d8467354591"
+    },
+    {
+      "name": "SCMD_PROVISIONAL_202508",
+      "url": "https://opendata.nhsbsa.net/dataset/74f3e468-095b-44c0-b957-f3766a92514e/resource/203dbc6b-2c60-4597-9ea4-94897ecb1a4c/download/scmd_provisional_202508.csv",
+      "format": "CSV",
+      "created": "2025-10-17T07:04:59.847054",
+      "id": "203dbc6b-2c60-4597-9ea4-94897ecb1a4c"
+    },
+    {
+      "name": "SCMD_PROVISIONAL_202509",
+      "url": "https://opendata.nhsbsa.net/dataset/74f3e468-095b-44c0-b957-f3766a92514e/resource/59d1da69-b8c6-4532-85c5-a2bf3618dd4e/download/scmd_provisional_202509.csv",
+      "format": "CSV",
+      "created": "2025-11-21T07:30:07.930236",
+      "id": "59d1da69-b8c6-4532-85c5-a2bf3618dd4e"
+    },
+    {
+      "name": "SCMD_PROVISIONAL_202510",
+      "url": "https://opendata.nhsbsa.net/dataset/74f3e468-095b-44c0-b957-f3766a92514e/resource/bd3d1360-6916-4b56-8c0e-7daef1a801f5/download/scmd_provisional_202510.csv",
+      "format": "CSV",
+      "created": "2025-12-19T07:29:06.490360",
+      "id": "bd3d1360-6916-4b56-8c0e-7daef1a801f5"
+    },
+    {
+      "name": "SCMD_PROVISIONAL_202511",
+      "url": "https://opendata.nhsbsa.net/dataset/74f3e468-095b-44c0-b957-f3766a92514e/resource/e61d571e-bcff-4116-9b4e-42aa2b0579d9/download/scmd_provisional_202511.csv",
+      "format": "CSV",
+      "created": "2026-01-20T07:31:02.654222",
+      "id": "e61d571e-bcff-4116-9b4e-42aa2b0579d9"
+    },
+    {
+      "name": "SCMD_PROVISIONAL_202512",
+      "url": "https://opendata.nhsbsa.net/dataset/74f3e468-095b-44c0-b957-f3766a92514e/resource/aed617d4-0263-4d85-bfb8-3701b6039474/download/scmd_provisional_202512.csv",
+      "format": "CSV",
+      "created": "2026-02-16T07:28:54.328161",
+      "id": "aed617d4-0263-4d85-bfb8-3701b6039474"
+    },
+    {
+      "name": "SCMD_PROVISIONAL_202601",
+      "url": "https://opendata.nhsbsa.net/dataset/74f3e468-095b-44c0-b957-f3766a92514e/resource/098edebd-eeac-42c5-ae41-a23ad49d26aa/download/scmd_provisional_202601.csv",
+      "format": "CSV",
+      "created": "2026-03-21T07:30:40.077939",
+      "id": "098edebd-eeac-42c5-ae41-a23ad49d26aa"
+    }
+  ]
+}

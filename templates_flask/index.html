@@ -1,0 +1,312 @@
+{% extends "base.html" %}
+{% block title %}Dashboard | SACT Scheduler{% endblock %}
+{% block content %}
+<div class="page-header fade-in">
+    <h1>Dashboard</h1>
+    <p class="page-subtitle">Real-time scheduling overview</p>
+</div>
+
+<!-- Filter Tabs -->
+<div class="filter-tabs">
+    <button class="filter-tab active">Today</button>
+    <button class="filter-tab">This Week</button>
+    <button class="filter-tab">All Pending</button>
+    <button class="filter-tab">Urgent</button>
+</div>
+
+<!-- Metrics -->
+<div class="metrics-grid fade-in">
+    <div class="metric-card">
+        <div class="metric-label">Scheduled Today</div>
+        <div class="metric-value" id="scheduled-count">{{ appointments|length }}</div>
+        <span class="metric-change positive"><i class="fas fa-check"></i> On track</span>
+    </div>
+    <div class="metric-card">
+        <div class="metric-label">Chair Utilization</div>
+        <div class="metric-value" id="utilization">85%</div>
+        <span class="metric-change positive"><i class="fas fa-arrow-up"></i> +5%</span>
+    </div>
+    <div class="metric-card">
+        <div class="metric-label">Active Events</div>
+        <div class="metric-value" id="events-count">0</div>
+        <span class="metric-change neutral"><i class="fas fa-minus"></i> Clear</span>
+    </div>
+    <div class="metric-card">
+        <div class="metric-label">Alerts</div>
+        <div class="metric-value" id="alerts-count">0</div>
+        <span class="metric-change neutral"><i class="fas fa-check"></i> None</span>
+    </div>
+</div>
+
+<!-- Main Grid -->
+<div class="dashboard-grid fade-in">
+    <div class="card">
+        <div class="card-header">
+            <h3><i class="fas fa-calendar-alt"></i> Today's Schedule</h3>
+            <button class="btn btn-primary btn-sm" onclick="runOptimize()">
+                <i class="fas fa-magic"></i> Optimize
+            </button>
+        </div>
+        <div class="card-body">
+            <div class="table-container">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Time</th>
+                            <th>Patient</th>
+                            <th>Chair</th>
+                            <th>Duration</th>
+                            <th>Priority</th>
+                            <th>Status</th>
+                        </tr>
+                    </thead>
+                    <tbody id="schedule-table">
+                        {% for apt in appointments[:10] %}
+                        <tr>
+                            <td><strong>{{ apt.start_time.strftime('%H:%M') }}</strong></td>
+                            <td>{{ apt.patient_id }}</td>
+                            <td>{{ apt.chair_id }}</td>
+                            <td>{{ apt.duration }} min</td>
+                            <td><span class="priority-tag p{{ apt.priority }}">P{{ apt.priority }}</span></td>
+                            <td><span class="status-tag confirmed">Confirmed</span></td>
+                        </tr>
+                        {% else %}
+                        <tr>
+                            <td colspan="6">
+                                <div class="empty-state">
+                                    <i class="fas fa-calendar-plus"></i>
+                                    <h4>No appointments scheduled</h4>
+                                    <p>Add patients and run optimization</p>
+                                </div>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% if appointments|length > 10 %}
+            <div style="padding: 12px; text-align: center; border-top: 1px solid var(--border-color);">
+                <a href="/schedule" style="color: var(--accent-blue); text-decoration: none; font-size: 0.85rem;">
+                    View all {{ appointments|length }} appointments <i class="fas fa-arrow-right"></i>
+                </a>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+
+    <div style="display: flex; flex-direction: column; gap: 20px;">
+        <!-- System Status -->
+        <div class="card">
+            <div class="card-header">
+                <h3><i class="fas fa-heart-pulse"></i> System Status</h3>
+            </div>
+            <div class="card-body" id="alerts-container">
+                <div class="success-state">
+                    <i class="fas fa-check-circle"></i>
+                    <span>All systems operational</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Quick Add -->
+        <div class="card">
+            <div class="card-header">
+                <h3><i class="fas fa-plus"></i> Quick Add</h3>
+            </div>
+            <div class="card-body">
+                <form id="quick-add-form">
+                    <div class="form-group">
+                        <label class="form-label">Patient ID</label>
+                        <input type="text" class="form-control" id="patient_id" placeholder="Enter ID" required>
+                    </div>
+                    <div class="grid-2">
+                        <div class="form-group">
+                            <label class="form-label">Priority</label>
+                            <select class="form-control form-select" id="priority">
+                                <option value="1">P1 - Critical</option>
+                                <option value="2" selected>P2 - High</option>
+                                <option value="3">P3 - Standard</option>
+                                <option value="4">P4 - Routine</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Duration</label>
+                            <input type="number" class="form-control" id="duration" value="90" min="15" max="480">
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Postcode</label>
+                        <input type="text" class="form-control" id="postcode" placeholder="CF14" value="CF14">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Patient History (for no-show prediction)</label>
+                        <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px;">
+                            <input type="number" class="form-control" id="total_appointments" placeholder="Total Appts" value="5" min="0" title="Total Appointments">
+                            <input type="number" class="form-control" id="no_shows" placeholder="No-Shows" value="0" min="0" title="Previous No-Shows">
+                            <input type="number" class="form-control" id="cancellations" placeholder="Cancels" value="0" min="0" title="Previous Cancellations">
+                        </div>
+                    </div>
+                    <div class="form-group" style="background: rgba(124, 58, 237, 0.1); padding: 12px; border-radius: 8px; border: 1px solid rgba(124, 58, 237, 0.2);">
+                        <label class="form-check" style="margin-bottom: 8px;">
+                            <input type="checkbox" class="form-check-input" id="is_urgent">
+                            <span style="color: #a78bfa; font-weight: 500;">Urgent squeeze-in (uses ML predictions)</span>
+                        </label>
+                        <div id="urgent-options" style="display: none; margin-top: 8px; padding-left: 24px;">
+                            <label class="form-check" style="margin-bottom: 4px;">
+                                <input type="checkbox" class="form-check-input" id="allow_double_booking" checked>
+                                <span style="font-size: 0.85rem;">Allow double-booking (high no-show slots)</span>
+                            </label>
+                            <label class="form-check">
+                                <input type="checkbox" class="form-check-input" id="allow_rescheduling">
+                                <span style="font-size: 0.85rem;">Allow rescheduling lower-priority patients</span>
+                            </label>
+                        </div>
+                    </div>
+                    <button type="submit" class="btn btn-success" style="width: 100%;">
+                        <i class="fas fa-plus"></i> Add Patient
+                    </button>
+                    <button type="button" class="btn btn-primary" style="width: 100%; margin-top: 8px;" onclick="previewUrgentSlots()">
+                        <i class="fas fa-search"></i> Preview Urgent Slots
+                    </button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    loadAlerts();
+    loadStatus();
+});
+
+function loadStatus() {
+    fetch('/api/status')
+        .then(r => r.json())
+        .then(data => {
+            document.getElementById('events-count').textContent = data.event_count;
+        });
+}
+
+function loadAlerts() {
+    fetch('/api/alerts')
+        .then(r => r.json())
+        .then(data => {
+            const container = document.getElementById('alerts-container');
+            if (data.length === 0) {
+                container.innerHTML = '<div class="success-state"><i class="fas fa-check-circle"></i><span>All systems operational</span></div>';
+            } else {
+                container.innerHTML = data.map(a => `
+                    <div class="alert-item ${a.priority.toLowerCase()}">
+                        <div class="alert-title">${a.title}</div>
+                        <div class="alert-message">${a.message.substring(0, 100)}...</div>
+                    </div>
+                `).join('');
+                document.getElementById('alerts-count').textContent = data.length;
+            }
+        });
+}
+
+function runOptimize() {
+    fetch('/api/optimize', {method: 'POST'})
+        .then(r => r.json())
+        .then(data => {
+            if (data.success) {
+                alert('Optimization complete! Scheduled: ' + (data.scheduled || 0));
+                location.reload();
+            } else {
+                alert('Optimization: ' + (data.message || 'No patients to schedule'));
+            }
+        });
+}
+
+// Toggle urgent options visibility
+document.getElementById('is_urgent').addEventListener('change', function() {
+    document.getElementById('urgent-options').style.display = this.checked ? 'block' : 'none';
+});
+
+document.getElementById('quick-add-form').addEventListener('submit', function(e) {
+    e.preventDefault();
+
+    const isUrgent = document.getElementById('is_urgent').checked;
+
+    const data = {
+        patient_id: document.getElementById('patient_id').value,
+        priority: document.getElementById('priority').value,
+        duration: document.getElementById('duration').value,
+        postcode: document.getElementById('postcode').value,
+        total_appointments: document.getElementById('total_appointments').value,
+        no_shows: document.getElementById('no_shows').value,
+        cancellations: document.getElementById('cancellations').value,
+        is_urgent: isUrgent,
+        allow_double_booking: isUrgent ? document.getElementById('allow_double_booking').checked : false,
+        allow_rescheduling: isUrgent ? document.getElementById('allow_rescheduling').checked : false
+    };
+
+    fetch('/api/add_patient', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(data)
+    })
+    .then(r => r.json())
+    .then(result => {
+        if (result.success) {
+            let msg = result.message;
+            if (result.strategy) {
+                msg += '\n\nStrategy: ' + result.strategy;
+                if (result.strategy === 'double_booking') {
+                    msg += '\nNo-show probability: ' + (result.noshow_probability * 100).toFixed(1) + '%';
+                    msg += '\nConfidence: ' + result.confidence_level;
+                }
+                if (result.affected_patients && result.affected_patients.length > 0) {
+                    msg += '\nAffected: ' + result.affected_patients.join(', ');
+                }
+                if (result.appointment) {
+                    msg += '\n\nScheduled at ' + result.appointment.start_time + ' on ' + result.appointment.chair_id;
+                }
+            }
+            alert(msg);
+            location.reload();
+        } else {
+            alert('Error: ' + result.message);
+        }
+    });
+});
+
+function previewUrgentSlots() {
+    const data = {
+        patient_id: 'PREVIEW',
+        priority: document.getElementById('priority').value,
+        duration: document.getElementById('duration').value,
+        postcode: document.getElementById('postcode').value,
+        long_infusion: false,
+        allow_double_booking: document.getElementById('allow_double_booking').checked
+    };
+
+    fetch('/api/urgent/find-best-slot', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(data)
+    })
+    .then(r => r.json())
+    .then(result => {
+        if (result.success && result.options.length > 0) {
+            let msg = 'Found ' + result.total_options + ' possible slots:\n\n';
+            result.options.slice(0, 5).forEach((opt, i) => {
+                msg += (i + 1) + '. ' + opt.start_time + ' on ' + opt.chair_id;
+                msg += ' (score: ' + opt.score + ')';
+                if (opt.is_noshow_based) {
+                    msg += ' [No-show: ' + (opt.noshow_probability * 100).toFixed(1) + '%]';
+                }
+                msg += '\n';
+            });
+            alert(msg);
+        } else {
+            alert('No slots available: ' + (result.message || 'Schedule may be full'));
+        }
+    });
+}
+</script>
+{% endblock %}

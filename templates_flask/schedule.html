@@ -1,0 +1,244 @@
+{% extends "base.html" %}
+{% block title %}Schedule | SACT Scheduler{% endblock %}
+{% block content %}
+<div class="page-header fade-in">
+    <h1>Schedule</h1>
+    <p class="page-subtitle">View and manage appointments</p>
+</div>
+
+<!-- Filter Tabs -->
+<div class="filter-tabs">
+    <button class="filter-tab active">All</button>
+    {% for site in sites %}
+    <button class="filter-tab">{{ site.name }}</button>
+    {% endfor %}
+</div>
+
+<div class="card fade-in">
+    <div class="card-header">
+        <h3><i class="fas fa-calendar-alt"></i> {{ appointments|length }} Appointments</h3>
+        <button class="btn btn-secondary btn-sm">
+            <i class="fas fa-download"></i> Export
+        </button>
+    </div>
+    <div class="card-body">
+        <div class="table-container">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Time</th>
+                        <th>Patient</th>
+                        <th>Chair</th>
+                        <th>Site</th>
+                        <th>Duration</th>
+                        <th>Priority</th>
+                        <th>Status</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for apt in appointments %}
+                    <tr>
+                        <td><strong>{{ apt.start_time.strftime('%H:%M') }} - {{ apt.end_time.strftime('%H:%M') }}</strong></td>
+                        <td>{{ apt.patient_id }}</td>
+                        <td>{{ apt.chair_id }}</td>
+                        <td>{{ apt.site_code }}</td>
+                        <td>{{ apt.duration }} min</td>
+                        <td><span class="priority-tag p{{ apt.priority }}">P{{ apt.priority }}</span></td>
+                        <td><span class="status-tag confirmed">Confirmed</span></td>
+                        <td>
+                            <button class="btn btn-secondary btn-icon btn-sm"><i class="fas fa-ellipsis-h"></i></button>
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="8">
+                            <div class="empty-state">
+                                <i class="fas fa-calendar-times"></i>
+                                <h4>No appointments found</h4>
+                                <p>Add patients from the dashboard to create appointments</p>
+                            </div>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<!-- High No-Show Slots Panel - For Urgent Patient Insertion -->
+<div class="card fade-in delay-1" style="margin-top: 24px;">
+    <div class="card-header" style="background: linear-gradient(135deg, rgba(124, 58, 237, 0.1) 0%, rgba(124, 58, 237, 0.05) 100%);">
+        <h3 style="color: #a78bfa;"><i class="fas fa-bolt"></i> High No-Show Risk Slots</h3>
+        <div style="display: flex; gap: 10px;">
+            <button class="btn btn-primary btn-sm" onclick="loadHighNoshowSlots()">
+                <i class="fas fa-sync"></i> Refresh
+            </button>
+            <button class="btn btn-success btn-sm" onclick="getDoubleBookingRecommendations()">
+                <i class="fas fa-lightbulb"></i> Get Recommendations
+            </button>
+        </div>
+    </div>
+    <div class="card-body">
+        <p style="color: var(--gray-400); font-size: 0.85rem; margin-bottom: 16px;">
+            <i class="fas fa-info-circle"></i> These slots have high no-show probability and are ideal for double-booking urgent patients.
+        </p>
+        <div id="noshow-slots-container">
+            <div class="loading-state">
+                <i class="fas fa-spinner fa-spin"></i>
+                <span>Loading no-show predictions...</span>
+            </div>
+        </div>
+        <div id="recommendations-container" style="margin-top: 16px; display: none;"></div>
+    </div>
+</div>
+
+<!-- Urgent Insertion Statistics -->
+<div class="card fade-in delay-2" style="margin-top: 24px;">
+    <div class="card-header">
+        <h3><i class="fas fa-chart-line"></i> Urgent Insertion Statistics</h3>
+    </div>
+    <div class="card-body">
+        <div id="urgent-stats-container" style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px;">
+            <div style="text-align: center; padding: 16px; background: rgba(52, 211, 153, 0.1); border-radius: 8px;">
+                <div id="stat-total" style="font-size: 2rem; font-weight: bold; color: #34d399;">0</div>
+                <div style="font-size: 0.8rem; color: var(--gray-400);">Total Insertions</div>
+            </div>
+            <div style="text-align: center; padding: 16px; background: rgba(59, 130, 246, 0.1); border-radius: 8px;">
+                <div id="stat-gap" style="font-size: 2rem; font-weight: bold; color: #3b82f6;">0</div>
+                <div style="font-size: 0.8rem; color: var(--gray-400);">Gap-Based</div>
+            </div>
+            <div style="text-align: center; padding: 16px; background: rgba(124, 58, 237, 0.1); border-radius: 8px;">
+                <div id="stat-double" style="font-size: 2rem; font-weight: bold; color: #a78bfa;">0</div>
+                <div style="font-size: 0.8rem; color: var(--gray-400);">Double-Bookings</div>
+            </div>
+            <div style="text-align: center; padding: 16px; background: rgba(251, 146, 60, 0.1); border-radius: 8px;">
+                <div id="stat-resched" style="font-size: 2rem; font-weight: bold; color: #fb923c;">0</div>
+                <div style="font-size: 0.8rem; color: var(--gray-400);">Rescheduled</div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    loadHighNoshowSlots();
+    loadUrgentStats();
+});
+
+function loadHighNoshowSlots() {
+    fetch('/api/urgent/high-noshow-slots')
+        .then(r => r.json())
+        .then(data => {
+            const container = document.getElementById('noshow-slots-container');
+            if (!data.success || data.total_slots === 0) {
+                container.innerHTML = '<div class="empty-state"><i class="fas fa-check-circle"></i><p>No high no-show risk slots detected</p></div>';
+                return;
+            }
+
+            let html = '<div class="table-container"><table><thead><tr>';
+            html += '<th>Patient</th><th>Time</th><th>Chair</th><th>No-Show Risk</th><th>Score</th><th>Action</th>';
+            html += '</tr></thead><tbody>';
+
+            data.slots.forEach(slot => {
+                const riskClass = slot.noshow_probability >= 0.30 ? 'high' : slot.noshow_probability >= 0.20 ? 'medium' : 'low';
+                const riskColor = slot.noshow_probability >= 0.30 ? '#ef4444' : slot.noshow_probability >= 0.20 ? '#f59e0b' : '#3b82f6';
+                html += '<tr>';
+                html += '<td><strong>' + slot.patient_id + '</strong></td>';
+                html += '<td>' + slot.start_time + ' - ' + slot.end_time + '</td>';
+                html += '<td>' + slot.chair_id + '</td>';
+                html += '<td><span style="background: ' + riskColor + '20; color: ' + riskColor + '; padding: 4px 12px; border-radius: 20px; font-weight: 500;">' + slot.noshow_percent + '</span></td>';
+                html += '<td>' + slot.double_book_score + '</td>';
+                html += '<td><button class="btn btn-primary btn-sm" onclick="doubleBookSlot(\'' + slot.patient_id + '\', \'' + slot.start_time + '\', \'' + slot.chair_id + '\')"><i class="fas fa-plus"></i> Double-Book</button></td>';
+                html += '</tr>';
+            });
+
+            html += '</tbody></table></div>';
+            html += '<div style="margin-top: 12px; padding: 12px; background: rgba(124, 58, 237, 0.1); border-radius: 8px; font-size: 0.85rem;">';
+            html += '<i class="fas fa-chart-pie" style="color: #a78bfa;"></i> ';
+            html += '<strong style="color: #ef4444;">' + data.high_risk_count + '</strong> high risk (>=30%) | ';
+            html += '<strong style="color: #f59e0b;">' + data.medium_risk_count + '</strong> medium risk (20-30%)';
+            html += '</div>';
+
+            container.innerHTML = html;
+        })
+        .catch(err => {
+            document.getElementById('noshow-slots-container').innerHTML = '<div class="error-state"><i class="fas fa-exclamation-triangle"></i><p>Error loading no-show data</p></div>';
+        });
+}
+
+function getDoubleBookingRecommendations() {
+    fetch('/api/urgent/recommend-double-booking?target_slots=5')
+        .then(r => r.json())
+        .then(data => {
+            const container = document.getElementById('recommendations-container');
+            container.style.display = 'block';
+
+            if (!data.success) {
+                container.innerHTML = '<div class="error-state"><p>' + data.message + '</p></div>';
+                return;
+            }
+
+            let html = '<div style="padding: 16px; background: linear-gradient(135deg, rgba(52, 211, 153, 0.1) 0%, rgba(52, 211, 153, 0.05) 100%); border-radius: 8px; border: 1px solid rgba(52, 211, 153, 0.2);">';
+            html += '<h4 style="margin-bottom: 12px; color: #34d399;"><i class="fas fa-lightbulb"></i> Double-Booking Recommendations</h4>';
+            html += '<p style="font-size: 0.85rem; color: var(--gray-400); margin-bottom: 12px;">Expected no-shows from these slots: <strong>' + data.summary.expected_noshows.toFixed(2) + '</strong></p>';
+            html += '<div style="display: flex; flex-wrap: wrap; gap: 8px;">';
+
+            data.recommended_slots.forEach(slot => {
+                html += '<div style="padding: 10px 16px; background: var(--gray-800); border-radius: 8px; border: 1px solid var(--gray-700);">';
+                html += '<strong>' + slot.patient_id + '</strong> @ ' + slot.start_time;
+                html += ' <span style="color: #a78bfa;">(' + slot.noshow_probability + ')</span>';
+                html += '</div>';
+            });
+
+            html += '</div></div>';
+            container.innerHTML = html;
+        });
+}
+
+function loadUrgentStats() {
+    fetch('/api/urgent/stats')
+        .then(r => r.json())
+        .then(data => {
+            if (data.success) {
+                document.getElementById('stat-total').textContent = data.stats.total_insertions || 0;
+                document.getElementById('stat-gap').textContent = data.stats.gap_based || 0;
+                document.getElementById('stat-double').textContent = data.stats.double_bookings || 0;
+                document.getElementById('stat-resched').textContent = data.stats.rescheduled || 0;
+            }
+        });
+}
+
+function doubleBookSlot(patientId, startTime, chairId) {
+    const urgentPatientId = prompt('Enter urgent patient ID to double-book at ' + startTime + ':');
+    if (!urgentPatientId) return;
+
+    const duration = prompt('Enter treatment duration (minutes):', '60');
+    if (!duration) return;
+
+    fetch('/api/urgent/insert', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+            patient_id: urgentPatientId,
+            priority: 1,
+            duration: parseInt(duration),
+            allow_double_booking: true,
+            allow_rescheduling: false
+        })
+    })
+    .then(r => r.json())
+    .then(result => {
+        if (result.success) {
+            alert('Urgent patient inserted successfully!\n\nStrategy: ' + result.strategy + '\nScheduled at: ' + result.appointment.start_time + ' on ' + result.appointment.chair_id);
+            location.reload();
+        } else {
+            alert('Error: ' + result.message);
+        }
+    });
+}
+</script>
+{% endblock %}

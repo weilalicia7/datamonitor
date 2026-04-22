@@ -1,0 +1,657 @@
+{% extends "base.html" %}
+{% block title %}Analytics | SACT Scheduler{% endblock %}
+{% block content %}
+<div class="page-header fade-in">
+    <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+        <div>
+            <h1>Analytics & Insights</h1>
+            <p class="page-subtitle">Real-time performance metrics with auto-refresh</p>
+        </div>
+        <div style="display: flex; gap: 12px; align-items: center;">
+            <div id="refresh-status" style="display: flex; align-items: center; gap: 8px; padding: 8px 16px; background: rgba(5, 150, 105, 0.1); border: 1px solid rgba(5, 150, 105, 0.2); border-radius: 20px; font-size: 0.75rem; color: #34d399;">
+                <span id="status-dot" style="width: 8px; height: 8px; border-radius: 50%; background: #34d399; animation: pulse 2s infinite;"></span>
+                <span id="status-text">Connected</span>
+            </div>
+            <select id="refresh-interval" class="form-control form-select" style="width: 140px; padding: 8px 12px; font-size: 0.8rem;" onchange="updateRefreshInterval(this.value)">
+                <option value="30000">30 seconds</option>
+                <option value="60000">1 minute</option>
+                <option value="300000">5 minutes</option>
+                <option value="900000" selected>15 minutes</option>
+                <option value="1800000">30 minutes</option>
+            </select>
+        </div>
+    </div>
+</div>
+
+<!-- Analysis Workflow Toggle -->
+<div class="card fade-in" style="margin-bottom: 28px; border: 1px solid rgba(99, 102, 241, 0.3); background: linear-gradient(135deg, rgba(99, 102, 241, 0.05) 0%, rgba(139, 92, 246, 0.05) 100%);">
+    <div class="card-body" style="padding: 24px 28px;">
+        <!-- Toggle Header -->
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+            <div style="display: flex; align-items: center; gap: 12px;">
+                <div style="width: 40px; height: 40px; background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%); border-radius: 10px; display: flex; align-items: center; justify-content: center;">
+                    <i class="fas fa-play-circle" style="color: white; font-size: 1.2rem;"></i>
+                </div>
+                <div>
+                    <h3 style="margin: 0; font-size: 1.1rem; color: var(--white);">Analysis Workflow</h3>
+                    <p style="margin: 0; font-size: 0.75rem; color: var(--gray-400);">Connect to data source, load data, and run analysis</p>
+                </div>
+            </div>
+            <button id="workflow-toggle" class="btn btn-primary" onclick="toggleWorkflowPanel()" style="padding: 10px 20px;">
+                <i class="fas fa-chevron-down" id="toggle-icon"></i> <span id="toggle-text">Show Workflow</span>
+            </button>
+        </div>
+
+        <!-- Workflow Panel (collapsed by default) -->
+        <div id="workflow-panel" style="display: none;">
+            <!-- Workflow Steps -->
+            <div style="display: flex; gap: 20px; margin-bottom: 24px;">
+                <!-- Step 1: Select Source -->
+                <div id="step-1" class="workflow-step active" style="flex: 1; padding: 20px; background: rgba(255,255,255,0.03); border-radius: 12px; border: 2px solid rgba(99, 102, 241, 0.5); position: relative;">
+                    <div style="position: absolute; top: -12px; left: 20px; background: var(--primary-900); padding: 2px 12px; border-radius: 20px; font-size: 0.7rem; color: #6366f1; font-weight: 600;">STEP 1</div>
+                    <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 16px;">
+                        <div style="width: 36px; height: 36px; background: rgba(99, 102, 241, 0.2); border-radius: 50%; display: flex; align-items: center; justify-content: center;">
+                            <i class="fas fa-database" style="color: #6366f1;"></i>
+                        </div>
+                        <span style="font-weight: 600; color: var(--white);">Select Data Source</span>
+                    </div>
+                    <div style="display: flex; gap: 10px; margin-bottom: 12px;">
+                        <button id="btn-local" class="source-btn active" onclick="selectSource('local')" style="flex: 1; padding: 12px; background: rgba(99, 102, 241, 0.2); border: 1px solid #6366f1; border-radius: 8px; color: var(--white); cursor: pointer; transition: all 0.2s;">
+                            <i class="fas fa-folder"></i> Local Files
+                        </button>
+                        <button id="btn-cloud" class="source-btn" onclick="selectSource('cloud')" style="flex: 1; padding: 12px; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.1); border-radius: 8px; color: var(--gray-400); cursor: pointer; transition: all 0.2s;">
+                            <i class="fas fa-cloud"></i> Cloud
+                        </button>
+                    </div>
+                    <div id="source-path" style="font-size: 0.75rem; color: var(--gray-500); word-break: break-all;">
+                        <i class="fas fa-folder-open"></i> datasets/sample_data/
+                    </div>
+                </div>
+
+                <!-- Step 2: Load Data -->
+                <div id="step-2" class="workflow-step" style="flex: 1; padding: 20px; background: rgba(255,255,255,0.02); border-radius: 12px; border: 2px solid rgba(255,255,255,0.1); position: relative; opacity: 0.7;">
+                    <div style="position: absolute; top: -12px; left: 20px; background: var(--primary-900); padding: 2px 12px; border-radius: 20px; font-size: 0.7rem; color: var(--gray-500); font-weight: 600;">STEP 2</div>
+                    <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 16px;">
+                        <div style="width: 36px; height: 36px; background: rgba(255,255,255,0.05); border-radius: 50%; display: flex; align-items: center; justify-content: center;">
+                            <i class="fas fa-download" style="color: var(--gray-500);"></i>
+                        </div>
+                        <span style="font-weight: 600; color: var(--gray-400);">Load Data</span>
+                    </div>
+                    <button id="btn-load" onclick="loadDataFromSource()" style="width: 100%; padding: 12px; background: rgba(5, 150, 105, 0.2); border: 1px solid #059669; border-radius: 8px; color: #34d399; cursor: pointer; font-weight: 500; transition: all 0.2s;">
+                        <i class="fas fa-plug"></i> Connect & Load
+                    </button>
+                    <div id="load-status" style="margin-top: 12px; font-size: 0.75rem; color: var(--gray-500);">
+                        <i class="fas fa-info-circle"></i> Click to load patient & appointment data
+                    </div>
+                </div>
+
+                <!-- Step 3: Analyze -->
+                <div id="step-3" class="workflow-step" style="flex: 1; padding: 20px; background: rgba(255,255,255,0.02); border-radius: 12px; border: 2px solid rgba(255,255,255,0.1); position: relative; opacity: 0.7;">
+                    <div style="position: absolute; top: -12px; left: 20px; background: var(--primary-900); padding: 2px 12px; border-radius: 20px; font-size: 0.7rem; color: var(--gray-500); font-weight: 600;">STEP 3</div>
+                    <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 16px;">
+                        <div style="width: 36px; height: 36px; background: rgba(255,255,255,0.05); border-radius: 50%; display: flex; align-items: center; justify-content: center;">
+                            <i class="fas fa-chart-line" style="color: var(--gray-500);"></i>
+                        </div>
+                        <span style="font-weight: 600; color: var(--gray-400);">Analyze</span>
+                    </div>
+                    <button id="btn-analyze" onclick="runFullAnalysis()" disabled style="width: 100%; padding: 12px; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.1); border-radius: 8px; color: var(--gray-500); cursor: not-allowed; font-weight: 500; transition: all 0.2s;">
+                        <i class="fas fa-magic"></i> Run Analysis
+                    </button>
+                    <div id="analyze-status" style="margin-top: 12px; font-size: 0.75rem; color: var(--gray-500);">
+                        <i class="fas fa-lock"></i> Load data first to enable
+                    </div>
+                </div>
+            </div>
+
+            <!-- Progress Bar -->
+            <div style="background: rgba(255,255,255,0.05); border-radius: 8px; height: 8px; overflow: hidden;">
+                <div id="workflow-progress" style="width: 33%; height: 100%; background: linear-gradient(90deg, #6366f1, #8b5cf6); border-radius: 8px; transition: width 0.5s ease;"></div>
+            </div>
+            <div style="display: flex; justify-content: space-between; margin-top: 8px; font-size: 0.7rem; color: var(--gray-500);">
+                <span>Source Selected</span>
+                <span>Data Loaded</span>
+                <span>Analysis Complete</span>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Data Source Status -->
+<div class="card fade-in" style="margin-bottom: 28px;">
+    <div class="card-body" style="padding: 20px 28px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 20px;">
+            <div style="display: flex; align-items: center; gap: 24px;">
+                <div>
+                    <div style="font-size: 0.7rem; color: var(--gray-500); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 4px;">Data Source</div>
+                    <div id="data-source" style="font-size: 0.95rem; color: var(--white); font-weight: 600;">Loading...</div>
+                </div>
+                <div style="width: 1px; height: 40px; background: rgba(255,255,255,0.1);"></div>
+                <div>
+                    <div style="font-size: 0.7rem; color: var(--gray-500); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 4px;">Last Data Refresh</div>
+                    <div id="last-refresh" style="font-size: 0.95rem; color: var(--white); font-weight: 600;">--</div>
+                </div>
+                <div style="width: 1px; height: 40px; background: rgba(255,255,255,0.1);"></div>
+                <div>
+                    <div style="font-size: 0.7rem; color: var(--gray-500); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 4px;">Last Optimization</div>
+                    <div id="last-optimization" style="font-size: 0.95rem; color: var(--white); font-weight: 600;">--</div>
+                </div>
+                <div style="width: 1px; height: 40px; background: rgba(255,255,255,0.1);"></div>
+                <div>
+                    <div style="font-size: 0.7rem; color: var(--gray-500); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 4px;">Next Auto-Refresh</div>
+                    <div id="next-refresh" style="font-size: 0.95rem; color: var(--primary-400); font-weight: 600;">--</div>
+                </div>
+            </div>
+            <button class="btn btn-success btn-sm" onclick="runFullOptimization()">
+                <i class="fas fa-magic"></i> Run Optimization
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- Live Metrics -->
+<div class="metrics-grid">
+    <div class="metric-card fade-in delay-1">
+        <div class="metric-icon blue">
+            <i class="fas fa-percentage"></i>
+        </div>
+        <div class="metric-value" id="metric-utilization">--</div>
+        <div class="metric-label">Chair Utilization</div>
+        <span class="metric-trend up" id="trend-utilization">
+            <i class="fas fa-sync fa-spin"></i> Loading
+        </span>
+    </div>
+    <div class="metric-card fade-in delay-2">
+        <div class="metric-icon green">
+            <i class="fas fa-calendar-check"></i>
+        </div>
+        <div class="metric-value" id="metric-scheduled">--</div>
+        <div class="metric-label">Scheduled Today</div>
+        <span class="metric-trend up" id="trend-scheduled">
+            <i class="fas fa-sync fa-spin"></i> Loading
+        </span>
+    </div>
+    <div class="metric-card fade-in delay-3">
+        <div class="metric-icon orange">
+            <i class="fas fa-user-clock"></i>
+        </div>
+        <div class="metric-value" id="metric-pending">--</div>
+        <div class="metric-label">Pending Patients</div>
+        <span class="metric-trend up" id="trend-pending">
+            <i class="fas fa-sync fa-spin"></i> Loading
+        </span>
+    </div>
+    <div class="metric-card fade-in delay-4">
+        <div class="metric-icon red">
+            <i class="fas fa-user-times"></i>
+        </div>
+        <div class="metric-value" id="metric-noshow">--</div>
+        <div class="metric-label">No-Show Rate</div>
+        <span class="metric-trend up" id="trend-noshow">
+            <i class="fas fa-sync fa-spin"></i> Loading
+        </span>
+    </div>
+</div>
+
+<!-- Charts Row -->
+<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 28px; margin-bottom: 28px;">
+    <div class="card fade-in">
+        <div class="card-header">
+            <h3><i class="fas fa-chart-line"></i>Utilization Trend</h3>
+            <span style="font-size: 0.75rem; color: var(--gray-500);">Live updates</span>
+        </div>
+        <div class="card-body">
+            <canvas id="utilizationChart" height="280"></canvas>
+        </div>
+    </div>
+
+    <div class="card fade-in">
+        <div class="card-header">
+            <h3><i class="fas fa-chart-pie"></i>Priority Distribution</h3>
+            <span style="font-size: 0.75rem; color: var(--gray-500);">Current schedule</span>
+        </div>
+        <div class="card-body">
+            <canvas id="priorityChart" height="280"></canvas>
+        </div>
+    </div>
+</div>
+
+<!-- Optimization Results & ML Predictions -->
+<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 28px;">
+    <div class="card fade-in">
+        <div class="card-header">
+            <h3><i class="fas fa-cogs"></i>Optimization Results</h3>
+        </div>
+        <div class="card-body" id="optimization-results">
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+                <div style="padding: 20px; background: rgba(255,255,255,0.02); border-radius: 12px; border: 1px solid rgba(255,255,255,0.06);">
+                    <div style="font-size: 2rem; font-weight: 700; color: var(--white);" id="opt-scheduled">--</div>
+                    <div style="font-size: 0.75rem; color: var(--gray-500); text-transform: uppercase;">Patients Scheduled</div>
+                </div>
+                <div style="padding: 20px; background: rgba(255,255,255,0.02); border-radius: 12px; border: 1px solid rgba(255,255,255,0.06);">
+                    <div style="font-size: 2rem; font-weight: 700; color: var(--warning);" id="opt-unscheduled">--</div>
+                    <div style="font-size: 0.75rem; color: var(--gray-500); text-transform: uppercase;">Unscheduled</div>
+                </div>
+                <div style="padding: 20px; background: rgba(255,255,255,0.02); border-radius: 12px; border: 1px solid rgba(255,255,255,0.06);">
+                    <div style="font-size: 2rem; font-weight: 700; color: #34d399;" id="opt-utilization">--</div>
+                    <div style="font-size: 0.75rem; color: var(--gray-500); text-transform: uppercase;">Utilization Achieved</div>
+                </div>
+                <div style="padding: 20px; background: rgba(255,255,255,0.02); border-radius: 12px; border: 1px solid rgba(255,255,255,0.06);">
+                    <div style="font-size: 2rem; font-weight: 700; color: var(--primary-400);" id="opt-score">--</div>
+                    <div style="font-size: 0.75rem; color: var(--gray-500); text-transform: uppercase;">Objective Score</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="card fade-in">
+        <div class="card-header">
+            <h3><i class="fas fa-brain"></i>ML Predictions</h3>
+            <span id="ml-status" style="font-size: 0.7rem; padding: 4px 10px; background: rgba(124, 58, 237, 0.2); color: #a78bfa; border-radius: 10px;">Active</span>
+        </div>
+        <div class="card-body" id="ml-predictions">
+            <div style="max-height: 250px; overflow-y: auto;">
+                <table style="width: 100%;">
+                    <thead>
+                        <tr>
+                            <th style="padding: 10px; font-size: 0.7rem;">Patient</th>
+                            <th style="padding: 10px; font-size: 0.7rem;">No-Show Risk</th>
+                            <th style="padding: 10px; font-size: 0.7rem;">Est. Duration</th>
+                        </tr>
+                    </thead>
+                    <tbody id="ml-table">
+                        <tr><td colspan="3" style="text-align: center; padding: 40px; color: var(--gray-500);">Loading predictions...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let refreshInterval = 900000; // 15 minutes default
+let refreshTimer = null;
+let nextRefreshTime = null;
+let utilizationChart = null;
+let priorityChart = null;
+
+document.addEventListener('DOMContentLoaded', function() {
+    Chart.defaults.color = '#94a3b8';
+    Chart.defaults.borderColor = 'rgba(255, 255, 255, 0.06)';
+
+    initCharts();
+    loadAllData();
+    startAutoRefresh();
+});
+
+function initCharts() {
+    // Utilization Chart
+    utilizationChart = new Chart(document.getElementById('utilizationChart'), {
+        type: 'line',
+        data: {
+            labels: ['8:00', '9:00', '10:00', '11:00', '12:00', '13:00', '14:00', '15:00', '16:00', '17:00'],
+            datasets: [{
+                label: 'Chair Utilization %',
+                data: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+                borderColor: '#3b82f6',
+                backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                fill: true,
+                tension: 0.4,
+                borderWidth: 3,
+                pointBackgroundColor: '#3b82f6',
+                pointBorderColor: '#1e293b',
+                pointBorderWidth: 3,
+                pointRadius: 6,
+                pointHoverRadius: 8
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: { legend: { display: false } },
+            scales: {
+                y: { beginAtZero: true, max: 100, grid: { color: 'rgba(255, 255, 255, 0.04)' } },
+                x: { grid: { color: 'rgba(255, 255, 255, 0.04)' } }
+            }
+        }
+    });
+
+    // Priority Chart
+    priorityChart = new Chart(document.getElementById('priorityChart'), {
+        type: 'doughnut',
+        data: {
+            labels: ['P1 Critical', 'P2 High', 'P3 Standard', 'P4 Routine'],
+            datasets: [{
+                data: [0, 0, 0, 0],
+                backgroundColor: ['rgba(220, 38, 38, 0.8)', 'rgba(234, 88, 12, 0.8)', 'rgba(217, 119, 6, 0.8)', 'rgba(5, 150, 105, 0.8)'],
+                borderColor: '#0f172a',
+                borderWidth: 4
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            cutout: '65%',
+            plugins: { legend: { position: 'bottom', labels: { padding: 20, usePointStyle: true } } }
+        }
+    });
+}
+
+// Workflow state
+let workflowState = {
+    sourceSelected: 'local',
+    dataLoaded: false,
+    analysisComplete: false
+};
+
+function toggleWorkflowPanel() {
+    const panel = document.getElementById('workflow-panel');
+    const icon = document.getElementById('toggle-icon');
+    const text = document.getElementById('toggle-text');
+
+    if (panel.style.display === 'none') {
+        panel.style.display = 'block';
+        icon.className = 'fas fa-chevron-up';
+        text.textContent = 'Hide Workflow';
+    } else {
+        panel.style.display = 'none';
+        icon.className = 'fas fa-chevron-down';
+        text.textContent = 'Show Workflow';
+    }
+}
+
+function selectSource(source) {
+    workflowState.sourceSelected = source;
+
+    // Update button styles
+    const btnLocal = document.getElementById('btn-local');
+    const btnCloud = document.getElementById('btn-cloud');
+    const sourcePath = document.getElementById('source-path');
+
+    if (source === 'local') {
+        btnLocal.style.background = 'rgba(99, 102, 241, 0.2)';
+        btnLocal.style.border = '1px solid #6366f1';
+        btnLocal.style.color = 'var(--white)';
+        btnCloud.style.background = 'rgba(255,255,255,0.03)';
+        btnCloud.style.border = '1px solid rgba(255,255,255,0.1)';
+        btnCloud.style.color = 'var(--gray-400)';
+        sourcePath.innerHTML = '<i class="fas fa-folder-open"></i> datasets/sample_data/';
+    } else {
+        btnCloud.style.background = 'rgba(99, 102, 241, 0.2)';
+        btnCloud.style.border = '1px solid #6366f1';
+        btnCloud.style.color = 'var(--white)';
+        btnLocal.style.background = 'rgba(255,255,255,0.03)';
+        btnLocal.style.border = '1px solid rgba(255,255,255,0.1)';
+        btnLocal.style.color = 'var(--gray-400)';
+        sourcePath.innerHTML = '<i class="fas fa-cloud"></i> Cloud endpoint (configure in settings)';
+    }
+
+    // Reset subsequent steps if source changes
+    if (workflowState.dataLoaded) {
+        resetWorkflowFrom(2);
+    }
+}
+
+function loadDataFromSource() {
+    const btnLoad = document.getElementById('btn-load');
+    const loadStatus = document.getElementById('load-status');
+    const step2 = document.getElementById('step-2');
+    const step3 = document.getElementById('step-3');
+
+    // Show loading state
+    btnLoad.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Loading...';
+    btnLoad.disabled = true;
+    loadStatus.innerHTML = '<i class="fas fa-sync fa-spin"></i> Connecting to data source...';
+
+    // Call the data load API
+    fetch('/api/data/load', { method: 'POST' })
+        .then(r => r.json())
+        .then(data => {
+            if (data.success) {
+                workflowState.dataLoaded = true;
+
+                // Update Step 2 appearance
+                step2.style.border = '2px solid #059669';
+                step2.style.opacity = '1';
+                btnLoad.innerHTML = '<i class="fas fa-check"></i> Data Loaded';
+                btnLoad.style.background = 'rgba(5, 150, 105, 0.3)';
+                btnLoad.style.color = '#34d399';
+                loadStatus.innerHTML = '<i class="fas fa-check-circle" style="color: #34d399;"></i> ' +
+                    (data.patients_count || 0) + ' patients, ' + (data.appointments_count || 0) + ' appointments loaded';
+
+                // Enable Step 3
+                step3.style.opacity = '1';
+                step3.style.border = '2px solid rgba(99, 102, 241, 0.5)';
+                const btnAnalyze = document.getElementById('btn-analyze');
+                btnAnalyze.disabled = false;
+                btnAnalyze.style.background = 'rgba(139, 92, 246, 0.2)';
+                btnAnalyze.style.border = '1px solid #8b5cf6';
+                btnAnalyze.style.color = '#a78bfa';
+                btnAnalyze.style.cursor = 'pointer';
+                document.getElementById('analyze-status').innerHTML = '<i class="fas fa-unlock"></i> Ready to analyze';
+
+                // Update progress bar
+                document.getElementById('workflow-progress').style.width = '66%';
+
+                // Refresh the main data display
+                loadAllData();
+            } else {
+                btnLoad.innerHTML = '<i class="fas fa-exclamation-triangle"></i> Retry';
+                btnLoad.disabled = false;
+                loadStatus.innerHTML = '<i class="fas fa-times-circle" style="color: #f87171;"></i> ' + (data.message || 'Failed to load data');
+            }
+        })
+        .catch(err => {
+            btnLoad.innerHTML = '<i class="fas fa-exclamation-triangle"></i> Retry';
+            btnLoad.disabled = false;
+            loadStatus.innerHTML = '<i class="fas fa-times-circle" style="color: #f87171;"></i> Connection error';
+        });
+}
+
+function runFullAnalysis() {
+    if (!workflowState.dataLoaded) {
+        alert('Please load data first');
+        return;
+    }
+
+    const btnAnalyze = document.getElementById('btn-analyze');
+    const analyzeStatus = document.getElementById('analyze-status');
+    const step3 = document.getElementById('step-3');
+
+    // Show analyzing state
+    btnAnalyze.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Analyzing...';
+    btnAnalyze.disabled = true;
+    analyzeStatus.innerHTML = '<i class="fas fa-sync fa-spin"></i> Running ML predictions & optimization...';
+
+    // Call the optimization API
+    fetch('/api/optimize/run', { method: 'POST' })
+        .then(r => r.json())
+        .then(data => {
+            workflowState.analysisComplete = true;
+
+            // Update Step 3 appearance
+            step3.style.border = '2px solid #8b5cf6';
+            btnAnalyze.innerHTML = '<i class="fas fa-check"></i> Analysis Complete';
+            btnAnalyze.style.background = 'rgba(139, 92, 246, 0.3)';
+            btnAnalyze.style.color = '#a78bfa';
+            analyzeStatus.innerHTML = '<i class="fas fa-check-circle" style="color: #a78bfa;"></i> ' +
+                data.message + (data.scheduled > 0 ? ' (' + data.scheduled + ' scheduled)' : '');
+
+            // Update progress bar to 100%
+            document.getElementById('workflow-progress').style.width = '100%';
+
+            // Refresh all data displays
+            loadAllData();
+        })
+        .catch(err => {
+            btnAnalyze.innerHTML = '<i class="fas fa-exclamation-triangle"></i> Retry';
+            btnAnalyze.disabled = false;
+            analyzeStatus.innerHTML = '<i class="fas fa-times-circle" style="color: #f87171;"></i> Analysis failed';
+        });
+}
+
+function resetWorkflowFrom(step) {
+    if (step <= 2) {
+        workflowState.dataLoaded = false;
+        const step2 = document.getElementById('step-2');
+        step2.style.border = '2px solid rgba(255,255,255,0.1)';
+        step2.style.opacity = '0.7';
+        document.getElementById('btn-load').innerHTML = '<i class="fas fa-plug"></i> Connect & Load';
+        document.getElementById('btn-load').disabled = false;
+        document.getElementById('btn-load').style.background = 'rgba(5, 150, 105, 0.2)';
+        document.getElementById('btn-load').style.color = '#34d399';
+        document.getElementById('load-status').innerHTML = '<i class="fas fa-info-circle"></i> Click to load patient & appointment data';
+    }
+    if (step <= 3) {
+        workflowState.analysisComplete = false;
+        const step3 = document.getElementById('step-3');
+        step3.style.border = '2px solid rgba(255,255,255,0.1)';
+        step3.style.opacity = '0.7';
+        const btnAnalyze = document.getElementById('btn-analyze');
+        btnAnalyze.innerHTML = '<i class="fas fa-magic"></i> Run Analysis';
+        btnAnalyze.disabled = true;
+        btnAnalyze.style.background = 'rgba(255,255,255,0.03)';
+        btnAnalyze.style.border = '1px solid rgba(255,255,255,0.1)';
+        btnAnalyze.style.color = 'var(--gray-500)';
+        btnAnalyze.style.cursor = 'not-allowed';
+        document.getElementById('analyze-status').innerHTML = '<i class="fas fa-lock"></i> Load data first to enable';
+        document.getElementById('workflow-progress').style.width = '33%';
+    }
+}
+
+function loadAllData() {
+    // Load status and metrics
+    fetch('/api/status')
+        .then(r => r.json())
+        .then(data => {
+            document.getElementById('data-source').textContent = data.data_source_status || 'Local';
+            document.getElementById('last-refresh').textContent = data.last_data_refresh ? new Date(data.last_data_refresh).toLocaleTimeString() : 'Never';
+            document.getElementById('last-optimization').textContent = data.last_optimization ? new Date(data.last_optimization).toLocaleTimeString() : 'Never';
+
+            // Update metrics
+            if (data.metrics) {
+                document.getElementById('metric-utilization').textContent = data.metrics.chair_utilization + '%';
+                document.getElementById('metric-scheduled').textContent = data.metrics.scheduled_today;
+                document.getElementById('metric-pending').textContent = data.metrics.pending_patients;
+                document.getElementById('metric-noshow').textContent = data.metrics.no_show_rate + '%';
+
+                document.getElementById('trend-utilization').innerHTML = '<i class="fas fa-check"></i> Live';
+                document.getElementById('trend-scheduled').innerHTML = '<i class="fas fa-check"></i> Live';
+                document.getElementById('trend-pending').innerHTML = '<i class="fas fa-check"></i> Live';
+                document.getElementById('trend-noshow').innerHTML = '<i class="fas fa-check"></i> Live';
+
+                // Update charts with simulated hourly data
+                utilizationChart.data.datasets[0].data = [65, 78, 85, 92, 88, 75, 90, 95, 82, 70];
+                utilizationChart.update();
+            }
+        });
+
+    // Load optimization results
+    fetch('/api/metrics')
+        .then(r => r.json())
+        .then(data => {
+            if (data.optimization_results) {
+                document.getElementById('opt-scheduled').textContent = data.optimization_results.patients_scheduled || 0;
+                document.getElementById('opt-unscheduled').textContent = data.optimization_results.patients_unscheduled || 0;
+                document.getElementById('opt-utilization').textContent = (data.optimization_results.utilization_achieved || 0) + '%';
+                document.getElementById('opt-score').textContent = (data.optimization_results.objective_score || 0).toFixed(2);
+            }
+        });
+
+    // Load ML predictions
+    fetch('/api/ml/predictions')
+        .then(r => r.json())
+        .then(data => {
+            document.getElementById('ml-status').textContent = data.model_status === 'active' ? 'Active' : 'Simulated';
+
+            const tbody = document.getElementById('ml-table');
+            if (data.noshow_predictions && data.noshow_predictions.length > 0) {
+                tbody.innerHTML = data.noshow_predictions.map((pred, i) => {
+                    const dur = data.duration_predictions[i];
+                    const riskColor = pred.risk_level === 'high' ? '#f87171' : pred.risk_level === 'medium' ? '#fbbf24' : '#34d399';
+                    return `<tr>
+                        <td style="padding: 12px; color: var(--white);">${pred.patient_id}</td>
+                        <td style="padding: 12px;"><span style="color: ${riskColor};">${(pred.probability * 100).toFixed(1)}%</span></td>
+                        <td style="padding: 12px;">${dur ? dur.predicted_duration : '--'} min</td>
+                    </tr>`;
+                }).join('');
+
+                // Update priority chart based on predictions count
+                priorityChart.data.datasets[0].data = [
+                    data.noshow_predictions.filter(p => p.risk_level === 'high').length || 1,
+                    data.noshow_predictions.filter(p => p.risk_level === 'medium').length || 2,
+                    data.noshow_predictions.filter(p => p.risk_level === 'low').length || 3,
+                    1
+                ];
+                priorityChart.update();
+            } else {
+                tbody.innerHTML = '<tr><td colspan="3" style="text-align: center; padding: 40px; color: var(--gray-500);">No predictions available. Load data first.</td></tr>';
+            }
+        });
+}
+
+function startAutoRefresh() {
+    if (refreshTimer) clearInterval(refreshTimer);
+
+    nextRefreshTime = Date.now() + refreshInterval;
+    updateNextRefreshDisplay();
+
+    refreshTimer = setInterval(() => {
+        loadAllData();
+        nextRefreshTime = Date.now() + refreshInterval;
+    }, refreshInterval);
+
+    // Update countdown every second
+    setInterval(updateNextRefreshDisplay, 1000);
+}
+
+function updateNextRefreshDisplay() {
+    if (nextRefreshTime) {
+        const remaining = Math.max(0, nextRefreshTime - Date.now());
+        const minutes = Math.floor(remaining / 60000);
+        const seconds = Math.floor((remaining % 60000) / 1000);
+        document.getElementById('next-refresh').textContent = `${minutes}m ${seconds}s`;
+    }
+}
+
+function updateRefreshInterval(ms) {
+    refreshInterval = parseInt(ms);
+    startAutoRefresh();
+
+    // Also update server config
+    fetch('/api/config', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({refresh_interval: refreshInterval / 1000})
+    });
+}
+
+function manualRefresh() {
+    document.getElementById('status-text').textContent = 'Refreshing...';
+    document.getElementById('status-dot').style.background = '#fbbf24';
+
+    fetch('/api/refresh', {method: 'POST'})
+        .then(r => r.json())
+        .then(data => {
+            if (data.success) {
+                loadAllData();
+                document.getElementById('status-text').textContent = 'Connected';
+                document.getElementById('status-dot').style.background = '#34d399';
+                nextRefreshTime = Date.now() + refreshInterval;
+            }
+        });
+}
+
+function runFullOptimization() {
+    document.getElementById('opt-scheduled').textContent = '...';
+
+    fetch('/api/optimize/run', {method: 'POST'})
+        .then(r => r.json())
+        .then(data => {
+            loadAllData();
+            alert(data.message + (data.scheduled > 0 ? ' - Scheduled: ' + data.scheduled : ''));
+        });
+}
+</script>
+{% endblock %}

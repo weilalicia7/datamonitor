@@ -1,0 +1,2725 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SACT Schedule Viewer - Velindre Cancer Centre</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f0f2f5; color: #1a1a2e; }
+
+.header {
+    background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+    color: white; padding: 20px 32px; display: flex; align-items: center; justify-content: space-between;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+}
+.header h1 { font-size: 1.4em; font-weight: 600; }
+.header .subtitle { font-size: 0.85em; opacity: 0.8; margin-top: 2px; }
+.header .back-link { color: #a0aec0; text-decoration: none; font-size: 0.85em; }
+.header .back-link:hover { color: white; }
+
+.tabs {
+    display: flex; background: #16213e; padding: 0 32px; gap: 0;
+    border-bottom: 2px solid #0f3460;
+}
+.tab {
+    padding: 12px 24px; color: #a0aec0; cursor: pointer; font-size: 0.9em;
+    border-bottom: 3px solid transparent; transition: all 0.2s;
+}
+.tab:hover { color: white; background: rgba(255,255,255,0.05); }
+.tab.active { color: #e94560; border-bottom-color: #e94560; font-weight: 600; }
+
+.content { padding: 24px 32px; max-width: 1600px; margin: 0 auto; }
+
+.controls {
+    display: flex; gap: 12px; align-items: center; flex-wrap: wrap;
+    margin-bottom: 20px; background: white; padding: 16px 20px;
+    border-radius: 10px; box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+}
+.controls label { font-size: 0.85em; color: #555; font-weight: 500; }
+.controls select, .controls input {
+    padding: 6px 10px; border: 1px solid #d0d5dd; border-radius: 6px;
+    font-size: 0.85em; background: white;
+}
+
+.stats {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 12px; margin-bottom: 20px;
+}
+.stat-card {
+    background: white; padding: 16px 20px; border-radius: 10px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+}
+.stat-card .label { font-size: 0.75em; text-transform: uppercase; color: #888; letter-spacing: 0.5px; }
+.stat-card .value { font-size: 1.8em; font-weight: 700; color: #1a1a2e; margin-top: 4px; }
+.stat-card .detail { font-size: 0.8em; color: #888; margin-top: 2px; }
+
+.schedule-container {
+    background: white; border-radius: 10px; box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+    overflow-x: auto; position: relative;
+}
+.time-header {
+    position: sticky; top: 0; background: #f8f9fa; z-index: 2;
+    border-bottom: 2px solid #e2e8f0; display: flex; padding-left: 100px;
+}
+.time-label {
+    font-size: 0.7em; color: #888; text-align: center; border-left: 1px solid #e2e8f0;
+    padding: 6px 0; flex-shrink: 0;
+}
+.chair-row {
+    display: flex; align-items: stretch; border-bottom: 1px solid #f0f0f0;
+    min-height: 36px; position: relative;
+}
+.chair-label {
+    width: 100px; min-width: 100px; padding: 8px 12px; font-size: 0.8em;
+    font-weight: 600; color: #555; background: #f8f9fa; display: flex;
+    align-items: center; border-right: 1px solid #e2e8f0; position: sticky; left: 0; z-index: 1;
+}
+.chair-timeline { flex: 1; position: relative; min-height: 36px; }
+.appt-block {
+    position: absolute; top: 3px; bottom: 3px; border-radius: 4px;
+    font-size: 0.68em; padding: 2px 6px; overflow: hidden;
+    cursor: pointer; transition: opacity 0.15s; white-space: nowrap;
+    display: flex; align-items: center; gap: 4px;
+    border: 1px solid rgba(0,0,0,0.1);
+    text-overflow: ellipsis;
+    min-width: 60px;
+}
+.appt-block:hover { opacity: 0.85; z-index: 10; box-shadow: 0 2px 8px rgba(0,0,0,0.2); min-width: auto; overflow: visible; }
+.appt-block .one-to-one { background: #e94560; color: white; border-radius: 3px; padding: 0 3px; font-size: 0.85em; font-weight: 700; }
+
+/* Risk border colors for ML no-show prediction */
+.risk-low { border-left: 3px solid #22c55e; }
+.risk-medium { border-left: 3px solid #eab308; }
+.risk-high { border-left: 3px solid #ef4444; }
+.risk-very-high { border-left: 3px solid #dc2626; background-image: repeating-linear-gradient(45deg, transparent, transparent 5px, rgba(220,38,38,0.1) 5px, rgba(220,38,38,0.1) 10px); }
+
+/* Regimen colors - high contrast, distinct per cancer type */
+/* Colorectal (blues) */
+.reg-FOLFOX { background: #3b82f6; color: white; }
+.reg-FOLFIRI { background: #1d4ed8; color: white; }
+.reg-CAPOX { background: #60a5fa; color: #1e3a5f; }
+/* Lymphoma (purples) */
+.reg-RCHOP { background: #8b5cf6; color: white; }
+.reg-RITUX { background: #a78bfa; color: #2e1065; }
+/* Breast (pinks) */
+.reg-FECT { background: #ec4899; color: white; }
+.reg-DOCE { background: #f472b6; color: #500724; }
+.reg-PACW { background: #fb7185; color: white; }
+.reg-AC { background: #be185d; color: white; }
+.reg-TRAS { background: #fda4af; color: #500724; }
+/* Lung (greens) */
+.reg-CARBPAC { background: #10b981; color: white; }
+.reg-PEME { background: #34d399; color: #064e3b; }
+.reg-CISE { background: #059669; color: white; }
+/* Immunotherapy (teals/cyans) */
+.reg-PEMBRO { background: #06b6d4; color: white; }
+.reg-NIVO { background: #22d3ee; color: #164e63; }
+.reg-IPNIVO { background: #0891b2; color: white; }
+/* Supportive/Other (ambers/oranges) */
+.reg-GEM { background: #f59e0b; color: white; }
+.reg-BEVA { background: #fbbf24; color: #78350f; }
+.reg-ZOLE { background: #d97706; color: white; }
+.reg-VINO { background: #f97316; color: white; }
+
+.data-table {
+    width: 100%; border-collapse: collapse; font-size: 0.85em;
+    background: white; border-radius: 10px; overflow: hidden;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+}
+.data-table th {
+    background: #f8f9fa; padding: 10px 12px; text-align: left;
+    font-weight: 600; color: #555; border-bottom: 2px solid #e2e8f0;
+    position: sticky; top: 0; z-index: 1;
+}
+.data-table td { padding: 8px 12px; border-bottom: 1px solid #f0f0f0; }
+.data-table tr:hover { background: #f8fafc; }
+
+.tooltip {
+    display: none; position: fixed; background: #1a1a2e; color: white;
+    padding: 12px 16px; border-radius: 8px; font-size: 0.8em;
+    z-index: 1000; max-width: 360px; box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+    line-height: 1.5;
+}
+.tooltip .tt-label { color: #a0aec0; font-size: 0.85em; }
+
+.hidden { display: none !important; }
+
+.util-bar-bg { background: #e2e8f0; height: 8px; border-radius: 4px; width: 100%; }
+.util-bar { height: 8px; border-radius: 4px; background: #3b82f6; transition: width 0.3s; }
+.util-bar.high { background: #ef4444; }
+.util-bar.medium { background: #f59e0b; }
+
+.loading { text-align: center; padding: 60px; color: #888; }
+.loading i { font-size: 2em; margin-bottom: 12px; display: block; }
+</style>
+</head>
+<body>
+
+<div class="header">
+    <div>
+        <h1>SACT Intelligent Scheduling System</h1>
+        <div class="subtitle">Velindre Cancer Centre &middot; 12 ML Models &middot; Multi-Objective Optimization &middot;
+            <span id="mode-badge" style="padding:2px 8px;border-radius:10px;background:#22c55e;color:white;font-size:0.85em;">NORMAL</span>
+            &middot;
+            <span id="channel-badge" title="Active data channel (Ch1 synthetic / Ch2 real hospital). Ch3 NHS open data runs always in background." style="padding:2px 8px;border-radius:10px;background:#8b5cf6;color:white;font-size:0.85em;cursor:help;">CH1 SYNTHETIC</span>
+        </div>
+    </div>
+    <div style="display:flex;gap:10px;align-items:center;">
+        <select id="mode-select" onchange="switchMode(this.value)" style="padding:4px 8px;border:1px solid #a0aec0;border-radius:5px;font-size:0.8em;background:#16213e;color:white;">
+            <option value="normal">Normal Mode</option>
+            <option value="elevated">Elevated Mode</option>
+            <option value="crisis">Crisis Mode</option>
+            <option value="emergency">Emergency Mode</option>
+        </select>
+    </div>
+</div>
+
+<div class="tabs">
+    <div class="tab active" data-tab="schedule">Schedule</div>
+    <div class="tab" data-tab="squeeze">Squeeze-In</div>
+    <div class="tab" data-tab="optimize">Optimize</div>
+    <div class="tab" data-tab="appointments">Appointments</div>
+    <div class="tab" data-tab="patients">Patients</div>
+    <div class="tab" data-tab="staff">Staff</div>
+    <div class="tab" data-tab="events">Events</div>
+    <div class="tab" data-tab="ml">ML Models</div>
+    <div class="tab" data-tab="irl">IRL Preferences</div>
+</div>
+
+<div class="content">
+    <!-- TAB: SCHEDULE (Gantt Chart) -->
+    <div id="tab-schedule" class="tab-content">
+        <div class="controls">
+            <label>Date:</label>
+            <input type="date" id="date-select" style="width:160px;">
+            <label style="margin-left:12px;">Site:</label>
+            <select id="site-select"></select>
+            <label style="margin-left:16px; font-size:0.8em; color:#888;" id="day-label"></label>
+        </div>
+        <div class="stats" id="schedule-stats"></div>
+        <!-- Color Legend -->
+        <div style="background:white;border-radius:8px;padding:10px 16px;margin-bottom:16px;box-shadow:0 1px 3px rgba(0,0,0,0.06);display:flex;flex-wrap:wrap;gap:6px;align-items:center;">
+            <span style="font-size:0.72em;color:#888;font-weight:600;margin-right:6px;">REGIMEN:</span>
+            <span class="reg-FOLFOX" style="padding:2px 8px;border-radius:4px;font-size:0.68em;">FOLFOX</span>
+            <span class="reg-FOLFIRI" style="padding:2px 8px;border-radius:4px;font-size:0.68em;">FOLFIRI</span>
+            <span class="reg-CAPOX" style="padding:2px 8px;border-radius:4px;font-size:0.68em;">CAPOX</span>
+            <span class="reg-RCHOP" style="padding:2px 8px;border-radius:4px;font-size:0.68em;">R-CHOP</span>
+            <span class="reg-RITUX" style="padding:2px 8px;border-radius:4px;font-size:0.68em;">Rituximab</span>
+            <span class="reg-FECT" style="padding:2px 8px;border-radius:4px;font-size:0.68em;">FEC-T</span>
+            <span class="reg-DOCE" style="padding:2px 8px;border-radius:4px;font-size:0.68em;">Docetaxel</span>
+            <span class="reg-PACW" style="padding:2px 8px;border-radius:4px;font-size:0.68em;">Paclitaxel</span>
+            <span class="reg-AC" style="padding:2px 8px;border-radius:4px;font-size:0.68em;">AC</span>
+            <span class="reg-TRAS" style="padding:2px 8px;border-radius:4px;font-size:0.68em;">Trastuzumab</span>
+            <span class="reg-CARBPAC" style="padding:2px 8px;border-radius:4px;font-size:0.68em;">Carbo/Pac</span>
+            <span class="reg-PEME" style="padding:2px 8px;border-radius:4px;font-size:0.68em;">Peme/Carbo</span>
+            <span class="reg-CISE" style="padding:2px 8px;border-radius:4px;font-size:0.68em;">Cis/Etop</span>
+            <span class="reg-PEMBRO" style="padding:2px 8px;border-radius:4px;font-size:0.68em;">Pembrolizumab</span>
+            <span class="reg-NIVO" style="padding:2px 8px;border-radius:4px;font-size:0.68em;">Nivolumab</span>
+            <span class="reg-IPNIVO" style="padding:2px 8px;border-radius:4px;font-size:0.68em;">Ipi/Nivo</span>
+            <span class="reg-GEM" style="padding:2px 8px;border-radius:4px;font-size:0.68em;">Gemcitabine</span>
+            <span class="reg-BEVA" style="padding:2px 8px;border-radius:4px;font-size:0.68em;">Bevacizumab</span>
+            <span class="reg-ZOLE" style="padding:2px 8px;border-radius:4px;font-size:0.68em;">Zoledronic</span>
+            <span class="reg-VINO" style="padding:2px 8px;border-radius:4px;font-size:0.68em;">Vinorelbine</span>
+        </div>
+        <!-- Risk Legend -->
+        <div style="background:white;border-radius:8px;padding:8px 16px;margin-bottom:16px;box-shadow:0 1px 3px rgba(0,0,0,0.06);display:flex;gap:16px;align-items:center;">
+            <span style="font-size:0.72em;color:#888;font-weight:600;">NO-SHOW RISK:</span>
+            <span style="font-size:0.7em;display:flex;align-items:center;gap:4px;"><span style="width:14px;height:14px;border-radius:3px;border-left:3px solid #22c55e;background:#f0fdf4;display:inline-block;"></span> Low (&lt;10%)</span>
+            <span style="font-size:0.7em;display:flex;align-items:center;gap:4px;"><span style="width:14px;height:14px;border-radius:3px;border-left:3px solid #eab308;background:#fefce8;display:inline-block;"></span> Medium (10-25%)</span>
+            <span style="font-size:0.7em;display:flex;align-items:center;gap:4px;"><span style="width:14px;height:14px;border-radius:3px;border-left:3px solid #ef4444;background:#fef2f2;display:inline-block;"></span> High (25-40%)</span>
+            <span style="font-size:0.7em;display:flex;align-items:center;gap:4px;"><span style="width:14px;height:14px;border-radius:3px;border-left:3px solid #dc2626;background:repeating-linear-gradient(45deg,transparent,transparent 3px,rgba(220,38,38,0.1) 3px,rgba(220,38,38,0.1) 6px);display:inline-block;"></span> Very High (&gt;40%)</span>
+            <span style="font-size:0.7em;display:flex;align-items:center;gap:4px;"><span style="background:#e94560;color:white;border-radius:3px;padding:0 4px;font-size:0.85em;font-weight:700;">1:1</span> Requires 1:1 nursing</span>
+        </div>
+        <div class="schedule-container" id="gantt" style="max-height: 70vh; overflow-y: auto;">
+            <div class="loading"><i>&#8987;</i>Loading schedule from API...</div>
+        </div>
+    </div>
+
+    <!-- TAB: SQUEEZE-IN (Urgent Patient Insertion) -->
+    <div id="tab-squeeze" class="tab-content hidden">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;">
+            <!-- Add Urgent Patient Form -->
+            <div style="background:white;border-radius:10px;padding:20px;box-shadow:0 1px 3px rgba(0,0,0,0.08);">
+                <h3 style="font-size:0.95em;color:#1a1a2e;margin-bottom:14px;">Add Urgent Patient</h3>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;font-size:0.85em;">
+                    <div><label style="font-size:0.8em;color:#888;">Patient ID</label><input type="text" id="sq-pid" placeholder="P12345" style="width:100%;padding:6px;border:1px solid #d0d5dd;border-radius:5px;"></div>
+                    <div><label style="font-size:0.8em;color:#888;">Priority</label><select id="sq-priority" style="width:100%;padding:6px;border:1px solid #d0d5dd;border-radius:5px;"><option value="1">P1 - Critical</option><option value="2" selected>P2 - High</option><option value="3">P3 - Standard</option><option value="4">P4 - Routine</option></select></div>
+                    <div><label style="font-size:0.8em;color:#888;">Duration (min)</label><input type="number" id="sq-dur" value="90" min="15" max="480" style="width:100%;padding:6px;border:1px solid #d0d5dd;border-radius:5px;"></div>
+                    <div><label style="font-size:0.8em;color:#888;">Postcode</label><input type="text" id="sq-postcode" value="CF14" style="width:100%;padding:6px;border:1px solid #d0d5dd;border-radius:5px;"></div>
+                    <div><label style="font-size:0.8em;color:#888;">Previous No-Shows</label><input type="number" id="sq-noshows" value="0" min="0" style="width:100%;padding:6px;border:1px solid #d0d5dd;border-radius:5px;"></div>
+                    <div><label style="font-size:0.8em;color:#888;">Total Appointments</label><input type="number" id="sq-total" value="5" min="0" style="width:100%;padding:6px;border:1px solid #d0d5dd;border-radius:5px;"></div>
+                </div>
+                <div style="margin-top:12px;display:flex;gap:8px;align-items:center;">
+                    <label style="font-size:0.8em;"><input type="checkbox" id="sq-double" checked> Allow double-booking (high no-show slots)</label>
+                </div>
+                <div style="margin-top:12px;display:flex;gap:8px;align-items:center;">
+                    <label style="font-size:0.8em;"><input type="checkbox" id="sq-resched"> Allow rescheduling lower-priority patients</label>
+                </div>
+                <div style="margin-top:14px;display:flex;gap:8px;">
+                    <button onclick="previewSlots()" style="flex:1;padding:8px;background:#3b82f6;color:white;border:none;border-radius:5px;cursor:pointer;font-size:0.85em;">Preview Best Slots</button>
+                    <button onclick="insertUrgent()" style="flex:1;padding:8px;background:#ef4444;color:white;border:none;border-radius:5px;cursor:pointer;font-size:0.85em;">Insert Now</button>
+                </div>
+                <div id="sq-result" style="margin-top:12px;font-size:0.8em;color:#555;display:none;"></div>
+            </div>
+
+            <!-- High No-Show Slots -->
+            <div style="background:white;border-radius:10px;padding:20px;box-shadow:0 1px 3px rgba(0,0,0,0.08);">
+                <h3 style="font-size:0.95em;color:#1a1a2e;margin-bottom:14px;">High No-Show Slots (Double-Booking Candidates)</h3>
+                <p style="font-size:0.78em;color:#888;margin-bottom:12px;">These existing appointments have high predicted no-show probability. Safe to double-book an urgent patient alongside them.</p>
+                <div id="noshow-slots" style="max-height:400px;overflow-y:auto;font-size:0.82em;">Loading...</div>
+            </div>
+        </div>
+
+        <!-- Squeeze-In Stats -->
+        <div style="background:white;border-radius:10px;padding:16px 20px;margin-top:16px;box-shadow:0 1px 3px rgba(0,0,0,0.08);">
+            <div style="display:flex;gap:24px;align-items:center;font-size:0.82em;" id="sq-stats">Loading squeeze-in statistics...</div>
+        </div>
+    </div>
+
+    <!-- TAB: OPTIMIZE -->
+    <div id="tab-optimize" class="tab-content hidden">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;">
+            <!-- Run Optimization -->
+            <div style="background:white;border-radius:10px;padding:20px;box-shadow:0 1px 3px rgba(0,0,0,0.08);">
+                <h3 style="font-size:0.95em;color:#1a1a2e;margin-bottom:14px;">Run Schedule Optimization</h3>
+                <p style="font-size:0.78em;color:#888;margin-bottom:14px;">Uses OR-Tools CP-SAT solver to find the optimal assignment of patients to chairs, balancing 6 objectives with fairness constraints.</p>
+                <button onclick="runOptimize()" style="width:100%;padding:12px;background:#10b981;color:white;border:none;border-radius:8px;cursor:pointer;font-size:0.9em;font-weight:600;">Run Optimization</button>
+                <div id="opt-result" style="margin-top:14px;font-size:0.82em;color:#555;display:none;"></div>
+            </div>
+
+            <!-- Pareto Frontier -->
+            <div style="background:white;border-radius:10px;padding:20px;box-shadow:0 1px 3px rgba(0,0,0,0.08);">
+                <h3 style="font-size:0.95em;color:#1a1a2e;margin-bottom:14px;">Pareto Frontier (Multi-Objective Trade-offs)</h3>
+                <p style="font-size:0.78em;color:#888;margin-bottom:14px;">Generate 5 different schedules showing trade-offs between throughput, waiting time, risk, and robustness.</p>
+                <button onclick="runParetoFromTab()" style="width:100%;padding:12px;background:#8b5cf6;color:white;border:none;border-radius:8px;cursor:pointer;font-size:0.9em;font-weight:600;">Generate Pareto Frontier</button>
+                <div id="pareto-tab-result" style="margin-top:14px;font-size:0.82em;color:#555;display:none;"></div>
+            </div>
+        </div>
+
+        <!-- Fairness Audit -->
+        <div style="background:white;border-radius:10px;padding:20px;margin-top:16px;box-shadow:0 1px 3px rgba(0,0,0,0.08);">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
+                <h3 style="font-size:0.95em;color:#1a1a2e;margin:0;">Fairness Audit (Equality Act 2010)</h3>
+                <button onclick="runFairnessFromTab()" style="padding:6px 16px;background:#06b6d4;color:white;border:none;border-radius:5px;cursor:pointer;font-size:0.82em;">Run Full Audit</button>
+            </div>
+            <div id="fairness-tab-result" style="font-size:0.82em;color:#555;">Click "Run Full Audit" to check scheduling fairness across Age, Gender, and Distance groups.</div>
+        </div>
+    </div>
+
+    <!-- TAB: EVENTS (Weather, Traffic, News) -->
+    <div id="tab-events" class="tab-content hidden">
+        <div style="display:grid;grid-template-columns:2fr 1fr;gap:20px;">
+            <!-- Event Analysis -->
+            <div style="background:white;border-radius:10px;padding:20px;box-shadow:0 1px 3px rgba(0,0,0,0.08);">
+                <h3 style="font-size:0.95em;color:#1a1a2e;margin-bottom:14px;">Quick Event Impact Check</h3>
+                <p style="font-size:0.78em;color:#888;margin-bottom:10px;">Analyse how an event affects no-show rates using NLP sentiment analysis and distance-weighted impact.</p>
+                <div style="display:flex;gap:8px;margin-bottom:10px;">
+                    <input type="text" id="evt-text" placeholder="e.g., Heavy rain warning for Cardiff area" style="flex:1;padding:8px;border:1px solid #d0d5dd;border-radius:5px;font-size:0.85em;">
+                    <select id="evt-type" style="padding:8px;border:1px solid #d0d5dd;border-radius:5px;font-size:0.85em;">
+                        <option value="WEATHER">Weather</option>
+                        <option value="TRAFFIC">Traffic</option>
+                        <option value="SPORTS">Sports</option>
+                        <option value="OTHER">Other</option>
+                    </select>
+                    <button onclick="checkEvent()" style="padding:8px 16px;background:#f59e0b;color:white;border:none;border-radius:5px;cursor:pointer;font-size:0.85em;">Analyse</button>
+                </div>
+                <div id="evt-result" style="font-size:0.82em;color:#555;display:none;"></div>
+
+                <h3 style="font-size:0.95em;color:#1a1a2e;margin:20px 0 14px;">Active Events</h3>
+                <div id="active-events" style="font-size:0.82em;">Loading...</div>
+            </div>
+
+            <!-- System Status + Data Source Toggle -->
+            <div style="background:white;border-radius:10px;padding:20px;box-shadow:0 1px 3px rgba(0,0,0,0.08);">
+                <h3 style="font-size:0.95em;color:#1a1a2e;margin-bottom:14px;">System Status</h3>
+                <div id="sys-status" style="font-size:0.82em;">Loading...</div>
+
+                <h3 style="font-size:0.95em;color:#1a1a2e;margin:18px 0 10px;">Data Source Channel</h3>
+                <p style="font-size:0.75em;color:#888;margin-bottom:10px;">Switch between synthetic, real hospital, or NHS open data. Switching reloads all data and retrains models (~30s).</p>
+                <div style="display:flex;flex-direction:column;gap:6px;" id="data-channels">
+                    <label style="display:flex;align-items:center;gap:8px;padding:8px 12px;background:#f0fdf4;border-radius:6px;border:1px solid #d1fae5;cursor:pointer;font-size:0.82em;">
+                        <input type="radio" name="data-channel" value="synthetic" checked onchange="switchDataChannel('synthetic')">
+                        <div><strong>Channel 1: Synthetic Data</strong><br><span style="color:#888;">SACT v4.0 compliant, 250 patients, reproducible</span></div>
+                    </label>
+                    <label style="display:flex;align-items:center;gap:8px;padding:8px 12px;background:#f8fafc;border-radius:6px;border:1px solid #e2e8f0;cursor:pointer;font-size:0.82em;" id="ch-real-label">
+                        <input type="radio" name="data-channel" value="real" onchange="switchDataChannel('real')">
+                        <div><strong>Channel 2: Real Hospital Data</strong><br><span style="color:#888;" id="ch-real-status">Checking...</span></div>
+                    </label>
+                    <label style="display:flex;align-items:center;gap:8px;padding:8px 12px;background:#eff6ff;border-radius:6px;border:1px solid #bfdbfe;font-size:0.82em;">
+                        <input type="checkbox" checked disabled>
+                        <div><strong>Channel 3: NHS Open Data</strong> (always active)<br><span style="color:#888;">Auto-updates every 24h — CWT, SCMD, SACT metadata</span></div>
+                    </label>
+                </div>
+                <div id="channel-switch-result" style="margin-top:8px;font-size:0.78em;display:none;"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- TAB: APPOINTMENTS TABLE -->
+    <div id="tab-appointments" class="tab-content hidden">
+        <div class="controls">
+            <label>Search:</label>
+            <input type="text" id="appt-search" placeholder="Patient name or ID..." oninput="renderAppointments()">
+            <label>Regimen:</label>
+            <select id="appt-reg" onchange="renderAppointments()"><option value="">All</option></select>
+        </div>
+        <div style="overflow-x: auto; max-height: 70vh; overflow-y: auto;">
+            <table class="data-table" id="appt-table">
+                <thead><tr><th>ID</th><th>Date</th><th>Time</th><th>Patient</th><th>Site</th><th>Chair</th><th>Regimen</th><th>Cycle</th><th>Duration</th><th>Nurse</th><th>1:1</th><th>Risk</th></tr></thead>
+                <tbody id="appt-body"></tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- TAB: PATIENTS -->
+    <div id="tab-patients" class="tab-content hidden">
+        <div class="controls">
+            <label>Search:</label>
+            <input type="text" id="pt-search" placeholder="Name or NHS Number..." oninput="renderPatients()">
+        </div>
+        <div style="overflow-x: auto; max-height: 70vh; overflow-y: auto;">
+            <table class="data-table">
+                <thead><tr><th>NHS#</th><th>Name</th><th>Age</th><th>Regimen</th><th>Cycle</th><th>Priority</th><th>Performance</th><th>No-Show Rate</th><th>Travel</th></tr></thead>
+                <tbody id="pt-body"></tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- TAB: STAFF -->
+    <div id="tab-staff" class="tab-content hidden">
+        <div style="overflow-x: auto; max-height: 70vh; overflow-y: auto;">
+            <table class="data-table">
+                <thead><tr><th>ID</th><th>Name</th><th>Role</th><th>Band</th><th>Site</th><th>SACT Trained</th><th>1:1 Capable</th></tr></thead>
+                <tbody id="staff-body"></tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- TAB: ML MODELS -->
+    <div id="tab-ml" class="tab-content hidden">
+        <!-- Overview -->
+        <div style="background:white;border-radius:10px;padding:20px 24px;box-shadow:0 1px 3px rgba(0,0,0,0.08);margin-bottom:20px;">
+            <h2 style="font-size:1.1em;color:#1a1a2e;margin-bottom:8px;">Machine Learning Pipeline Overview</h2>
+            <p style="font-size:0.85em;color:#666;line-height:1.6;margin-bottom:12px;">
+                This system integrates <strong>12 ML models</strong> into a unified scheduling pipeline. Patient data flows through
+                feature engineering (22 raw fields &rarr; 92 features), then through prediction models that estimate no-show risk,
+                treatment duration, and intervention effectiveness. These predictions feed into a <strong>multi-objective OR-Tools CP-SAT
+                optimizer</strong> that balances 6 competing objectives to produce fair, efficient schedules.
+            </p>
+            <p style="font-size:0.8em;color:#888;line-height:1.5;">
+                All models are trained on SACT v4.0 compliant synthetic data (1,899 historical records) and recalibrate automatically
+                from NHS open data sources. The system is designed as an intelligent layer on top of existing NHS systems (ChemoCare/ChemoSchedule).
+            </p>
+        </div>
+
+        <!-- Model Cards Row 1: Prediction Models -->
+        <h3 style="font-size:0.9em;color:#888;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:12px;">Tier 1: Core Prediction Models</h3>
+        <div class="stats" id="ml-stats"></div>
+
+        <!-- Model Cards Row 2: Advanced Models -->
+        <h3 style="font-size:0.9em;color:#888;text-transform:uppercase;letter-spacing:0.05em;margin:20px 0 12px;">Tier 2: Advanced Statistical Models</h3>
+        <div class="stats" id="ml-advanced"></div>
+
+        <!-- Model Cards Row 3: Causal & Uncertainty -->
+        <h3 style="font-size:0.9em;color:#888;text-transform:uppercase;letter-spacing:0.05em;margin:20px 0 12px;">Tier 3: Causal Inference & Uncertainty</h3>
+        <div class="stats" id="ml-causal"></div>
+
+        <!-- Model Descriptions -->
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-top:20px;">
+            <!-- How the Pipeline Works -->
+            <div style="background:white;border-radius:10px;padding:20px 24px;box-shadow:0 1px 3px rgba(0,0,0,0.08);">
+                <h3 style="font-size:0.95em;margin-bottom:14px;color:#1a1a2e;">How the ML Pipeline Works</h3>
+                <div style="font-size:0.8em;color:#555;line-height:1.7;">
+                    <div style="margin-bottom:10px;padding:8px 12px;background:#f0f7ff;border-radius:6px;border-left:3px solid #3b82f6;">
+                        <strong>Step 1: Feature Engineering</strong><br>
+                        22 raw patient fields are transformed into 92 ML features including temporal patterns,
+                        geographic risk, behavioral history, and interaction terms (e.g., distance &times; weather).
+                    </div>
+                    <div style="margin-bottom:10px;padding:8px 12px;background:#f0fdf4;border-radius:6px;border-left:3px solid #22c55e;">
+                        <strong>Step 2: Ensemble Prediction</strong><br>
+                        Three base models (Random Forest + Gradient Boosting + XGBoost) are combined via stacking.
+                        A GRU sequence model captures patient attendance trajectories for those with 5+ appointments.
+                    </div>
+                    <div style="margin-bottom:10px;padding:8px 12px;background:#fef3c7;border-radius:6px;border-left:3px solid #f59e0b;">
+                        <strong>Step 3: Uncertainty Quantification</strong><br>
+                        Conformal Prediction provides guaranteed coverage intervals (P(Y&isin;C) &ge; 90%).
+                        MC Dropout decomposes uncertainty into epistemic (model) vs aleatoric (data noise).
+                    </div>
+                    <div style="padding:8px 12px;background:#fdf2f8;border-radius:6px;border-left:3px solid #ec4899;">
+                        <strong>Step 4: Multi-Objective Optimization</strong><br>
+                        OR-Tools CP-SAT solver maximizes a weighted objective across 6 goals: priority, utilization,
+                        no-show risk, waiting time, robustness, and travel distance. Fairness constraints ensure
+                        scheduling doesn't disadvantage patients by age, gender, or location.
+                    </div>
+                </div>
+            </div>
+
+            <!-- Optimization Weights -->
+            <div style="background:white;border-radius:10px;padding:20px 24px;box-shadow:0 1px 3px rgba(0,0,0,0.08);">
+                <h3 style="font-size:0.95em;margin-bottom:14px;color:#1a1a2e;">Multi-Objective Optimization Weights</h3>
+                <p style="font-size:0.78em;color:#888;margin-bottom:14px;">
+                    The scheduler balances 6 competing objectives. Weights can be adjusted to generate different
+                    trade-off solutions (Pareto frontier). The NHS 62-day target drives the waiting time weight.
+                </p>
+                <div id="weights-chart"></div>
+            </div>
+        </div>
+
+        <!-- Bottom Row: Model Details & NHS Pipeline -->
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-top:20px;">
+            <!-- Model Technical Details -->
+            <div style="background:white;border-radius:10px;padding:20px 24px;box-shadow:0 1px 3px rgba(0,0,0,0.08);">
+                <h3 style="font-size:0.95em;margin-bottom:14px;color:#1a1a2e;">Model Technical Details</h3>
+                <div style="font-size:0.78em;color:#555;line-height:1.6;" id="model-details">
+                    <table style="width:100%;border-collapse:collapse;">
+                        <tr style="border-bottom:1px solid #eee;"><td style="padding:6px 0;font-weight:600;">No-Show Ensemble</td><td>RF + GB + XGBoost stacking, AUC-ROC 0.82</td></tr>
+                        <tr style="border-bottom:1px solid #eee;"><td style="padding:6px 0;font-weight:600;">Duration Ensemble</td><td>Regression ensemble, MAE 11.3 min</td></tr>
+                        <tr style="border-bottom:1px solid #eee;"><td style="padding:6px 0;font-weight:600;">Sequence (GRU)</td><td>Patient attendance trajectories, 64 hidden units</td></tr>
+                        <tr style="border-bottom:1px solid #eee;"><td style="padding:6px 0;font-weight:600;">Survival (Cox PH)</td><td>h(t|X) = h&#8320;(t)&middot;exp(&beta;&#7511;X), hazard ratios</td></tr>
+                        <tr style="border-bottom:1px solid #eee;"><td style="padding:6px 0;font-weight:600;">Uplift (S+T Learner)</td><td>&tau;(x) = E[Y(1)-Y(0)|X=x], intervention targeting</td></tr>
+                        <tr style="border-bottom:1px solid #eee;"><td style="padding:6px 0;font-weight:600;">Multi-Task (PyTorch)</td><td>Joint no-show + duration, shared layers 128&rarr;64</td></tr>
+                        <tr style="border-bottom:1px solid #eee;"><td style="padding:6px 0;font-weight:600;">Quantile Forest</td><td>Distribution-free prediction intervals, 100 trees</td></tr>
+                        <tr style="border-bottom:1px solid #eee;"><td style="padding:6px 0;font-weight:600;">Hierarchical (PyMC)</td><td>y&#7522;&#11388; ~ N(&mu;+&alpha;&#7522;+X&beta;, &sigma;&sup2;), MCMC NUTS</td></tr>
+                        <tr style="border-bottom:1px solid #eee;"><td style="padding:6px 0;font-weight:600;">Causal DAG</td><td>11 nodes, 16 edges, do-calculus P(Y|do(X))</td></tr>
+                        <tr style="border-bottom:1px solid #eee;"><td style="padding:6px 0;font-weight:600;">IV (2SLS)</td><td>Weather&rarr;Traffic&rarr;NoShow, F-stat rule &gt;10</td></tr>
+                        <tr style="border-bottom:1px solid #eee;"><td style="padding:6px 0;font-weight:600;">DML</td><td>&theta;&#770; with cross-fitting, &radic;n-consistent</td></tr>
+                        <tr><td style="padding:6px 0;font-weight:600;">MC Dropout</td><td>Var[y] = E[Var[y|w]] + Var[E[y|w]], 100 passes</td></tr>
+                    </table>
+                </div>
+            </div>
+
+            <!-- NHS Data Pipeline -->
+            <div style="background:white;border-radius:10px;padding:20px 24px;box-shadow:0 1px 3px rgba(0,0,0,0.08);">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
+                <h3 style="font-size:0.95em;color:#1a1a2e;margin:0;">NHS Open Data & Auto-Learning Pipeline</h3>
+                <div style="display:flex;gap:8px;">
+                    <button onclick="checkNHSNow()" style="padding:5px 12px;background:#3b82f6;color:white;border:none;border-radius:5px;font-size:0.75em;cursor:pointer;">Check Now</button>
+                    <select id="recal-level" style="padding:4px 8px;border:1px solid #d0d5dd;border-radius:5px;font-size:0.75em;background:white;">
+                        <option value="0">Level 0 - Parameter Refresh</option>
+                        <option value="1" selected>Level 1 - Baseline Recalibration</option>
+                        <option value="2">Level 2 - Feature Weight Update</option>
+                        <option value="3">Level 3 - Full Model Retrain</option>
+                    </select>
+                    <button onclick="runRecalNow()" style="padding:5px 12px;background:#10b981;color:white;border:none;border-radius:5px;font-size:0.75em;cursor:pointer;">Run</button>
+                </div>
+                </div>
+                <p style="font-size:0.78em;color:#888;margin-bottom:14px;">
+                    <strong>Auto-update is active.</strong> Background scheduler checks NHS sources every 24 hours (first check 5 min after startup).
+                    When new data is found, drift detection runs automatically. If distribution shift is detected, models recalibrate at the appropriate level.
+                    8 datasets available now; SACT v4.0 collection commenced 1 April 2026 (rollout phase — first complete dataset August 2026).
+                </p>
+                <div id="auto-update-status" style="font-size:0.75em;color:#888;margin-bottom:10px;display:none;"></div>
+                <div id="nhs-status"></div>
+                <div style="margin-top:14px;padding:10px 14px;background:#f0fdf4;border-radius:6px;font-size:0.78em;color:#555;border-left:3px solid #22c55e;">
+                    <strong>Recalibration Levels:</strong><br>
+                    Level 0: Real-time parameter refresh (weather/traffic) &mdash; no downtime<br>
+                    Level 1: Monthly baseline recalibration (CWT data) &mdash; no downtime<br>
+                    Level 2: Quarterly feature weight update &mdash; &lt;1 min<br>
+                    Level 3: Full model retrain (on drift) &mdash; 2-5 min
+                </div>
+            </div>
+        </div>
+
+        <!-- Interactive ML Tools -->
+        <h3 style="font-size:0.9em;color:#888;text-transform:uppercase;letter-spacing:0.05em;margin:20px 0 12px;">Interactive ML Tools — Individual Patient Prediction</h3>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:20px;">
+            <!-- Patient Prediction Tool -->
+            <div style="background:white;border-radius:10px;padding:20px 24px;box-shadow:0 1px 3px rgba(0,0,0,0.08);">
+                <h3 style="font-size:0.95em;margin-bottom:10px;color:#1a1a2e;">Predict for Patient</h3>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:0.82em;">
+                    <div><label style="font-size:0.75em;color:#888;">Patient ID</label><input type="text" id="ml-pid" value="P93810" style="width:100%;padding:5px;border:1px solid #d0d5dd;border-radius:4px;"></div>
+                    <div><label style="font-size:0.75em;color:#888;">Age</label><input type="number" id="ml-age" value="65" style="width:100%;padding:5px;border:1px solid #d0d5dd;border-radius:4px;"></div>
+                    <div><label style="font-size:0.75em;color:#888;">Distance (km)</label><input type="number" id="ml-dist" value="20" style="width:100%;padding:5px;border:1px solid #d0d5dd;border-radius:4px;"></div>
+                    <div><label style="font-size:0.75em;color:#888;">No-Show Rate</label><input type="number" id="ml-rate" value="0.15" step="0.01" style="width:100%;padding:5px;border:1px solid #d0d5dd;border-radius:4px;"></div>
+                    <div><label style="font-size:0.75em;color:#888;">Duration (min)</label><input type="number" id="ml-dur2" value="180" style="width:100%;padding:5px;border:1px solid #d0d5dd;border-radius:4px;"></div>
+                    <div><label style="font-size:0.75em;color:#888;">Cycle</label><input type="number" id="ml-cycle" value="3" style="width:100%;padding:5px;border:1px solid #d0d5dd;border-radius:4px;"></div>
+                </div>
+                <div style="display:flex;gap:6px;margin-top:10px;flex-wrap:wrap;">
+                    <button onclick="runMultitask()" style="padding:5px 10px;background:#8b5cf6;color:white;border:none;border-radius:4px;cursor:pointer;font-size:0.75em;">Multi-Task</button>
+                    <button onclick="runConformal()" style="padding:5px 10px;background:#06b6d4;color:white;border:none;border-radius:4px;cursor:pointer;font-size:0.75em;">Conformal</button>
+                    <button onclick="runMCDropout()" style="padding:5px 10px;background:#8b5cf6;color:white;border:none;border-radius:4px;cursor:pointer;font-size:0.75em;">MC Dropout</button>
+                    <button onclick="runHierarchical()" style="padding:5px 10px;background:#10b981;color:white;border:none;border-radius:4px;cursor:pointer;font-size:0.75em;">Hierarchical</button>
+                    <button onclick="runSurvival()" style="padding:5px 10px;background:#3b82f6;color:white;border:none;border-radius:4px;cursor:pointer;font-size:0.75em;">Survival</button>
+                    <button onclick="runUplift()" style="padding:5px 10px;background:#f97316;color:white;border:none;border-radius:4px;cursor:pointer;font-size:0.75em;">Uplift</button>
+                    <button onclick="runQRF()" style="padding:5px 10px;background:#eab308;color:white;border:none;border-radius:4px;cursor:pointer;font-size:0.75em;">QRF</button>
+                    <button onclick="runDMLEstimate()" style="padding:5px 10px;background:#ec4899;color:white;border:none;border-radius:4px;cursor:pointer;font-size:0.75em;">DML</button>
+                    <button onclick="runQRFNoshow()" style="padding:5px 10px;background:#eab308;color:white;border:none;border-radius:4px;cursor:pointer;font-size:0.75em;">QRF No-Show</button>
+                    <button onclick="runUpliftImpact()" style="padding:5px 10px;background:#f97316;color:white;border:none;border-radius:4px;cursor:pointer;font-size:0.75em;">Uplift Impact</button>
+                    <button onclick="runAllModels()" style="padding:5px 10px;background:#1a1a2e;color:white;border:none;border-radius:4px;cursor:pointer;font-size:0.75em;font-weight:700;">Run ALL</button>
+                </div>
+                <div id="ml-predict-result" style="margin-top:10px;font-size:0.78em;max-height:300px;overflow-y:auto;"></div>
+            </div>
+
+            <!-- Causal Analysis Tools -->
+            <div style="background:white;border-radius:10px;padding:20px 24px;box-shadow:0 1px 3px rgba(0,0,0,0.08);">
+                <h3 style="font-size:0.95em;margin-bottom:10px;color:#1a1a2e;">Causal Analysis & Counterfactuals</h3>
+                <div style="display:flex;gap:6px;margin-bottom:10px;flex-wrap:wrap;">
+                    <button onclick="loadDAG()" style="padding:5px 10px;background:#f59e0b;color:white;border:none;border-radius:4px;cursor:pointer;font-size:0.75em;">Causal DAG</button>
+                    <button onclick="runIVDiag()" style="padding:5px 10px;background:#f59e0b;color:white;border:none;border-radius:4px;cursor:pointer;font-size:0.75em;">IV Diagnostics</button>
+                    <button onclick="runCounterfactual()" style="padding:5px 10px;background:#f59e0b;color:white;border:none;border-radius:4px;cursor:pointer;font-size:0.75em;">Counterfactual</button>
+                    <button onclick="runCFExplanation()" style="padding:5px 10px;background:#dc2626;color:white;border:none;border-radius:4px;cursor:pointer;font-size:0.75em;">CF Explanation</button>
+                    <button onclick="runCausalEffect()" style="padding:5px 10px;background:#f59e0b;color:white;border:none;border-radius:4px;cursor:pointer;font-size:0.75em;">Causal Effect</button>
+                    <button onclick="runOptimalTime()" style="padding:5px 10px;background:#f59e0b;color:white;border:none;border-radius:4px;cursor:pointer;font-size:0.75em;">Optimal Time</button>
+                    <button onclick="runDriftCheck()" style="padding:5px 10px;background:#ef4444;color:white;border:none;border-radius:4px;cursor:pointer;font-size:0.75em;">Drift Check</button>
+                    <button onclick="runIVEstimate()" style="padding:5px 10px;background:#f59e0b;color:white;border:none;border-radius:4px;cursor:pointer;font-size:0.75em;">IV Estimate</button>
+                    <button onclick="runInterventionCompare()" style="padding:5px 10px;background:#f59e0b;color:white;border:none;border-radius:4px;cursor:pointer;font-size:0.75em;">Compare Interventions</button>
+                    <button onclick="runDMLCompare()" style="padding:5px 10px;background:#ec4899;color:white;border:none;border-radius:4px;cursor:pointer;font-size:0.75em;">DML Compare</button>
+                    <button onclick="runHierVariance()" style="padding:5px 10px;background:#10b981;color:white;border:none;border-radius:4px;cursor:pointer;font-size:0.75em;">Variance Decomp</button>
+                    <button onclick="runConformalCalibrate()" style="padding:5px 10px;background:#06b6d4;color:white;border:none;border-radius:4px;cursor:pointer;font-size:0.75em;">Calibrate Conformal</button>
+                    <button onclick="loadValidation()" style="padding:5px 10px;background:#888;color:white;border:none;border-radius:4px;cursor:pointer;font-size:0.75em;">Validation</button>
+                    <button onclick="loadEnsembleConfig()" style="padding:5px 10px;background:#888;color:white;border:none;border-radius:4px;cursor:pointer;font-size:0.75em;">Ensemble Config</button>
+                    <button onclick="loadSequenceModel()" style="padding:5px 10px;background:#888;color:white;border:none;border-radius:4px;cursor:pointer;font-size:0.75em;">Sequence Model</button>
+                    <button onclick="loadOnlineLearning()" style="padding:5px 10px;background:#10b981;color:white;border:none;border-radius:4px;cursor:pointer;font-size:0.75em;">Online Learning</button>
+                    <button onclick="testOnlineUpdate()" style="padding:5px 10px;background:#3b82f6;color:white;border:none;border-radius:4px;cursor:pointer;font-size:0.75em;">Test SGD Update</button>
+                    <button onclick="loadRLAgent()" style="padding:5px 10px;background:#7c3aed;color:white;border:none;border-radius:4px;cursor:pointer;font-size:0.75em;">RL Agent</button>
+                    <button onclick="loadMARLAgent()" style="padding:5px 10px;background:#6d28d9;color:white;border:none;border-radius:4px;cursor:pointer;font-size:0.75em;">MARL Chairs</button>
+                    <button onclick="rlRecommend()" style="padding:5px 10px;background:#6d28d9;color:white;border:none;border-radius:4px;cursor:pointer;font-size:0.75em;">RL Recommend</button>
+                    <button onclick="loadRobustness()" style="padding:5px 10px;background:#059669;color:white;border:none;border-radius:4px;cursor:pointer;font-size:0.75em;">Robustness</button>
+                    <button onclick="runCausalValidation()" style="padding:5px 10px;background:#b91c1c;color:white;border:none;border-radius:4px;cursor:pointer;font-size:0.75em;">Causal Validation</button>
+                    <button onclick="runSensitivityLocal()" style="padding:5px 10px;background:#0e7490;color:white;border:none;border-radius:4px;cursor:pointer;font-size:0.75em;">Sensitivity (Local)</button>
+                    <button onclick="runSensitivityGlobal()" style="padding:5px 10px;background:#155e75;color:white;border:none;border-radius:4px;cursor:pointer;font-size:0.75em;">Sensitivity (Global)</button>
+                    <button onclick="runSensitivityFull()" style="padding:5px 10px;background:#164e63;color:white;border:none;border-radius:4px;cursor:pointer;font-size:0.75em;font-weight:700;">Full Sensitivity</button>
+                    <button onclick="runDROEvaluate()" style="padding:5px 10px;background:#7e22ce;color:white;border:none;border-radius:4px;cursor:pointer;font-size:0.75em;">DRO Evaluate</button>
+                    <button onclick="runDROCalibrate()" style="padding:5px 10px;background:#6b21a8;color:white;border:none;border-radius:4px;cursor:pointer;font-size:0.75em;">Calibrate Epsilon</button>
+                    <button onclick="runDROMetrics()" style="padding:5px 10px;background:#581c87;color:white;border:none;border-radius:4px;cursor:pointer;font-size:0.75em;font-weight:700;">Worst-Case Metrics</button>
+                    <button onclick="showModelCards()" style="padding:5px 10px;background:#4338ca;color:white;border:none;border-radius:4px;cursor:pointer;font-size:0.75em;font-weight:700;">Model Cards</button>
+                    <button onclick="showModelCard('noshow_ensemble')" style="padding:5px 10px;background:#5b21b6;color:white;border:none;border-radius:4px;cursor:pointer;font-size:0.75em;">NoShow Card</button>
+                </div>
+                <div id="causal-result" style="font-size:0.78em;max-height:300px;overflow-y:auto;"></div>
+            </div>
+        </div>
+
+        <!-- Sentiment Analysis & Event Impact Tools -->
+        <div style="background:white;border-radius:10px;padding:20px 24px;box-shadow:0 1px 3px rgba(0,0,0,0.08);margin-bottom:20px;">
+            <h3 style="font-size:0.95em;margin-bottom:10px;color:#1a1a2e;">Sentiment Analysis & Event Impact</h3>
+            <div style="display:grid;grid-template-columns:2fr 1fr;gap:12px;margin-bottom:10px;">
+                <div>
+                    <label style="font-size:0.75em;color:#888;">Event Description (NLP sentiment analysis)</label>
+                    <input type="text" id="ml-evt-text" placeholder="e.g., M4 motorway closed due to major accident near Cardiff" style="width:100%;padding:6px;border:1px solid #d0d5dd;border-radius:4px;font-size:0.85em;">
+                </div>
+                <div style="display:flex;gap:6px;align-items:flex-end;">
+                    <button onclick="runSentiment()" style="padding:6px 12px;background:#f59e0b;color:white;border:none;border-radius:4px;cursor:pointer;font-size:0.8em;">Analyse Sentiment</button>
+                    <button onclick="runFullImpact()" style="padding:6px 12px;background:#ef4444;color:white;border:none;border-radius:4px;cursor:pointer;font-size:0.8em;">Full Impact</button>
+                </div>
+            </div>
+            <div id="sentiment-result" style="font-size:0.78em;"></div>
+        </div>
+
+        <!-- Fairness -->
+        <div style="background:white;border-radius:10px;padding:20px 24px;box-shadow:0 1px 3px rgba(0,0,0,0.08);margin-top:20px;">
+            <h3 style="font-size:0.95em;margin-bottom:10px;color:#1a1a2e;">Fairness Constraints (Equality Act 2010)</h3>
+            <p style="font-size:0.78em;color:#888;margin-bottom:14px;">
+                The optimizer enforces scheduling fairness across protected characteristics.
+                Demographic Parity ensures equal scheduling rates across age, gender, and distance groups.
+                The Disparate Impact Ratio (Four-Fifths Rule) guarantees no group is scheduled at less than 80% the rate of any other.
+                Equal Opportunity ensures that among patients who would attend, scheduling rates are equal regardless of group.
+            </p>
+            <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;" id="fairness-info">
+                <div style="padding:12px;background:#f8fafc;border-radius:6px;text-align:center;">
+                    <div style="font-size:0.7em;color:#888;text-transform:uppercase;">Demographic Parity</div>
+                    <div style="font-size:1.1em;font-weight:700;color:#1a1a2e;margin:4px 0;" id="f-dp2">--</div>
+                    <div style="font-size:0.7em;color:#888;">|P(sched|A) - P(sched|B)| &lt; 0.15</div>
+                </div>
+                <div style="padding:12px;background:#f8fafc;border-radius:6px;text-align:center;">
+                    <div style="font-size:0.7em;color:#888;text-transform:uppercase;">Disparate Impact</div>
+                    <div style="font-size:1.1em;font-weight:700;color:#1a1a2e;margin:4px 0;" id="f-di2">--</div>
+                    <div style="font-size:0.7em;color:#888;">P(sched|min)/P(sched|maj) &ge; 0.80</div>
+                </div>
+                <div style="padding:12px;background:#f8fafc;border-radius:6px;text-align:center;">
+                    <div style="font-size:0.7em;color:#888;text-transform:uppercase;">Protected Attributes</div>
+                    <div style="font-size:1.1em;font-weight:700;color:#1a1a2e;margin:4px 0;">3</div>
+                    <div style="font-size:0.7em;color:#888;">Age, Gender, Distance</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- TAB: IRL PREFERENCES (Dissertation §1.4) -->
+    <div id="tab-irl" class="tab-content hidden">
+        <div style="background:white;border-radius:10px;padding:20px 24px;box-shadow:0 1px 3px rgba(0,0,0,0.08);margin-bottom:16px;">
+            <h2 style="font-size:1.1em;color:#1a1a2e;margin-bottom:6px;">Inverse RL &mdash; Learned Pareto Preferences</h2>
+            <p style="font-size:0.82em;color:#666;line-height:1.55;">
+                Instead of fixed weights, the system learns clinician preferences from past manual overrides of optimiser-proposed schedules.
+                Under a pairwise-softmax choice model
+                <span style="font-family:Consolas,monospace;color:#1a1a2e;">&theta;* = argmax &Sigma; log &sigma;(&theta;&middot;(Z<sub>manual</sub> &minus; Z<sub>proposed</sub>))</span>
+                with &theta; &ge; 0, the weight vector that best explains observed overrides is recovered and written back into the CP-SAT objective.
+            </p>
+        </div>
+
+        <div style="display:grid;grid-template-columns:2fr 1fr;gap:16px;margin-bottom:16px;">
+            <div style="background:white;border-radius:10px;padding:20px;box-shadow:0 1px 3px rgba(0,0,0,0.08);">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+                    <h3 style="font-size:0.95em;color:#1a1a2e;margin:0;">Learned vs Prior Weights</h3>
+                    <div>
+                        <button onclick="irlRefit(false)" style="padding:6px 14px;background:#6366f1;color:white;border:none;border-radius:5px;cursor:pointer;font-size:0.82em;">Refit &theta;</button>
+                        <button onclick="irlRefit(true)" style="padding:6px 14px;background:#10b981;color:white;border:none;border-radius:5px;cursor:pointer;font-size:0.82em;margin-left:4px;">Refit &amp; Apply</button>
+                        <button onclick="irlApply()" style="padding:6px 14px;background:#8b5cf6;color:white;border:none;border-radius:5px;cursor:pointer;font-size:0.82em;margin-left:4px;">Apply Learned</button>
+                        <button onclick="irlReset()" style="padding:6px 14px;background:#ef4444;color:white;border:none;border-radius:5px;cursor:pointer;font-size:0.82em;margin-left:4px;">Reset to Prior</button>
+                    </div>
+                </div>
+                <table class="data-table" style="width:100%;font-size:0.82em;" id="irl-weights-table">
+                    <thead>
+                        <tr><th>Objective</th><th>Prior (fixed)</th><th>Learned &theta;</th><th>&Delta;</th><th>Bar</th></tr>
+                    </thead>
+                    <tbody id="irl-weights-body"><tr><td colspan="5" style="padding:12px;color:#888;">No fit yet &mdash; click "Refit &theta;" to train on the override log.</td></tr></tbody>
+                </table>
+            </div>
+            <div style="background:white;border-radius:10px;padding:20px;box-shadow:0 1px 3px rgba(0,0,0,0.08);">
+                <h3 style="font-size:0.95em;color:#1a1a2e;margin-bottom:12px;">Fit Diagnostics</h3>
+                <div id="irl-diag" style="font-size:0.82em;color:#555;line-height:1.8;">Waiting for first fit&hellip;</div>
+            </div>
+        </div>
+
+        <div style="background:white;border-radius:10px;padding:20px;box-shadow:0 1px 3px rgba(0,0,0,0.08);margin-bottom:16px;">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+                <h3 style="font-size:0.95em;color:#1a1a2e;margin:0;">Log a Manual Override</h3>
+                <span style="font-size:0.75em;color:#888;">Enter the Z feature vectors; 6 values each: priority, utilisation, noshow_risk, waiting_time, robustness, travel</span>
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr auto auto;gap:10px;align-items:end;">
+                <div>
+                    <label style="font-size:0.75em;color:#888;">Z proposed (comma-separated)</label>
+                    <input type="text" id="irl-z-prop" placeholder="e.g., 1200,-340,-80,90,-2,-5" style="width:100%;padding:8px;border:1px solid #d0d5dd;border-radius:5px;font-size:0.82em;">
+                </div>
+                <div>
+                    <label style="font-size:0.75em;color:#888;">Z manual (comma-separated)</label>
+                    <input type="text" id="irl-z-man" placeholder="e.g., 1300,-360,-70,105,-2,-4" style="width:100%;padding:8px;border:1px solid #d0d5dd;border-radius:5px;font-size:0.82em;">
+                </div>
+                <div>
+                    <label style="font-size:0.75em;color:#888;">Reason</label>
+                    <input type="text" id="irl-reason" placeholder="travel / patient ask / ..." style="padding:8px;border:1px solid #d0d5dd;border-radius:5px;font-size:0.82em;">
+                </div>
+                <button onclick="irlLog()" style="padding:10px 16px;background:#06b6d4;color:white;border:none;border-radius:5px;cursor:pointer;font-size:0.85em;">Log Override</button>
+            </div>
+            <div id="irl-log-result" style="margin-top:10px;font-size:0.8em;color:#555;"></div>
+        </div>
+
+        <div style="background:white;border-radius:10px;padding:20px;box-shadow:0 1px 3px rgba(0,0,0,0.08);">
+            <h3 style="font-size:0.95em;color:#1a1a2e;margin-bottom:12px;">Recent Overrides</h3>
+            <div id="irl-overrides-list" style="font-size:0.8em;color:#555;max-height:320px;overflow-y:auto;">Loading&hellip;</div>
+        </div>
+    </div>
+</div>
+
+<div class="tooltip" id="tooltip"></div>
+
+<script>
+// ================================================================
+// DATA STORES (fetched from Flask API)
+// ================================================================
+let appointments = [];
+let patients = [];
+let staff = [];
+let sites = [];
+let regimens = [];
+let mlPredictions = {};
+
+// ================================================================
+// INITIALIZATION
+// ================================================================
+document.querySelectorAll('.tab').forEach(tab => {
+    tab.addEventListener('click', () => {
+        document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+        document.querySelectorAll('.tab-content').forEach(c => c.classList.add('hidden'));
+        tab.classList.add('active');
+        document.getElementById('tab-' + tab.dataset.tab).classList.remove('hidden');
+        if (tab.dataset.tab === 'ml') loadMLTab();
+        if (tab.dataset.tab === 'squeeze') loadSqueezeTab();
+        if (tab.dataset.tab === 'events') { loadEventsTab(); loadDataChannelStatus(); }
+        if (tab.dataset.tab === 'irl') loadIRLTab();
+    });
+});
+
+// ================================================================
+// IRL PREFERENCES TAB (Dissertation §1.4)
+// ================================================================
+const IRL_OBJ_KEYS = ['priority','utilization','noshow_risk','waiting_time','robustness','travel'];
+
+async function loadIRLTab() {
+    try {
+        const s = await fetch('/api/irl/status').then(r => r.json());
+        irlRenderStatus(s);
+        const ov = await fetch('/api/irl/overrides?limit=30').then(r => r.json());
+        irlRenderOverrides(ov);
+    } catch (e) {
+        document.getElementById('irl-diag').innerHTML = '<span style="color:#b91c1c;">Error loading IRL status: ' + e + '</span>';
+    }
+}
+
+function irlRenderStatus(s) {
+    const tbody = document.getElementById('irl-weights-body');
+    const prior = s.prior_weights || {};
+    const learned = s.learned_weights;
+    if (!learned) {
+        tbody.innerHTML = '<tr><td colspan="5" style="padding:12px;color:#888;">No fit yet — click "Refit θ" to train on the override log.</td></tr>';
+    } else {
+        const rows = IRL_OBJ_KEYS.map(k => {
+            const p = +(prior[k] || 0), l = +(learned[k] || 0);
+            const delta = l - p;
+            const dstyle = Math.abs(delta) < 0.005 ? 'color:#888;' : (delta > 0 ? 'color:#10b981;' : 'color:#ef4444;');
+            const barPct = Math.min(100, l * 200);
+            return `<tr>
+                <td style="text-transform:capitalize;">${k.replace('_',' ')}</td>
+                <td>${p.toFixed(3)}</td>
+                <td style="font-weight:600;">${l.toFixed(3)}</td>
+                <td style="${dstyle}">${delta >= 0 ? '+' : ''}${delta.toFixed(3)}</td>
+                <td><div style="width:100%;background:#eef2ff;border-radius:3px;height:10px;"><div style="width:${barPct}%;background:#6366f1;height:10px;border-radius:3px;"></div></div></td>
+            </tr>`;
+        }).join('');
+        tbody.innerHTML = rows;
+    }
+    const diag = document.getElementById('irl-diag');
+    const fit = s.last_fit;
+    const chMix = s.overrides_by_channel || {};
+    const chMixStr = Object.keys(chMix).length
+        ? Object.entries(chMix).map(([k,v]) => `${k}:${v}`).join(' · ')
+        : '—';
+    const channelBadge = (mode) => {
+        if (mode === 'real_only')
+            return '<span style="background:#dcfce7;color:#166534;padding:2px 8px;border-radius:4px;font-size:0.78em;">real overrides only</span>';
+        if (mode === 'mixed')
+            return '<span style="background:#fef3c7;color:#92400e;padding:2px 8px;border-radius:4px;font-size:0.78em;">mixed (real + synthetic)</span>';
+        return '<span style="background:#e0e7ff;color:#3730a3;padding:2px 8px;border-radius:4px;font-size:0.78em;">synthetic bootstrap</span>';
+    };
+    if (!fit) {
+        diag.innerHTML =
+            '<div>Active data channel: <b>' + (s.active_data_channel || 'synthetic') + '</b></div>' +
+            '<div>N overrides: <b>' + (s.n_overrides_total || 0) + '</b> (real: ' + (s.n_overrides_real || 0) + ', synthetic: ' + (s.n_overrides_synthetic || 0) + ')</div>' +
+            '<div>By channel: <span style="font-family:Consolas,monospace;">' + chMixStr + '</span></div>' +
+            '<div style="color:#888;margin-top:6px;">No fit yet — click "Refit θ".</div>';
+    } else {
+        const act = s.active_optimizer_weights || {};
+        const applied = IRL_OBJ_KEYS.every(k => Math.abs((act[k]||0)-(fit.theta_weights[k]||0))<1e-4);
+        diag.innerHTML =
+            '<div>Training mode: ' + channelBadge(fit.training_mode) + '</div>' +
+            '<div>Active data channel: <b>' + (s.active_data_channel || 'synthetic') + '</b></div>' +
+            '<div>Training samples: <b>' + fit.n_samples + '</b> (real ' + fit.n_real + ' / synth ' + fit.n_synthetic + ')</div>' +
+            '<div>Log-likelihood: <b>' + (+fit.log_likelihood).toFixed(2) + '</b></div>' +
+            '<div>Mean agreement: <b>' + (100*fit.mean_agreement).toFixed(1) + '%</b></div>' +
+            '<div>Converged: <b style="color:' + (fit.converged?'#10b981':'#ef4444') + ';">' + (fit.converged?'yes':'no') + '</b></div>' +
+            '<div>L2 λ: <b>' + (+fit.l2_lambda).toFixed(3) + '</b></div>' +
+            '<div>Log by channel: <span style="font-family:Consolas,monospace;">' + chMixStr + '</span></div>' +
+            '<div>Last fit: <span style="color:#888;">' + fit.fit_ts + '</span></div>' +
+            '<div style="margin-top:10px;padding:8px;background:' + (applied ? '#ecfdf5' : '#fef3c7') + ';border-radius:5px;">' +
+            'Optimiser weights in use: <b>' + (applied ? 'learned θ' : 'prior (fixed)') + '</b></div>';
+    }
+}
+
+function irlRenderOverrides(payload) {
+    const box = document.getElementById('irl-overrides-list');
+    const ov = payload.overrides || [];
+    if (ov.length === 0) { box.innerHTML = '<span style="color:#888;">No overrides logged yet.</span>'; return; }
+    box.innerHTML = '<div style="color:#888;margin-bottom:8px;">Showing ' + payload.returned + ' of ' + payload.count + '</div>' +
+        ov.map(r => {
+            const dz = r.z_manual.map((m,i) => (m - r.z_proposed[i]).toFixed(1)).join(', ');
+            const badge = r.source === 'real'
+                ? '<span style="background:#dcfce7;color:#166534;padding:2px 6px;border-radius:4px;font-size:0.72em;">real</span>'
+                : '<span style="background:#f3f4f6;color:#555;padding:2px 6px;border-radius:4px;font-size:0.72em;">synthetic</span>';
+            return '<div style="padding:8px 0;border-bottom:1px solid #f0f0f0;">' + badge +
+                ' <span style="color:#888;">' + r.ts + '</span>' +
+                (r.site_code ? ' · ' + r.site_code : '') +
+                (r.reason ? ' · ' + r.reason : '') +
+                '<br><span style="font-family:Consolas,monospace;color:#555;font-size:0.85em;">ΔZ = [' + dz + ']</span></div>';
+        }).join('');
+}
+
+async function irlRefit(applyAfter) {
+    document.getElementById('irl-diag').innerHTML = '<span style="color:#6366f1;">Fitting θ…</span>';
+    try {
+        const res = await fetch('/api/irl/train', {
+            method: 'POST', headers: {'Content-Type':'application/json'},
+            body: JSON.stringify({ bootstrap_if_empty: true, apply_to_optimizer: !!applyAfter })
+        }).then(r => r.json());
+        if (res.error) throw new Error(res.error);
+        await loadIRLTab();
+    } catch (e) {
+        document.getElementById('irl-diag').innerHTML = '<span style="color:#b91c1c;">Fit failed: ' + e.message + '</span>';
+    }
+}
+
+async function irlApply() {
+    const res = await fetch('/api/irl/apply', {method:'POST'}).then(r => r.json());
+    if (res.error) { alert(res.error); return; }
+    await loadIRLTab();
+}
+
+async function irlReset() {
+    await fetch('/api/irl/reset', {method:'POST'}).then(r => r.json());
+    await loadIRLTab();
+}
+
+async function irlLog() {
+    const zp = document.getElementById('irl-z-prop').value.split(',').map(s => parseFloat(s.trim()));
+    const zm = document.getElementById('irl-z-man').value.split(',').map(s => parseFloat(s.trim()));
+    const reason = document.getElementById('irl-reason').value.trim();
+    const out = document.getElementById('irl-log-result');
+    if (zp.length !== 6 || zm.length !== 6 || zp.concat(zm).some(x => !isFinite(x))) {
+        out.innerHTML = '<span style="color:#b91c1c;">Enter exactly 6 numeric values in each field.</span>';
+        return;
+    }
+    try {
+        const res = await fetch('/api/irl/log_override', {
+            method: 'POST', headers: {'Content-Type':'application/json'},
+            body: JSON.stringify({ z_proposed: zp, z_manual: zm, reason: reason || null })
+        }).then(r => r.json());
+        if (res.error) throw new Error(res.error);
+        out.innerHTML = '<span style="color:#10b981;">Override logged at ' + res.record.ts + '.</span>';
+        await loadIRLTab();
+    } catch (e) {
+        out.innerHTML = '<span style="color:#b91c1c;">Log failed: ' + e.message + '</span>';
+    }
+}
+
+// Load all data from APIs
+async function init() {
+    try {
+        const [schedRes, ptRes, siteRes, regRes, staffRes, predRes] = await Promise.all([
+            fetch('/api/schedule/full').then(r => r.json()),
+            fetch('/api/patients/list').then(r => r.json()),
+            fetch('/api/sites').then(r => r.json()),
+            fetch('/api/regimens').then(r => r.json()),
+            fetch('/api/staff').then(r => r.json()),
+            fetch('/api/ml/predictions').then(r => r.json()).catch(() => ({}))
+        ]);
+
+        // Normalize: appointments use exact Excel column names (Title_Case)
+        appointments = (schedRes.schedule || []).map(a => ({
+            id: a.Appointment_ID || '',
+            pid: a.Patient_ID || '',
+            name: a.Patient_Name || '',
+            nhs: a.NHS_Number || '',
+            date: a.Date || '',
+            start: a.Start_Time || '',
+            end: a.End_Time || '',
+            dur: a.Duration_Minutes || 60,
+            site: a.Site_Code || '',
+            siteName: a.Site_Name || '',
+            chair: a.Chair_Number || 1,
+            chairId: a.Chair_ID || '',
+            reg: a.Regimen_Code || '',
+            regName: a.Regimen_Name || '',
+            cancer: a.Cancer_Type || '',
+            cycle: a.Cycle_Number || 1,
+            totalCycles: a.Total_Cycles || 1,
+            dayInCycle: a.Day_In_Cycle || 1,
+            priority: a.Priority || 'P3',
+            bed: a.Requires_Bed || false,
+            oneToOne: a.Requires_1to1_Nursing || false,
+            nurse: a.Nurse_Name || '',
+            nurseId: a.Nurse_ID || '',
+            status: a.Status || 'Scheduled',
+            noshow: a.noshow_probability || a.ML_NoShow_Probability || 0,
+            risk: a.risk_level || 'unknown',
+            ps: a.Performance_Status || 0,
+        }));
+
+        patients = ptRes.patients || [];
+        sites = (siteRes.sites || []).map(s => ({
+            code: s.Site_Code || '',
+            name: s.Site_Name || '',
+            chairs: s.Chairs || 10,
+            beds: s.Beds || 0,
+            hours: s.Operating_Hours || '08:00-18:00',
+        }));
+        regimens = regRes.regimens || [];
+        staff = staffRes.staff || [];
+
+        // Build prediction map from API response
+        if (predRes.noshow_predictions) {
+            predRes.noshow_predictions.forEach(p => {
+                mlPredictions[p.patient_id] = p;
+            });
+        }
+        // Also use inline predictions from schedule data
+        appointments.forEach(a => {
+            if (a.noshow > 0 && !mlPredictions[a.pid]) {
+                mlPredictions[a.pid] = { probability: a.noshow, risk_level: a.risk, patient_id: a.pid };
+            }
+        });
+
+        // Populate site dropdown
+        const sel = document.getElementById('site-select');
+        sites.forEach(s => {
+            const opt = document.createElement('option');
+            opt.value = s.code;
+            opt.textContent = s.name + ' (' + s.chairs + ' chairs)';
+            sel.appendChild(opt);
+        });
+
+        // Populate regimen filter
+        const regSel = document.getElementById('appt-reg');
+        const regCodes = [...new Set(appointments.map(a => a.reg))].sort();
+        regCodes.forEach(r => {
+            if (!r) return;
+            const opt = document.createElement('option');
+            opt.value = r;
+            opt.textContent = r;
+            regSel.appendChild(opt);
+        });
+
+        sel.addEventListener('change', renderSchedule);
+
+        // Populate date picker with available dates
+        const dates = [...new Set(appointments.map(a => a.date))].sort();
+        const datePicker = document.getElementById('date-select');
+        if (dates.length > 0) {
+            // Find first weekday date
+            const firstDate = dates.find(d => { const day = new Date(d).getDay(); return day > 0 && day < 6; }) || dates[0];
+            datePicker.value = firstDate;
+            datePicker.min = dates[0];
+            datePicker.max = dates[dates.length - 1];
+        }
+        datePicker.addEventListener('change', renderSchedule);
+
+        renderSchedule();
+        renderAppointments();
+        renderPatients();
+        renderStaff();
+
+        console.log('Viewer loaded:', appointments.length, 'appointments across', dates.length, 'dates,', patients.length, 'patients,', sites.length, 'sites');
+
+        // Auto-load system status, alerts, metrics
+        loadSystemData();
+    } catch (e) {
+        console.error('Init error:', e);
+        document.getElementById('gantt').innerHTML = '<div class="loading" style="color:#ef4444;">Failed to load: ' + e.message + '<br>Check browser console (F12)</div>';
+    }
+}
+
+// ================================================================
+// SCHEDULE (Gantt Chart)
+// ================================================================
+function timeToMin(t) { if (!t) return 0; const [h,m] = t.split(':').map(Number); return h*60+(m||0); }
+function minToTime(m) { return String(Math.floor(m/60)).padStart(2,'0') + ':' + String(m%60).padStart(2,'0'); }
+
+function renderSchedule() {
+    const siteId = document.getElementById('site-select').value;
+    const selectedDate = document.getElementById('date-select').value;
+    const site = sites.find(s => s.code === siteId) || sites[0] || {};
+    const nChairs = site.chairs || 10;
+    const openStr = (site.hours || '08:00-18:00').split('-')[0];
+    const closeStr = (site.hours || '08:00-18:00').split('-')[1];
+    const openMin = timeToMin(openStr);
+    const closeMin = timeToMin(closeStr);
+
+    // Filter by BOTH date AND site
+    let siteAppts = appointments;
+    if (selectedDate) siteAppts = siteAppts.filter(a => a.date === selectedDate);
+    if (siteId) siteAppts = siteAppts.filter(a => a.site === siteId);
+
+    const total = siteAppts.length;
+    const totalMin = siteAppts.reduce((s,a) => s + a.dur, 0);
+    const capacity = nChairs * (closeMin - openMin);
+    const util = capacity > 0 ? Math.round(totalMin / capacity * 100) : 0;
+    const oneToOne = siteAppts.filter(a => a.oneToOne).length;
+
+    const dateLabel = selectedDate ? new Date(selectedDate + 'T00:00:00').toLocaleDateString('en-GB', {weekday:'long', day:'numeric', month:'long', year:'numeric'}) : 'All dates';
+    document.getElementById('day-label').textContent = dateLabel + ' | ' + site.name + ' - ' + total + ' appointments';
+
+    document.getElementById('schedule-stats').innerHTML = `
+        <div class="stat-card"><div class="label">Scheduled</div><div class="value">${total}</div></div>
+        <div class="stat-card"><div class="label">Chair Utilisation</div><div class="value">${util}%</div>
+            <div style="margin-top:6px"><div class="util-bar-bg"><div class="util-bar ${util>85?'high':util>70?'medium':''}" style="width:${Math.min(util,100)}%"></div></div></div>
+        </div>
+        <div class="stat-card"><div class="label">1:1 Nursing</div><div class="value">${oneToOne}</div></div>
+        <div class="stat-card"><div class="label">Chairs</div><div class="value">${nChairs}</div><div class="detail">${openStr} - ${closeStr}</div></div>
+    `;
+
+    const pxPerMin = 1.8;
+    const tlWidth = (closeMin - openMin) * pxPerMin;
+
+    let html = '<div class="time-header" style="padding-left:100px;">';
+    for (let m = openMin; m < closeMin; m += 60) {
+        html += `<div class="time-label" style="width:${60*pxPerMin}px">${minToTime(m)}</div>`;
+    }
+    html += '</div>';
+
+    // Find max chair number used in this day/site's data
+    const maxChair = siteAppts.length > 0 ? Math.max(...siteAppts.map(a => a.chair)) : nChairs;
+    const totalPositions = Math.max(nChairs, maxChair);
+
+    for (let ch = 1; ch <= totalPositions; ch++) {
+        const chairAppts = siteAppts.filter(a => a.chair === ch);
+        if (chairAppts.length === 0 && ch > nChairs) continue; // Skip empty bed rows
+
+        const label = ch > nChairs ? `Bed ${ch - nChairs}` : `Chair ${ch}`;
+        html += '<div class="chair-row">';
+        html += `<div class="chair-label">${label}</div>`;
+        html += `<div class="chair-timeline" style="width:${tlWidth}px">`;
+
+        for (let m = openMin; m < closeMin; m += 60) {
+            html += `<div style="position:absolute;left:${(m-openMin)*pxPerMin}px;top:0;bottom:0;width:1px;background:#f0f0f0;"></div>`;
+        }
+
+        chairAppts.forEach(a => {
+            const left = (timeToMin(a.start) - openMin) * pxPerMin;
+            const width = Math.max(a.dur * pxPerMin, 130);  // Minimum 130px so names are readable
+
+            // ML risk class
+            const prob = a.noshow || (mlPredictions[a.pid] ? mlPredictions[a.pid].probability : 0) || 0;
+            const riskClass = prob >= 0.4 ? 'risk-very-high' : prob >= 0.25 ? 'risk-high' : prob >= 0.1 ? 'risk-medium' : prob > 0 ? 'risk-low' : '';
+
+            const dataStr = JSON.stringify(a).replace(/'/g, "&#39;").replace(/"/g, "&quot;");
+
+            html += `<div class="appt-block reg-${a.reg} ${riskClass}"
+                style="left:${left}px; width:${Math.max(width-2, 20)}px;"
+                data-appt="${dataStr}"
+                onmouseenter="showTooltip(event, this)" onmouseleave="hideTooltip()">
+                ${a.oneToOne ? '<span class="one-to-one">1:1</span>' : ''}
+                ${a.name.split(' ').pop()} &middot; ${a.reg} &middot; ${a.dur}m
+            </div>`;
+        });
+
+        html += '</div></div>';
+    }
+
+    document.getElementById('gantt').innerHTML = html || '<div class="loading">No appointments for this site</div>';
+}
+
+function showTooltip(e, el) {
+    const a = JSON.parse(el.dataset.appt.replace(/&quot;/g, '"').replace(/&#39;/g, "'"));
+    const pred = mlPredictions[a.pid];
+    const prob = a.noshow || (pred ? pred.probability : 0) || 0;
+    const riskColor = prob >= 0.3 ? '#ef4444' : prob >= 0.15 ? '#f59e0b' : '#22c55e';
+
+    let mlInfo = '';
+    if (prob > 0) {
+        mlInfo = `<div style="margin-top:8px;padding-top:8px;border-top:1px solid rgba(255,255,255,0.1);">
+            <div><span class="tt-label">No-Show Risk:</span> <span style="color:${riskColor};font-weight:700;">${(prob * 100).toFixed(1)}%</span> (${a.risk || 'unknown'})</div>
+            ${pred && pred.top_factors ? '<div><span class="tt-label">Factors:</span> ' + pred.top_factors.slice(0,3).map(f=>f[0]).join(', ') + '</div>' : ''}
+        </div>`;
+    }
+
+    document.getElementById('tooltip').innerHTML = `
+        <div><strong>${a.name}</strong> (${a.pid})</div>
+        <div><span class="tt-label">Regimen:</span> ${a.regName} (${a.cancer})</div>
+        <div><span class="tt-label">Cycle:</span> ${a.cycle}/${a.totalCycles}, Day ${a.dayInCycle}</div>
+        <div><span class="tt-label">Time:</span> ${a.start} - ${a.end} (${a.dur} min)</div>
+        <div><span class="tt-label">Chair:</span> ${a.chair} at ${a.siteName}</div>
+        <div><span class="tt-label">Nurse:</span> ${a.nurse || 'Unassigned'}</div>
+        <div><span class="tt-label">Priority:</span> ${a.priority} | PS ${a.ps}</div>
+        ${mlInfo}
+    `;
+    const tt = document.getElementById('tooltip');
+    tt.style.display = 'block';
+    tt.style.left = Math.min(e.clientX + 12, window.innerWidth - 380) + 'px';
+    tt.style.top = Math.min(e.clientY + 12, window.innerHeight - 250) + 'px';
+}
+function hideTooltip() { document.getElementById('tooltip').style.display = 'none'; }
+
+// ================================================================
+// APPOINTMENTS TABLE
+// ================================================================
+function renderAppointments() {
+    const search = (document.getElementById('appt-search').value || '').toLowerCase();
+    const regFilter = document.getElementById('appt-reg').value;
+
+    let filtered = appointments;
+    if (search) filtered = filtered.filter(a => (a.name + a.pid).toLowerCase().includes(search));
+    if (regFilter) filtered = filtered.filter(a => a.reg === regFilter);
+
+    const tbody = document.getElementById('appt-body');
+    tbody.innerHTML = filtered.slice(0, 300).map(a => {
+        const prob = a.noshow || (mlPredictions[a.pid] ? mlPredictions[a.pid].probability : 0) || 0;
+        const riskHtml = prob > 0 ? `<span style="color:${prob>=0.3?'#ef4444':prob>=0.15?'#f59e0b':'#22c55e'}">${(prob*100).toFixed(1)}%</span>` : '--';
+
+        return `<tr>
+            <td>${a.id}</td>
+            <td>${a.date}</td>
+            <td>${a.start} - ${a.end}</td>
+            <td>${a.name}</td>
+            <td>${a.site}</td>
+            <td>${a.chair}</td>
+            <td><span class="reg-${a.reg}" style="padding:2px 8px;border-radius:4px;">${a.regName}</span></td>
+            <td>${a.cycle}/${a.totalCycles}</td>
+            <td>${a.dur} min</td>
+            <td>${a.nurse}</td>
+            <td>${a.oneToOne?'<span style="color:#e94560;font-weight:700;">Yes</span>':'No'}</td>
+            <td>${riskHtml}</td>
+        </tr>`;
+    }).join('');
+}
+
+// ================================================================
+// PATIENTS TABLE
+// ================================================================
+function renderPatients() {
+    const search = (document.getElementById('pt-search').value || '').toLowerCase();
+    let filtered = patients;
+    if (search) filtered = filtered.filter(p => ((p.Person_Given_Name||'')+(p.Person_Family_Name||'')+(p.NHS_Number||'')+(p.Patient_ID||'')).toLowerCase().includes(search));
+
+    const tbody = document.getElementById('pt-body');
+    tbody.innerHTML = filtered.slice(0, 200).map(p => {
+        const pred = mlPredictions[p.Patient_ID || p.patient_id];
+        const riskHtml = pred ? `<span style="color:${pred.risk_level==='high'?'#ef4444':pred.risk_level==='medium'?'#f59e0b':'#22c55e'}">${(pred.probability*100).toFixed(1)}%</span>` : (p.Historical_NoShow_Rate ? (p.Historical_NoShow_Rate*100).toFixed(1)+'%' : '--');
+
+        return `<tr>
+            <td>${p.NHS_Number||''}</td>
+            <td>${p.Person_Given_Name||p.First_Name||''} ${p.Person_Family_Name||p.Surname||''}</td>
+            <td>${p.Age||''}</td>
+            <td><span class="reg-${p.Regimen_Code||''}" style="padding:2px 8px;border-radius:4px;">${p.Regimen_Name||p.Regimen_Code||''}</span></td>
+            <td>${p.Cycle_Number||''}/${p.Total_Cycles||''}</td>
+            <td>${p.Priority||''}</td>
+            <td>PS ${p.Performance_Status||'?'}</td>
+            <td>${riskHtml}</td>
+            <td>${p.Travel_Time_Min||''} min</td>
+        </tr>`;
+    }).join('');
+}
+
+// ================================================================
+// STAFF TABLE
+// ================================================================
+function renderStaff() {
+    const tbody = document.getElementById('staff-body');
+    tbody.innerHTML = staff.map(s => `<tr>
+        <td>${s.Staff_ID||s.id||''}</td>
+        <td>${s.Name||((s.First_Name||'')+' '+(s.Surname||''))}</td>
+        <td>${s.Role||s.role||''}</td>
+        <td>${s.Band||s.band||''}</td>
+        <td>${s.Site_Code||s.site_id||''}</td>
+        <td>${s.SACT_Trained||s.Chemotherapy_Trained?'Yes':'No'}</td>
+        <td>${s.Can_Administer_1to1?'Yes':'No'}</td>
+    </tr>`).join('');
+}
+
+// ================================================================
+// ML TAB
+// ================================================================
+function loadMLTab() {
+    Promise.all([
+        fetch('/api/ml/conformal').then(r=>r.json()).catch(()=>({})),
+        fetch('/api/ml/mc-dropout').then(r=>r.json()).catch(()=>({})),
+        fetch('/api/ml/causal/iv').then(r=>r.json()).catch(()=>({})),
+        fetch('/api/ml/dml').then(r=>r.json()).catch(()=>({})),
+        fetch('/api/ml/events').then(r=>r.json()).catch(()=>({})),
+        fetch('/api/ml/hierarchical').then(r=>r.json()).catch(()=>({})),
+        fetch('/api/ml/survival').then(r=>r.json()).catch(()=>({})),
+        fetch('/api/ml/uplift').then(r=>r.json()).catch(()=>({})),
+        fetch('/api/optimize/weights').then(r=>r.json()).catch(()=>({})),
+        fetch('/api/data/nhs/status').then(r=>r.json()).catch(()=>({})),
+        fetch('/api/ml/recalibration/status').then(r=>r.json()).catch(()=>({})),
+    ]).then(([conf, mc, iv, dml, evt, hier, surv, upl, wts, nhs, recal]) => {
+
+        // Tier 1: Core Prediction Models
+        const noshowPreds = Object.keys(mlPredictions).length;
+        const highRisk = Object.values(mlPredictions).filter(p => p.probability >= 0.3).length;
+        document.getElementById('ml-stats').innerHTML = `
+            <div class="stat-card">
+                <div class="label">No-Show Ensemble</div>
+                <div class="value">${noshowPreds}</div>
+                <div class="detail">Patients predicted (RF+GB+XGB stacking, AUC 0.82). ${highRisk} flagged high-risk (&ge;30%)</div>
+            </div>
+            <div class="stat-card">
+                <div class="label">Duration Ensemble</div>
+                <div class="value">MAE 11m</div>
+                <div class="detail">Treatment duration prediction accuracy. Uses cycle number, regimen, comorbidities, IV access</div>
+            </div>
+            <div class="stat-card">
+                <div class="label">Sequence (GRU)</div>
+                <div class="value">64 units</div>
+                <div class="detail">Recurrent neural network captures patient attendance trajectories for patients with 5+ appointments</div>
+            </div>
+            <div class="stat-card">
+                <div class="label">Multi-Task (PyTorch)</div>
+                <div class="value">Joint</div>
+                <div class="detail">Predicts no-show AND duration simultaneously. Shared layers learn correlations between outcomes</div>
+            </div>
+        `;
+
+        // Tier 2: Advanced Statistical Models
+        document.getElementById('ml-advanced').innerHTML = `
+            <div class="stat-card">
+                <div class="label">Survival Analysis (2.2)</div>
+                <div class="value">${surv.c_index ? surv.c_index.toFixed(3) : 'Fitted'}</div>
+                <div class="detail">Cox PH model: h(t|X) = h&#8320;(t)&middot;exp(&beta;X). Estimates time-to-event risk using hazard ratios</div>
+            </div>
+            <div class="stat-card">
+                <div class="label">Uplift Modeling (2.3)</div>
+                <div class="value">${upl.best_intervention || 'phone_call'}</div>
+                <div class="detail">S-Learner + T-Learner estimate which intervention reduces no-shows most for each patient: &tau;(x) = E[Y(1)-Y(0)|X]</div>
+            </div>
+            <div class="stat-card">
+                <div class="label">Quantile Forest (3.2)</div>
+                <div class="value">90% CI</div>
+                <div class="detail">Distribution-free prediction intervals. Uses 100 trees to estimate full conditional distribution for scheduling buffers</div>
+            </div>
+            <div class="stat-card">
+                <div class="label">Hierarchical Bayesian (3.3)</div>
+                <div class="value">${hier.n_patients || '--'} pts</div>
+                <div class="detail">PyMC MCMC model with patient random effects: y&#7522;&#11388; ~ N(&mu;+&alpha;&#7522;+X&beta;, &sigma;&sup2;). Shrinks estimates for new patients toward population mean</div>
+            </div>
+        `;
+
+        // Tier 3: Causal & Uncertainty
+        document.getElementById('ml-causal').innerHTML = `
+            <div class="stat-card">
+                <div class="label">Causal DAG (4.1)</div>
+                <div class="value">11 nodes</div>
+                <div class="detail">Directed Acyclic Graph with do-calculus. Answers: "What happens to no-shows if we DO intervene?" vs mere correlation</div>
+            </div>
+            <div class="stat-card">
+                <div class="label">IV Estimation (4.2)</div>
+                <div class="value">${iv.causal_effect ? (iv.causal_effect*100).toFixed(2)+'%' : 'Pending'}</div>
+                <div class="detail">2SLS: Weather (instrument) &rarr; Traffic (treatment) &rarr; No-Show (outcome). F-stat=${iv.first_stage ? iv.first_stage.f_statistic : '--'} (strong &gt;10)</div>
+            </div>
+            <div class="stat-card">
+                <div class="label">Double ML (4.3)</div>
+                <div class="value">${dml.summary?.treatment_effect ? (dml.summary.treatment_effect*100).toFixed(1)+'%' : 'Pending'}</div>
+                <div class="detail">Neyman-orthogonal cross-fitting for treatment effect with high-dimensional confounders. &radic;n-consistent with valid CIs</div>
+            </div>
+            <div class="stat-card">
+                <div class="label">Event Impact (4.4)</div>
+                <div class="value">${evt.baseline_noshow_rate ? (evt.baseline_noshow_rate*100).toFixed(1)+'%' : '--'}</div>
+                <div class="detail">NLP sentiment analysis of weather/traffic/news events. Distance-weighted impact decay: impact = severity &middot; exp(-d/&lambda;)</div>
+            </div>
+            <div class="stat-card">
+                <div class="label">Conformal (5.1)</div>
+                <div class="value">${conf.guarantee || '&ge;90%'}</div>
+                <div class="detail">Distribution-free coverage guarantee: P(Y&isin;C(X)) &ge; 1-&alpha;. No normality assumption needed. Calibrated on holdout set</div>
+            </div>
+            <div class="stat-card">
+                <div class="label">MC Dropout (5.2)</div>
+                <div class="value">${mc.n_forward_passes || 100} passes</div>
+                <div class="detail">Bayesian uncertainty via stochastic forward passes. Decomposes into epistemic (model, reducible) vs aleatoric (data, irreducible)</div>
+            </div>
+        `;
+
+        // Optimization weights bar chart
+        if (wts.weights) {
+            const w = wts.weights;
+            const colors = {priority:'#3b82f6',utilization:'#10b981',noshow_risk:'#ef4444',waiting_time:'#f59e0b',robustness:'#8b5cf6',travel:'#06b6d4'};
+            const labels = {priority:'Priority (clinical urgency)',utilization:'Utilization (chair efficiency)',noshow_risk:'No-Show Risk (waste reduction)',waiting_time:'Waiting Time (NHS 62-day target)',robustness:'Robustness (schedule stability)',travel:'Travel (patient convenience)'};
+            let wHtml = '';
+            Object.entries(w).forEach(([k,v]) => {
+                wHtml += `<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
+                    <span style="width:190px;font-size:0.78em;color:#555;">${labels[k]||k}</span>
+                    <div style="flex:1;background:#e2e8f0;height:22px;border-radius:4px;">
+                        <div style="height:22px;border-radius:4px;width:${v*100}%;background:${colors[k]||'#888'};display:flex;align-items:center;padding-left:8px;font-size:0.72em;font-weight:600;color:white;">${(v*100).toFixed(0)}%</div>
+                    </div>
+                </div>`;
+            });
+            document.getElementById('weights-chart').innerHTML = wHtml;
+        }
+
+        // NHS data sources
+        if (nhs.sources) {
+            let nHtml = '';
+            const statusIcons = {'monthly':'&#128197;','quarterly':'&#128198;','json_api':'&#128268;'};
+            Object.entries(nhs.sources).forEach(([k,v]) => {
+                const icon = v.is_due ? '&#9888;' : '&#10004;';
+                const color = v.is_due ? '#f59e0b' : '#22c55e';
+                nHtml += `<div style="margin-bottom:10px;padding:8px 12px;background:#f8fafc;border-radius:6px;">
+                    <div style="display:flex;justify-content:space-between;align-items:center;">
+                        <strong style="font-size:0.82em;">${v.name}</strong>
+                        <span style="font-size:0.72em;color:${color};">${icon} ${v.is_due?'Update due':'Up to date'}</span>
+                    </div>
+                    <div style="font-size:0.72em;color:#888;margin-top:2px;">${v.description || v.frequency + ' | ' + v.format} | ${v.files_on_disk} files on disk</div>
+                </div>`;
+            });
+            // SACT v4.0 card — rendered after setting innerHTML, via separate async fetch
+            document.getElementById('nhs-status').innerHTML = nHtml;
+            nHtml = null; // prevent double-set below
+            fetch('/api/data/sact-v4/status').then(r => r.json()).then(sv4 => {
+                const av = sv4.sact_v4 || {};
+                const phase = av.phase || 'unknown';
+                const quality = av.quality || 'unknown';
+                const hasFiles = av.has_local_files || false;
+                const fileCount = av.local_file_count || 0;
+                const recLevel = av.recommended_recalibration_level;
+                const note = (av.note || '').split('.')[0];
+                const phaseColors = {
+                    not_started:'#fef3c7', rollout_partial:'#fff7ed',
+                    full_conformance:'#ecfdf5', first_complete:'#f0fdf4', unknown:'#f8fafc'
+                };
+                const phaseBorders = {
+                    not_started:'#f59e0b', rollout_partial:'#f97316',
+                    full_conformance:'#22c55e', first_complete:'#16a34a', unknown:'#94a3b8'
+                };
+                const phaseLabels = {
+                    not_started:'&#128683; Not Started',
+                    rollout_partial:'&#9888;&#65039; Rollout &mdash; Partial',
+                    full_conformance:'&#9989; Full Conformance',
+                    first_complete:'&#127775; Complete',
+                    unknown:'&#63; Unknown'
+                };
+                const bg = phaseColors[phase] || '#f8fafc';
+                const bdr = phaseBorders[phase] || '#94a3b8';
+                const lbl = phaseLabels[phase] || phase;
+                const fileStatus = hasFiles
+                    ? `<span style="color:#16a34a;">&#10003; ${fileCount} CSV file(s) in sact_v4/ &mdash; ready for ingest</span>`
+                    : `<span style="color:#888;">No CSV yet &mdash; place SACT v4.0 CSV in datasets/nhs_open_data/sact_v4/ to trigger auto-retrain</span>`;
+                const recText = recLevel != null ? ` &rarr; triggers Level ${recLevel} recalibration` : '';
+                const nhsDiv = document.getElementById('nhs-status');
+                if (nhsDiv) nhsDiv.insertAdjacentHTML('beforeend',
+                    `<div style="margin-bottom:10px;padding:8px 12px;background:${bg};border-radius:6px;border-left:3px solid ${bdr};">
+                        <div style="display:flex;justify-content:space-between;align-items:center;">
+                            <strong style="font-size:0.82em;">SACT v4.0 Patient-Level Data</strong>
+                            <span style="font-size:0.72em;color:${bdr};">${lbl}</span>
+                        </div>
+                        <div style="font-size:0.72em;color:#555;margin-top:3px;">${fileStatus}</div>
+                        <div style="font-size:0.7em;color:#888;margin-top:2px;">${note}${recText}</div>
+                        <div style="font-size:0.7em;color:#aaa;margin-top:1px;">SACTv4DataAdapter maps NHS field names &rarr; ML features automatically when CSV detected</div>
+                    </div>`
+                );
+            }).catch(() => {
+                const nhsDiv = document.getElementById('nhs-status');
+                if (nhsDiv) nhsDiv.insertAdjacentHTML('beforeend',
+                    `<div style="padding:6px 12px;background:#fef3c7;border-radius:6px;font-size:0.75em;color:#92400e;">SACT v4.0 status check unavailable</div>`
+                );
+            });
+            if (recal.n_models) {
+                const recalDiv = document.getElementById('nhs-status');
+                if (recalDiv) recalDiv.insertAdjacentHTML('beforeend',
+                    `<div style="padding:8px 12px;background:#f0fdf4;border-radius:6px;">
+                        <div style="font-size:0.82em;"><strong>${recal.n_models} models</strong> registered for auto-recalibration</div>
+                        <div style="font-size:0.72em;color:#888;">Version: ${recal.current_version} | ${recal.total_recalibrations} recalibrations performed</div>
+                    </div>`
+                );
+            }
+        }
+    });
+}
+
+// ================================================================
+// AUTO-LOAD SYSTEM DATA (runs on page load)
+// ================================================================
+function loadSystemData() {
+    // Load alerts
+    fetch('/api/alerts').then(r=>r.json()).then(d => {
+        if (d && d.length > 0) {
+            console.log('Active alerts:', d.length);
+        }
+    }).catch(()=>{});
+
+    // Load metrics
+    fetch('/api/metrics').then(r=>r.json()).then(d => {
+        console.log('Metrics loaded:', d);
+    }).catch(()=>{});
+
+    // Load system status + mode
+    fetch('/api/status').then(r=>r.json()).then(d => {
+        const mode = d.mode || 'normal';
+        const modeColors = {normal:'#22c55e',elevated:'#f59e0b',crisis:'#f97316',emergency:'#ef4444'};
+        const mb = document.getElementById('mode-badge');
+        if (mb) { mb.textContent = mode.toUpperCase(); mb.style.background = modeColors[mode]||'#22c55e'; }
+        const ms = document.getElementById('mode-select');
+        if (ms) ms.value = mode;
+    }).catch(()=>{});
+
+    // Auto-load high-risk patients from survival model
+    fetch('/api/ml/survival/high-risk').then(r=>r.json()).then(d => {
+        if (d.high_risk_patients) console.log('High-risk patients:', d.high_risk_patients.length);
+    }).catch(()=>{});
+
+    // Auto-load optimal reminders
+    fetch('/api/ml/survival/optimal-reminders').then(r=>r.json()).then(d => {
+        if (d.recommendations) console.log('Reminder recommendations:', d.recommendations.length);
+    }).catch(()=>{});
+
+    // Auto-load uplift interventions
+    fetch('/api/ml/uplift/interventions').then(r=>r.json()).then(d => {
+        console.log('Uplift interventions available:', d);
+    }).catch(()=>{});
+
+    // Auto-load QRF overview
+    fetch('/api/ml/quantile-forest').then(r=>r.json()).then(d => {
+        console.log('QRF status:', d);
+    }).catch(()=>{});
+
+    // Auto-load multitask overview
+    fetch('/api/ml/multitask').then(r=>r.json()).then(d => {
+        console.log('Multi-task model:', d);
+    }).catch(()=>{});
+
+    // Auto-load causal overview
+    fetch('/api/ml/causal').then(r=>r.json()).then(d => {
+        console.log('Causal model:', d);
+    }).catch(()=>{});
+
+    // Auto-load fairness status
+    fetch('/api/fairness/status').then(r=>r.json()).then(d => {
+        console.log('Fairness:', d);
+    }).catch(()=>{});
+
+    // Auto-load drift report
+    fetch('/api/ml/drift/report').then(r=>r.json()).then(d => {
+        console.log('Drift:', d);
+    }).catch(()=>{});
+
+    // Auto-load double-booking recommendations
+    fetch('/api/urgent/recommend-double-booking').then(r=>r.json()).then(d => {
+        console.log('Double-booking recommendations:', d);
+    }).catch(()=>{});
+
+    // Auto-load online learning status
+    fetch('/api/ml/online-learning').then(r=>r.json()).then(d => {
+        console.log('Online learning:', d.total_updates, 'updates, SGD fitted:', d.sgd_fitted);
+    }).catch(()=>{});
+
+    // Refresh data periodically (every 5 minutes)
+    setInterval(() => {
+        fetch('/api/refresh', {method:'POST'}).catch(()=>{});
+    }, 300000);
+}
+
+// ================================================================
+// SQUEEZE-IN TAB
+// ================================================================
+// Cache the patient payload used by Preview so "Insert here" buttons can
+// reuse it without the operator re-typing the form.
+let _lastSqPatient = null;
+
+function previewSlots() {
+    const r = document.getElementById('sq-result');
+    r.style.display = 'block';
+    r.innerHTML = '<span style="color:#3b82f6;">Finding best slots...</span>';
+    _lastSqPatient = {
+        patient_id: document.getElementById('sq-pid').value || 'PREVIEW',
+        priority: document.getElementById('sq-priority').value,
+        duration: parseInt(document.getElementById('sq-dur').value),
+        postcode: document.getElementById('sq-postcode').value,
+        allow_double_booking: document.getElementById('sq-double').checked
+    };
+    fetch('/api/urgent/find-best-slot', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(_lastSqPatient)}).then(r=>r.json()).then(d => {
+        if (d.success && d.options && d.options.length > 0) {
+            let h = `<strong style="color:#10b981;">Found ${d.total_options} possible slots:</strong>`
+                  + ` <span style="color:#888;font-size:0.9em;">(showing ${d.options.length}, click a row to insert)</span>`
+                  + `<div id="sq-slot-list" style="max-height:360px;overflow-y:auto;margin-top:8px;padding-right:4px;">`;
+            d.options.forEach((opt,i) => {
+                const nsPct = opt.noshow_probability ? (opt.noshow_probability*100).toFixed(1)+'%' : '';
+                // Safely embed chair_id + start_time into the data-attrs for the insert handler
+                const ci  = (opt.chair_id || '').replace(/"/g, '&quot;');
+                const st  = (opt.start_time || '').replace(/"/g, '&quot;');
+                h += `<div style="display:flex;align-items:center;gap:8px;padding:6px 10px;margin:4px 0;background:#f0fdf4;border-radius:4px;border-left:3px solid #10b981;">
+                        <div style="flex:1;">
+                          ${i+1}. <strong>${opt.start_time}</strong> on ${opt.chair_id}
+                          <span style="color:#888;"> (score: ${opt.score})</span>
+                          ${opt.is_noshow_based ? ' <span style="color:#f59e0b;">[Double-book: '+nsPct+' no-show]</span>' : ''}
+                        </div>
+                        <button onclick="manualInsertSlot('${ci}', '${st}', this)"
+                                style="padding:5px 12px;background:#10b981;color:white;border:none;border-radius:4px;cursor:pointer;font-size:0.82em;white-space:nowrap;">
+                          Insert here
+                        </button>
+                      </div>`;
+            });
+            h += `</div>`;
+            document.getElementById('sq-result').innerHTML = h;
+        } else {
+            document.getElementById('sq-result').innerHTML = '<span style="color:#ef4444;">No slots available: ' + (d.message || 'Schedule may be full') + '</span>';
+        }
+    }).catch(e => { document.getElementById('sq-result').innerHTML = '<span style="color:#ef4444;">Error: '+e.message+'</span>'; });
+}
+
+// Per-row "Insert here" — pins the urgent patient into the exact slot
+// the operator clicked, bypassing engine re-ranking.  Uses the patient
+// payload captured by the last previewSlots() call.
+function manualInsertSlot(chair_id, start_time, btn) {
+    if (!_lastSqPatient) {
+        alert('Click "Preview Best Slots" first so the patient details are captured.');
+        return;
+    }
+    if (btn) {
+        btn.disabled = true;
+        btn.textContent = 'Inserting…';
+        btn.style.background = '#9ca3af';
+    }
+    const payload = Object.assign({}, _lastSqPatient, {
+        forced_slot: { chair_id: chair_id, start_time: start_time }
+    });
+    // Channel-aware ID handling:
+    //   Ch1 (synthetic) — auto-generate a timestamped placeholder silently.
+    //   Ch2 (real)      — refuse placeholder; prompt operator for real NHS
+    //                     Number / Trust ID before the insert fires.
+    const activeChannel = (document.getElementById('channel-badge') || {}).textContent || 'CH1 SYNTHETIC';
+    const onRealHospital = activeChannel.includes('CH2');
+    const supplied = (payload.patient_id || '').trim();
+    const isPlaceholder = !supplied || /^(URGENT_|PREVIEW|TEST)/i.test(supplied);
+    if (isPlaceholder) {
+        if (onRealHospital) {
+            if (btn) { btn.disabled = false; btn.textContent = 'Insert here'; btn.style.background = '#10b981'; }
+            const realId = prompt('Channel 2 (real hospital) — enter the patient NHS Number or Trust Local ID:');
+            if (!realId || !realId.trim()) return;
+            payload.patient_id = realId.trim();
+        } else {
+            // Synthetic channel: auto-generate so the insert just works
+            const ts = new Date().toISOString().replace(/[-:T.Z]/g, '').slice(0, 14);
+            payload.patient_id = 'URGENT_' + ts;
+        }
+    }
+    fetch('/api/urgent/insert', {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify(payload)
+    }).then(r => r.json()).then(d => {
+        if (d.success) {
+            if (btn) { btn.textContent = '✓ Inserted'; btn.style.background = '#059669'; }
+            // Refresh the schedule/stats tabs so the newly-inserted appointment appears
+            if (typeof loadSqueezeTab === 'function') loadSqueezeTab();
+            if (typeof init === 'function') setTimeout(init, 400);
+        } else {
+            if (btn) { btn.disabled = false; btn.textContent = 'Retry'; btn.style.background = '#ef4444'; }
+            alert('Insert failed: ' + (d.error || d.message || 'unknown'));
+        }
+    }).catch(e => {
+        if (btn) { btn.disabled = false; btn.textContent = 'Retry'; btn.style.background = '#ef4444'; }
+        alert('Insert failed: ' + e.message);
+    });
+}
+
+function insertUrgent() {
+    const r = document.getElementById('sq-result');
+    r.style.display = 'block';
+    r.innerHTML = '<span style="color:#ef4444;">Inserting urgent patient...</span>';
+    fetch('/api/add_patient', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({
+        patient_id: document.getElementById('sq-pid').value,
+        priority: document.getElementById('sq-priority').value,
+        duration: parseInt(document.getElementById('sq-dur').value),
+        postcode: document.getElementById('sq-postcode').value,
+        total_appointments: parseInt(document.getElementById('sq-total').value),
+        no_shows: parseInt(document.getElementById('sq-noshows').value),
+        is_urgent: true,
+        allow_double_booking: document.getElementById('sq-double').checked,
+        allow_rescheduling: document.getElementById('sq-resched').checked
+    })}).then(r=>r.json()).then(d => {
+        if (d.success) {
+            let h = `<div style="padding:10px;background:#f0fdf4;border-radius:6px;border-left:3px solid #10b981;">
+                <strong style="color:#10b981;">Patient inserted successfully!</strong><br>${d.message}`;
+            if (d.strategy) h += `<br>Strategy: <strong>${d.strategy}</strong>`;
+            if (d.appointment) h += `<br>Scheduled at ${d.appointment.start_time} on ${d.appointment.chair_id}`;
+            if (d.noshow_probability) h += `<br>No-show probability of existing: ${(d.noshow_probability*100).toFixed(1)}%`;
+            if (d.robustness) {
+                h += `<br><span style="font-size:0.85em;color:#6b7280;">Remaining slack: ${d.robustness.remaining_slack}min | Impact: ${d.robustness.robustness_impact}min</span>`;
+                if (d.robustness.alert) {
+                    const alertColor = d.robustness.alert.level === 'CRITICAL' ? '#ef4444' : '#f59e0b';
+                    h += `<br><span style="color:${alertColor};font-weight:600;">[${d.robustness.alert.level}] ${d.robustness.alert.message}</span>`;
+                }
+            }
+            h += '</div>';
+            r.innerHTML = h;
+            loadSqueezeTab();
+        } else {
+            r.innerHTML = `<span style="color:#ef4444;">Failed: ${d.message}</span>`;
+        }
+    }).catch(e => { r.innerHTML = '<span style="color:#ef4444;">Error: '+e.message+'</span>'; });
+}
+
+function loadSqueezeTab() {
+    // Load high no-show slots
+    fetch('/api/urgent/high-noshow-slots').then(r=>r.json()).then(d => {
+        const slots = d.slots || d.high_noshow_slots || [];
+        if (slots.length > 0) {
+            let h = '';
+            slots.slice(0,15).forEach(s => {
+                const prob = s.noshow_probability || s.probability || 0;
+                const color = prob >= 0.4 ? '#ef4444' : prob >= 0.25 ? '#f59e0b' : '#eab308';
+                h += `<div style="padding:6px 10px;margin:4px 0;background:#fefce8;border-radius:4px;border-left:3px solid ${color};">
+                    <strong>${s.start_time || s.time || ''}</strong> ${s.chair_id || ''} — ${s.patient_id || ''}
+                    <span style="color:${color};font-weight:700;">${(prob*100).toFixed(0)}% no-show</span>
+                    <span style="color:#888;font-size:0.9em;"> (${s.duration || ''} min)</span>
+                </div>`;
+            });
+            document.getElementById('noshow-slots').innerHTML = h;
+        } else {
+            document.getElementById('noshow-slots').innerHTML = '<span style="color:#888;">No high no-show slots found</span>';
+        }
+    }).catch(() => { document.getElementById('noshow-slots').innerHTML = '<span style="color:#888;">Could not load slots</span>'; });
+
+    // Load stats
+    fetch('/api/urgent/stats').then(r=>r.json()).then(d => {
+        document.getElementById('sq-stats').innerHTML = `
+            <div><strong>Total slots:</strong> ${d.total_slots || '--'}</div>
+            <div style="margin-left:20px;"><strong>High no-show (>=30%):</strong> ${d.high_noshow_slots || '--'}</div>
+            <div style="margin-left:20px;"><strong>Double-book candidates:</strong> ${d.double_book_candidates || '--'}</div>
+        `;
+    }).catch(() => {});
+}
+
+// ================================================================
+// OPTIMIZE TAB
+// ================================================================
+function runOptimize() {
+    const r = document.getElementById('opt-result');
+    r.style.display = 'block';
+    r.innerHTML = '<span style="color:#10b981;">Running ML predictions + CP-SAT optimization...</span>';
+    fetch('/api/optimize', {method:'POST', headers:{'Content-Type':'application/json'}, body:'{}'}).then(r=>r.json()).then(d => {
+        let h = `<div style="padding:10px;background:#f0fdf4;border-radius:6px;border-left:3px solid #10b981;">
+            <strong>${d.message || 'Optimization complete'}</strong><br>
+            Scheduled: ${d.scheduled || 0} | Unscheduled: ${d.unscheduled || 0}`;
+        if (d.metrics) {
+            h += `<br>Utilization: ${(d.metrics.utilization*100).toFixed(0)}% | No-show exposure: ${((d.metrics.noshow_exposure||0)*100).toFixed(1)}%`;
+            h += ` | Robustness: ${d.metrics.robustness_score || '--'}`;
+        }
+        if (d.ml_integration) {
+            const ml = d.ml_integration;
+            h += `<br><br><strong style="color:#8b5cf6;">ML Integration:</strong>`;
+            if (ml.uncertainty) h += `<br>MC Dropout: ${ml.uncertainty.high_uncertainty_patients || 0} high-uncertainty patients (${ml.uncertainty.buffer_applied || ''})`;
+            if (ml.fairness) h += `<br>Fairness: ${JSON.stringify(ml.fairness.priority_distribution || {})}`;
+            if (ml.rl_feedback && ml.rl_feedback.learned) h += `<br>RL Agent: reward=${ml.rl_feedback.reward}, epsilon=${ml.rl_feedback.epsilon}`;
+        }
+        h += '</div>';
+        r.innerHTML = h;
+        init(); // Reload all data
+    }).catch(e => { r.innerHTML = '<span style="color:#ef4444;">Optimization failed: '+e.message+'</span>'; });
+}
+
+function runParetoFromTab() {
+    const r = document.getElementById('pareto-tab-result');
+    r.style.display = 'block';
+    r.innerHTML = '<span style="color:#8b5cf6;">Generating Pareto frontier (5 profiles, ~2 min)...</span>';
+    fetch('/api/optimize/pareto', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({time_limit_per_run:30})}).then(r=>r.json()).then(d => {
+        if (d.pareto_frontier && d.pareto_frontier.length > 0) {
+            let h = `<strong style="color:#8b5cf6;">Frontier: ${d.frontier_size} non-dominated solutions</strong><br><br>`;
+            h += '<table style="width:100%;font-size:0.85em;border-collapse:collapse;">';
+            h += '<tr style="border-bottom:2px solid #e2e8f0;"><th style="padding:6px;text-align:left;">Profile</th><th>Scheduled</th><th>Utilization</th><th>Risk</th><th>Waiting</th></tr>';
+            d.pareto_frontier.forEach(s => {
+                h += `<tr style="border-bottom:1px solid #f0f0f0;">
+                    <td style="padding:6px;font-weight:600;color:#8b5cf6;">${s.name}</td>
+                    <td style="text-align:center;">${s.scheduled}</td>
+                    <td style="text-align:center;">${(s.utilization*100).toFixed(0)}%</td>
+                    <td style="text-align:center;">${((s.noshow_exposure||0)*100).toFixed(1)}%</td>
+                    <td style="text-align:center;">${s.avg_waiting||'--'}</td>
+                </tr>`;
+            });
+            h += '</table>';
+            r.innerHTML = h;
+        } else {
+            r.innerHTML = '<span style="color:#f59e0b;">'+(d.error||'No patients to optimize')+'</span>';
+        }
+    }).catch(e => { r.innerHTML = '<span style="color:#ef4444;">Error: '+e.message+'</span>'; });
+}
+
+function runFairnessFromTab() {
+    const r = document.getElementById('fairness-tab-result');
+    r.innerHTML = '<span style="color:#06b6d4;">Running fairness audit...</span>';
+    fetch('/api/fairness/audit', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({})}).then(r=>r.json()).then(d => {
+        if (d.results) {
+            let h = `<strong style="color:${d.passes_all?'#10b981':'#ef4444'};">${d.passes_all?'PASSED':'VIOLATIONS FOUND'}</strong> across ${d.groups_audited.length} protected attributes<br><br>`;
+            Object.entries(d.results).forEach(([group, result]) => {
+                const icon = result.passes ? '&#10004;' : '&#10008;';
+                const color = result.passes ? '#10b981' : '#ef4444';
+                h += `<div style="padding:6px 10px;margin:4px 0;background:${result.passes?'#f0fdf4':'#fef2f2'};border-radius:4px;border-left:3px solid ${color};">
+                    <span style="color:${color};">${icon}</span> <strong>${group}</strong>: ${result.passes?'Pass':'FAIL — '+result.violations.length+' violations'}
+                </div>`;
+                if (result.violations && result.violations.length > 0) {
+                    result.violations.forEach(v => { h += `<div style="padding:2px 10px 2px 30px;font-size:0.9em;color:#888;">${v}</div>`; });
+                }
+            });
+            r.innerHTML = h;
+        }
+    }).catch(e => { r.innerHTML = '<span style="color:#ef4444;">Error: '+e.message+'</span>'; });
+}
+
+// ================================================================
+// EVENTS TAB
+// ================================================================
+function checkEvent() {
+    const text = document.getElementById('evt-text').value;
+    const type = document.getElementById('evt-type').value;
+    if (!text) return;
+    const r = document.getElementById('evt-result');
+    r.style.display = 'block';
+    r.innerHTML = '<span style="color:#f59e0b;">Analysing event...</span>';
+    fetch('/api/ml/events/quick-check', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({text:text,type:type})}).then(r=>r.json()).then(d => {
+        if (d.impact) {
+            r.innerHTML = `<div style="padding:10px;background:#fef3c7;border-radius:6px;border-left:3px solid #f59e0b;">
+                <strong>Severity:</strong> ${d.detected_severity} | <strong>Sentiment:</strong> ${d.sentiment}<br>
+                <strong>Baseline no-show:</strong> ${(d.impact.baseline_rate*100).toFixed(1)}% &rarr; <strong>Predicted:</strong> ${(d.impact.predicted_rate*100).toFixed(1)}% (+${d.impact.increase_pct}%)
+                ${d.keywords && d.keywords.length ? '<br><strong>Keywords:</strong> '+d.keywords.join(', ') : ''}
+                ${d.recommendations && d.recommendations.length ? '<br><strong>Recommendations:</strong> '+d.recommendations.join('; ') : ''}
+            </div>`;
+        } else if (d.error) {
+            r.innerHTML = `<span style="color:#ef4444;">${d.error}</span>`;
+        }
+    }).catch(e => { r.innerHTML = '<span style="color:#ef4444;">Error: '+e.message+'</span>'; });
+}
+
+function loadEventsTab() {
+    // Active events
+    fetch('/api/ml/events/active').then(r=>r.json()).then(d => {
+        const events = d.events || [];
+        if (events.length > 0) {
+            let h = '';
+            events.forEach(e => {
+                h += `<div style="padding:8px 10px;margin:4px 0;background:#fef3c7;border-radius:4px;border-left:3px solid #f59e0b;">
+                    <strong>${e.title}</strong> (${e.event_type})<br>
+                    <span style="font-size:0.9em;color:#888;">${e.description || ''}</span>
+                </div>`;
+            });
+            document.getElementById('active-events').innerHTML = h;
+        } else {
+            document.getElementById('active-events').innerHTML = '<div style="padding:12px;background:#f0fdf4;border-radius:6px;color:#10b981;">No active events affecting operations</div>';
+        }
+    }).catch(() => { document.getElementById('active-events').innerHTML = 'Could not load events'; });
+
+    // System status
+    fetch('/api/status').then(r=>r.json()).then(d => {
+        document.getElementById('sys-status').innerHTML = `
+            <div style="margin-bottom:8px;"><strong>Mode:</strong> ${(d.mode||'normal').toUpperCase()}</div>
+            <div style="margin-bottom:8px;"><strong>Data Source:</strong> ${d.data_source_status||'Local'}</div>
+            <div style="margin-bottom:8px;"><strong>Scheduled:</strong> ${d.metrics?.scheduled_today||'--'}</div>
+            <div style="margin-bottom:8px;"><strong>Pending:</strong> ${d.metrics?.pending_patients||'--'}</div>
+            <div style="margin-bottom:8px;"><strong>Utilization:</strong> ${d.metrics?.chair_utilization||'--'}%</div>
+            <div style="margin-bottom:8px;"><strong>No-Show Rate:</strong> ${d.metrics?.no_show_rate||'--'}%</div>
+            <div style="margin-bottom:8px;"><strong>Events:</strong> ${d.event_count||0}</div>
+        `;
+        // Update mode badge
+        const modeColors = {normal:'#22c55e',elevated:'#f59e0b',crisis:'#f97316',emergency:'#ef4444'};
+        const mb = document.getElementById('mode-badge');
+        mb.textContent = (d.mode||'normal').toUpperCase();
+        mb.style.background = modeColors[d.mode||'normal'] || '#22c55e';
+        document.getElementById('mode-select').value = d.mode || 'normal';
+    }).catch(() => {});
+}
+
+function switchDataChannel(channel) {
+    const r = document.getElementById('channel-switch-result');
+    r.style.display = 'block';
+    r.innerHTML = `<span style="color:#3b82f6;">Switching to ${channel} data... (reloading models, ~30s)</span>`;
+    fetch('/api/data/source', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({channel:channel})}).then(r=>r.json()).then(d => {
+        if (d.success) {
+            document.getElementById('channel-switch-result').innerHTML = `<span style="color:#10b981;">&#10004; ${d.message} (${d.patients_loaded} patients loaded)</span>`;
+            // Reload all viewer data
+            setTimeout(() => { init(); }, 1000);
+        } else {
+            document.getElementById('channel-switch-result').innerHTML = `<span style="color:#ef4444;">&#10008; ${d.error}</span>`;
+        }
+    }).catch(e => { r.innerHTML = `<span style="color:#ef4444;">Error: ${e.message}</span>`; });
+}
+
+// Global header channel badge — refreshes every 30 s so a Ch2 auto-promotion
+// (triggered by the file-drop watcher, not the UI) is reflected promptly.
+function updateChannelBadge() {
+    fetch('/api/data/channel2-watcher').then(r=>r.json()).then(d => {
+        const b = document.getElementById('channel-badge');
+        if (!b) return;
+        const ch = d.active_channel;
+        if (ch === 'real') {
+            b.textContent = 'CH2 REAL HOSPITAL';
+            b.style.background = '#10b981';
+            b.title = 'Active: Channel 2 real hospital data. Ch3 NHS open data always on in background.';
+        } else {
+            b.textContent = 'CH1 SYNTHETIC';
+            b.style.background = '#8b5cf6';
+            let tip = 'Active: Channel 1 synthetic (SACT v4.0 calibrated). ';
+            if (d.real_data_missing && d.real_data_missing.length) {
+                tip += 'Ch2 waiting for: ' + d.real_data_missing.join(', ') + '.';
+            } else if (d.pending_since_mtime) {
+                tip += 'Ch2 files detected — stability gate pending promotion.';
+            } else {
+                tip += 'Ch3 NHS open data always on in background.';
+            }
+            b.title = tip;
+        }
+    }).catch(() => {});
+}
+
+// Initial + polling
+updateChannelBadge();
+setInterval(updateChannelBadge, 30000);
+
+function loadDataChannelStatus() {
+    fetch('/api/data/source').then(r=>r.json()).then(d => {
+        // Update radio buttons
+        const current = d.current_channel;
+        document.querySelectorAll('input[name="data-channel"]').forEach(radio => {
+            if (radio.value === current) radio.checked = true;
+        });
+        // Update real data status
+        const real = d.channels.real;
+        const realStatus = document.getElementById('ch-real-status');
+        if (real.available) {
+            realStatus.textContent = `Available: ${real.patients} patients`;
+            realStatus.style.color = '#10b981';
+        } else {
+            realStatus.textContent = 'Not available — place files in datasets/real_data/';
+            realStatus.style.color = '#f59e0b';
+        }
+        // Highlight active channel
+        const synLabel = document.querySelector('label:has(input[value="synthetic"])');
+        const realLabel = document.getElementById('ch-real-label');
+        if (current === 'real') {
+            realLabel.style.background = '#f0fdf4';
+            realLabel.style.borderColor = '#22c55e';
+        }
+    }).catch(() => {});
+}
+
+function switchMode(mode) {
+    fetch('/api/mode', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({mode:mode})}).then(r=>r.json()).then(d => {
+        const modeColors = {normal:'#22c55e',elevated:'#f59e0b',crisis:'#f97316',emergency:'#ef4444'};
+        const mb = document.getElementById('mode-badge');
+        mb.textContent = mode.toUpperCase();
+        mb.style.background = modeColors[mode] || '#22c55e';
+    });
+}
+
+// ================================================================
+// ML PREDICTION TOOLS (Individual Patient)
+// ================================================================
+function getPatientData() {
+    return {
+        patient_id: document.getElementById('ml-pid').value,
+        age: parseInt(document.getElementById('ml-age').value),
+        distance_km: parseInt(document.getElementById('ml-dist').value),
+        previous_noshow_rate: parseFloat(document.getElementById('ml-rate').value),
+        expected_duration: parseInt(document.getElementById('ml-dur2').value),
+        cycle_number: parseInt(document.getElementById('ml-cycle').value),
+    };
+}
+function showMLResult(html) { document.getElementById('ml-predict-result').innerHTML += html; }
+function clearMLResult() { document.getElementById('ml-predict-result').innerHTML = ''; }
+
+function runMultitask() {
+    clearMLResult();
+    fetch('/api/ml/multitask/predict', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(getPatientData())}).then(r=>r.json()).then(d => {
+        showMLResult(`<div style="padding:8px;margin:4px 0;background:#f5f3ff;border-radius:4px;border-left:3px solid #8b5cf6;">
+            <strong>Multi-Task (PyTorch):</strong> No-show=${(d.noshow_probability*100).toFixed(1)}%, Duration=${d.predicted_duration?.toFixed(0)||'--'}min, CI=[${d.duration_lower?.toFixed(0)||'--'}, ${d.duration_upper?.toFixed(0)||'--'}], Correlation=${d.correlation_factor?.toFixed(2)||'--'}
+        </div>`);
+    }).catch(e => showMLResult(`<div style="color:#ef4444;">Multi-task error: ${e.message}</div>`));
+}
+
+function runConformal() {
+    const d = getPatientData();
+    Promise.all([
+        fetch('/api/ml/conformal/duration', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(d)}).then(r=>r.json()).catch(()=>({})),
+        fetch('/api/ml/conformal/noshow', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(d)}).then(r=>r.json()).catch(()=>({})),
+    ]).then(([dur, ns]) => {
+        showMLResult(`<div style="padding:8px;margin:4px 0;background:#ecfeff;border-radius:4px;border-left:3px solid #06b6d4;">
+            <strong>Conformal Duration:</strong> ${dur.point_estimate||'--'}min [${dur.lower_bound||'--'}, ${dur.upper_bound||'--'}] (${dur.coverage_guarantee||'90%'} guaranteed)<br>
+            <strong>Conformal No-Show:</strong> P=${ns.noshow_probability?.toFixed(3)||'--'}, Set=${JSON.stringify(ns.prediction_set||[])}, ${ns.set_interpretation||'--'}
+        </div>`);
+    });
+}
+
+function runMCDropout() {
+    fetch('/api/ml/mc-dropout/predict', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(getPatientData())}).then(r=>r.json()).then(d => {
+        showMLResult(`<div style="padding:8px;margin:4px 0;background:#f5f3ff;border-radius:4px;border-left:3px solid #8b5cf6;">
+            <strong>MC Dropout (${d.config?.n_forward_passes||100} passes):</strong><br>
+            No-show: ${d.noshow?.mean?.toFixed(3)||'--'} &plusmn; ${d.noshow?.std?.toFixed(3)||'--'} [${d.noshow?.ci_lower?.toFixed(3)||'--'}, ${d.noshow?.ci_upper?.toFixed(3)||'--'}]<br>
+            Duration: ${d.duration?.mean?.toFixed(1)||'--'} &plusmn; ${d.duration?.std?.toFixed(1)||'--'}min<br>
+            Epistemic: ${d.uncertainty?.epistemic?.toFixed(4)||'--'} | Aleatoric: ${d.uncertainty?.aleatoric?.toFixed(4)||'--'}<br>
+            ${d.interpretation||''}
+        </div>`);
+    }).catch(e => showMLResult(`<div style="color:#ef4444;">MC Dropout error: ${e.message}</div>`));
+}
+
+function runHierarchical() {
+    const pid = document.getElementById('ml-pid').value;
+    fetch('/api/ml/hierarchical/predict', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(getPatientData())}).then(r=>r.json()).then(d => {
+        showMLResult(`<div style="padding:8px;margin:4px 0;background:#f0fdf4;border-radius:4px;border-left:3px solid #10b981;">
+            <strong>Hierarchical Bayesian:</strong> Mean=${d.predicted_duration?.toFixed(1)||d.mean?.toFixed(1)||'--'}min, Patient effect=${d.patient_effect?.toFixed(2)||'--'}, Shrinkage=${d.shrinkage_factor?.toFixed(2)||'--'}
+        </div>`);
+    }).catch(e => showMLResult(`<div style="color:#ef4444;">Hierarchical error: ${e.message}</div>`));
+}
+
+function runSurvival() {
+    fetch('/api/ml/survival/predict', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(getPatientData())}).then(r=>r.json()).then(d => {
+        showMLResult(`<div style="padding:8px;margin:4px 0;background:#eff6ff;border-radius:4px;border-left:3px solid #3b82f6;">
+            <strong>Survival (Cox PH):</strong> Risk score=${d.risk_score?.toFixed(3)||'--'}, Survival@7d=${d.survival_7d?.toFixed(3)||'--'}, @14d=${d.survival_14d?.toFixed(3)||'--'}, @21d=${d.survival_21d?.toFixed(3)||'--'}
+        </div>`);
+    }).catch(e => showMLResult(`<div style="color:#ef4444;">Survival error: ${e.message}</div>`));
+}
+
+function runUplift() {
+    const pid = document.getElementById('ml-pid').value;
+    fetch('/api/ml/uplift/predict', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(getPatientData())}).then(r=>r.json()).then(d => {
+        const rec = d.recommended_intervention || d.best_intervention || '--';
+        const uplifts = d.intervention_uplifts || d.uplifts || {};
+        let details = Object.entries(uplifts).map(([k,v]) => `${k}: ${(v*100).toFixed(1)}%`).join(', ');
+        showMLResult(`<div style="padding:8px;margin:4px 0;background:#fff7ed;border-radius:4px;border-left:3px solid #f97316;">
+            <strong>Uplift:</strong> Best intervention=<strong>${rec}</strong><br>
+            ${details ? 'Uplifts: '+details : JSON.stringify(d).substring(0,200)}
+        </div>`);
+    }).catch(e => showMLResult(`<div style="color:#ef4444;">Uplift error: ${e.message}</div>`));
+}
+
+function runQRF() {
+    fetch('/api/ml/quantile-forest/duration', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(getPatientData())}).then(r=>r.json()).then(d => {
+        showMLResult(`<div style="padding:8px;margin:4px 0;background:#fefce8;border-radius:4px;border-left:3px solid #eab308;">
+            <strong>Quantile Forest:</strong> Median=${d.median?.toFixed(0)||d.predicted_duration?.toFixed(0)||'--'}min, Q10=${d.q10?.toFixed(0)||d.lower_90?.toFixed(0)||'--'}, Q90=${d.q90?.toFixed(0)||d.upper_90?.toFixed(0)||'--'}, Width=${d.interval_width?.toFixed(0)||'--'}min
+        </div>`);
+    }).catch(e => showMLResult(`<div style="color:#ef4444;">QRF error: ${e.message}</div>`));
+}
+
+function runDMLEstimate() {
+    fetch('/api/ml/dml/estimate', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({treatment:'Reminder_Sent',outcome:'no_show'})}).then(r=>r.json()).then(d => {
+        showMLResult(`<div style="padding:8px;margin:4px 0;background:#fdf2f8;border-radius:4px;border-left:3px solid #ec4899;">
+            <strong>DML:</strong> ATE=${d.treatment_effect?.toFixed(4)||'--'}, SE=${d.standard_error?.toFixed(4)||'--'}, CI=[${d.confidence_interval?.lower?.toFixed(4)||'--'}, ${d.confidence_interval?.upper?.toFixed(4)||'--'}], p=${d.p_value?.toFixed(4)||'--'} ${d.significant?'***':''}
+        </div>`);
+    }).catch(e => showMLResult(`<div style="color:#ef4444;">DML error: ${e.message}</div>`));
+}
+
+function runAllModels() {
+    clearMLResult();
+    showMLResult('<div style="color:#3b82f6;margin-bottom:8px;"><strong>Running all 8 models...</strong></div>');
+    runMultitask(); runConformal(); runMCDropout(); runHierarchical();
+    runSurvival(); runUplift(); runQRF(); runDMLEstimate();
+}
+
+// ================================================================
+// CAUSAL ANALYSIS TOOLS
+// ================================================================
+function showCausal(html) { document.getElementById('causal-result').innerHTML += html; }
+function clearCausal() { document.getElementById('causal-result').innerHTML = ''; }
+
+function loadDAG() {
+    clearCausal();
+    fetch('/api/ml/causal/dag').then(r=>r.json()).then(d => {
+        const nodes = d.nodes || []; const edges = d.edges || [];
+        showCausal(`<div style="padding:8px;background:#fef3c7;border-radius:4px;border-left:3px solid #f59e0b;">
+            <strong>Causal DAG:</strong> ${nodes.length} nodes, ${edges.length} edges<br>
+            Nodes: ${nodes.join(', ')}<br>
+            Edges: ${edges.map(e => e[0]+'→'+e[1]).join(', ')}
+        </div>`);
+    }).catch(e => showCausal(`<div style="color:#ef4444;">DAG error: ${e.message}</div>`));
+}
+
+function runIVDiag() {
+    fetch('/api/ml/causal/iv/diagnostics').then(r=>r.json()).then(d => {
+        showCausal(`<div style="padding:8px;margin:4px 0;background:#fef3c7;border-radius:4px;border-left:3px solid #f59e0b;">
+            <strong>IV Diagnostics:</strong><br>${JSON.stringify(d, null, 1).replace(/\n/g,'<br>').substring(0,500)}
+        </div>`);
+    }).catch(e => showCausal(`<div style="color:#ef4444;">IV Diagnostics error: ${e.message}</div>`));
+}
+
+function runCFExplanation() {
+    clearCausal();
+    const d = getPatientData();
+    fetch('/api/ml/causal/counterfactual-explanation', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+        Previous_NoShows: 3, Previous_Cancellations: 1, Travel_Distance_KM: parseInt(d.distance_km),
+        Age: parseInt(d.age), Cycle_Number: parseInt(d.cycle_number), Performance_Status: 1, Total_Appointments: 10
+    })}).then(r=>r.json()).then(d => {
+        let h = `<div style="padding:10px;margin:4px 0;background:#fef2f2;border-radius:4px;border-left:3px solid #dc2626;">
+            <strong>Counterfactual Explanation</strong><br>
+            <em>CF(x) = argmin ||x'-x|| s.t. f(x') != f(x)</em><br><br>
+            Current: <strong>${d.current_class}</strong> (${(d.current_prediction*100).toFixed(1)}%)<br>`;
+        if (d.found) {
+            h += `Counterfactual: <strong>${d.counterfactual_class}</strong> (${(d.counterfactual_prediction*100).toFixed(1)}%)<br>
+            Distance: ${d.distance}<br>
+            <strong>What would need to change:</strong><br>`;
+            Object.entries(d.changes||{}).forEach(([feat, info]) => {
+                h += `&bull; ${feat}: ${info.from} &rarr; ${info.to} (${info.label})<br>`;
+            });
+            h += `<br><em>${d.explanation}</em>`;
+        } else {
+            h += `<em>${d.explanation}</em>`;
+        }
+        h += '</div>';
+        showCausal(h);
+    }).catch(e => showCausal(`<div style="color:#ef4444;">CF Explanation error: ${e.message}</div>`));
+}
+
+function runCounterfactual() {
+    fetch('/api/ml/causal/counterfactual', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({treatment:'reminder_sent',patient_data:{reminder_sent:0,no_show:1}})}).then(r=>r.json()).then(d => {
+        showCausal(`<div style="padding:8px;margin:4px 0;background:#fef3c7;border-radius:4px;border-left:3px solid #f59e0b;">
+            <strong>Counterfactual:</strong> "What if we sent a reminder?"<br>
+            Predicted outcome: ${d.predicted_outcome??'--'}, Confidence: ${d.confidence?.toFixed(2)||'--'}
+        </div>`);
+    }).catch(e => showCausal(`<div style="color:#ef4444;">Counterfactual error: ${e.message}</div>`));
+}
+
+function runCausalEffect() {
+    fetch('/api/ml/causal/effect', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({treatment:'reminder_sent',outcome:'no_show'})}).then(r=>r.json()).then(d => {
+        showCausal(`<div style="padding:8px;margin:4px 0;background:#fef3c7;border-radius:4px;border-left:3px solid #f59e0b;">
+            <strong>Causal Effect (do-calculus):</strong> ATE=${d.ate?.toFixed(4)||JSON.stringify(d).substring(0,200)}
+        </div>`);
+    }).catch(e => showCausal(`<div style="color:#ef4444;">Causal effect error: ${e.message}</div>`));
+}
+
+function runOptimalTime() {
+    fetch('/api/ml/causal/optimal-time').then(r=>r.json()).then(d => {
+        showCausal(`<div style="padding:8px;margin:4px 0;background:#fef3c7;border-radius:4px;border-left:3px solid #f59e0b;">
+            <strong>Optimal Scheduling Time:</strong><br>${JSON.stringify(d, null, 1).replace(/\n/g,'<br>').substring(0,400)}
+        </div>`);
+    }).catch(e => showCausal(`<div style="color:#ef4444;">Optimal time error: ${e.message}</div>`));
+}
+
+function runDriftCheck() {
+    fetch('/api/ml/drift/check', {method:'POST'}).then(r=>r.json()).then(d => {
+        const color = d.overall_severity === 'none' ? '#10b981' : d.overall_severity === 'moderate' ? '#f59e0b' : '#ef4444';
+        showCausal(`<div style="padding:8px;margin:4px 0;background:#f8fafc;border-radius:4px;border-left:3px solid ${color};">
+            <strong>Drift Detection:</strong> ${d.features_drifted||0}/${d.total_checked||0} features drifted, Severity=${d.overall_severity||'none'}, Action=${d.recommended_action||'none'}
+            ${d.reports ? '<br>Max PSI: '+d.max_drift_score?.toFixed(4) : ''}
+        </div>`);
+    }).catch(e => showCausal(`<div style="color:#ef4444;">Drift check error: ${e.message}</div>`));
+}
+
+function loadValidation() {
+    fetch('/api/ml/validation').then(r=>r.json()).then(d => {
+        showCausal(`<div style="padding:8px;margin:4px 0;background:#f8fafc;border-radius:4px;border-left:3px solid #888;">
+            <strong>Model Validation:</strong><br>${JSON.stringify(d, null, 1).replace(/\n/g,'<br>').substring(0,500)}
+        </div>`);
+    }).catch(e => showCausal(`<div style="color:#ef4444;">Validation error: ${e.message}</div>`));
+}
+
+function loadEnsembleConfig() {
+    fetch('/api/ml/ensemble-config').then(r=>r.json()).then(d => {
+        showCausal(`<div style="padding:8px;margin:4px 0;background:#f8fafc;border-radius:4px;border-left:3px solid #888;">
+            <strong>Ensemble Config:</strong> Method=${d.method||'--'}, Models=${d.n_models||'--'}
+            ${d.weights ? '<br>Weights: '+JSON.stringify(d.weights) : ''}
+            ${d.model_names ? '<br>Models: '+d.model_names.join(', ') : ''}
+        </div>`);
+    }).catch(e => showCausal(`<div style="color:#ef4444;">Ensemble config error: ${e.message}</div>`));
+}
+
+function runCausalValidation() {
+    clearCausal();
+    showCausal('<div style="color:#b91c1c;">Running causal validation (placebo + falsification + sensitivity)...</div>');
+    fetch('/api/ml/causal/validate', {method:'POST'}).then(r=>r.json()).then(d => {
+        let h = `<div style="padding:10px;margin:4px 0;background:${d.overall_valid?'#f0fdf4':'#fef2f2'};border-radius:4px;border-left:3px solid ${d.overall_valid?'#059669':'#b91c1c'};">
+            <strong>Causal Validation Suite</strong>: ${d.passed}/${d.total_tests} passed (${d.pass_rate*100}%)<br><br>`;
+        (d.tests||[]).forEach(t => {
+            const icon = t.passed ? '&#10004;' : '&#10008;';
+            const color = t.passed ? '#059669' : '#ef4444';
+            h += `<div style="margin:4px 0;padding:4px 8px;background:${t.passed?'#f0fdf4':'#fef2f2'};border-radius:3px;">
+                <span style="color:${color};">${icon}</span> <strong>[${t.type.toUpperCase()}]</strong> ${t.name}<br>
+                <span style="font-size:0.9em;color:#555;">Expected: ${t.expected}, Observed: ${t.observed} (tol: ${t.tolerance}) — ${t.details}</span>
+            </div>`;
+        });
+        h += `<br><em>${d.interpretation||''}</em></div>`;
+        document.getElementById('causal-result').innerHTML = h;
+    }).catch(e => showCausal(`<div style="color:#ef4444;">Validation error: ${e.message}</div>`));
+}
+
+function runDROEvaluate() {
+    clearCausal();
+    showCausal('<div style="color:#7e22ce;">Evaluating schedule robustness under distributional shifts (DRO)...</div>');
+    fetch('/api/ml/uncertainty-optimization/evaluate', {method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({epsilon:0.05, alpha:0.90, n_scenarios:50})
+    }).then(r=>r.json()).then(d => {
+        if (d.error) { showCausal(`<div style="color:#ef4444;">${d.error}</div>`); return; }
+        let h = `<div style="padding:10px;background:#faf5ff;border-radius:6px;border-left:3px solid #7e22ce;">
+            <strong>Distributionally Robust Optimization (DRO) Evaluation</strong><br>
+            <em>P = {Q : W<sub>2</sub>(P<sub>emp</sub>, Q) &le; &epsilon;}</em><br><br>
+            <strong>Schedule Performance Under Distributional Shift:</strong><br>
+            Mean objective: <strong>${d.mean_objective?.toFixed(0)}</strong> |
+            Worst-case: <span style="color:#ef4444;font-weight:600;">${d.worst_case?.toFixed(0)}</span> |
+            Best-case: <span style="color:#10b981;">${d.best_case?.toFixed(0)}</span><br>
+            CVaR<sub>${d.cvar_alpha}</sub>: <strong>${d.cvar?.toFixed(0)}</strong>
+            (worst ${((1-(d.cvar_alpha||0.9))*100).toFixed(0)}% average)<br>
+            Std: ${d.std_objective?.toFixed(1)} | Scenarios: ${d.n_scenarios} | &epsilon;=${d.epsilon}<br>
+            Duration violations: <span style="color:${d.violation_probability>0.1?'#ef4444':'#10b981'};">${(d.violation_probability*100).toFixed(0)}%</span> of scenarios<br><br>
+            <em style="font-size:0.9em;">${d.interpretation||''}</em>
+        </div>`;
+        showCausal(h);
+    }).catch(e => showCausal(`<div style="color:#ef4444;">DRO error: ${e.message}</div>`));
+}
+
+function runDROCalibrate() {
+    clearCausal();
+    showCausal('<div style="color:#6b21a8;">Calibrating epsilon from historical data (seasonal shifts, disruptions)...</div>');
+    fetch('/api/ml/uncertainty-optimization/calibrate', {method:'POST'}).then(r=>r.json()).then(d => {
+        if (d.error) { showCausal(`<div style="color:#ef4444;">${d.error}</div>`); return; }
+        let h = `<div style="padding:10px;background:#faf5ff;border-radius:6px;border-left:3px solid #6b21a8;">
+            <strong>Epsilon Calibration from Historical Data</strong><br>
+            <em>epsilon = max(monthly_shift, CV * 0.3) * safety_factor</em><br><br>
+            <strong>Recommended epsilon: ${d.epsilon_recommended}</strong> (current: ${d.epsilon_current})<br>
+            Monthly no-show std: ${d.monthly_noshow_std || '?'}<br>
+            Max monthly shift: ${d.max_monthly_shift || '?'}<br>
+            Duration CV: ${d.duration_cv || '?'}<br>
+            Safety factor: ${d.safety_factor || '?'}<br><br>
+            <strong>Disruption Scenarios:</strong><br>`;
+        if (d.disruption_scenarios) {
+            Object.entries(d.disruption_scenarios).forEach(([k,v]) => {
+                h += `<span style="font-size:0.85em;"><strong>${k}:</strong> epsilon=${v.epsilon} — ${v.description}</span><br>`;
+            });
+        }
+        h += '</div>';
+        showCausal(h);
+    }).catch(e => showCausal(`<div style="color:#ef4444;">Calibration error: ${e.message}</div>`));
+}
+
+function runDROMetrics() {
+    clearCausal();
+    showCausal('<div style="color:#581c87;">Computing worst-case utilization and stability (30 scenarios)...</div>');
+    fetch('/api/ml/uncertainty-optimization/metrics', {method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({n_scenarios:30, auto_calibrate:true})
+    }).then(r=>r.json()).then(d => {
+        if (d.error) { showCausal(`<div style="color:#ef4444;">${d.error}</div>`); return; }
+        const u = d.utilization || {};
+        const s = d.stability || {};
+        const o = d.objective || {};
+        const t = d.tail_risk || {};
+        let h = `<div style="padding:10px;background:#faf5ff;border-radius:6px;border-left:3px solid #581c87;">
+            <strong>DRO Evaluation Metrics</strong> (${d.n_scenarios} scenarios, alpha=${d.alpha}, epsilon=${d.epsilon})<br><br>
+            <strong style="color:#7e22ce;">Utilization:</strong><br>
+            Mean: <strong>${(u.mean*100).toFixed(1)}%</strong> |
+            <span style="color:#ef4444;">Worst-case: ${(u.worst_case*100).toFixed(1)}%</span> |
+            <span style="color:#10b981;">Best-case: ${(u.best_case*100).toFixed(1)}%</span> |
+            CVaR: ${(u.cvar*100).toFixed(1)}%<br><br>
+            <strong style="color:#7e22ce;">Stability:</strong><br>
+            Std: ${s.std} | CV: ${s.cv} | <em>${s.interpretation}</em><br><br>
+            <strong style="color:#7e22ce;">Objective:</strong><br>
+            Mean: ${o.mean} | Worst: <span style="color:#ef4444;">${o.worst_case}</span> | CVaR: ${o.cvar} | Std: ${o.std}<br><br>
+            <strong style="color:#7e22ce;">Tail Risk:</strong><br>
+            ${t.interpretation}
+        </div>`;
+        showCausal(h);
+    }).catch(e => showCausal(`<div style="color:#ef4444;">Metrics error: ${e.message}</div>`));
+}
+
+function showModelCards() {
+    clearCausal();
+    showCausal('<div style="color:#4338ca;">Loading Model Cards for all ML models...</div>');
+    fetch('/api/ml/model-cards').then(r=>r.json()).then(d => {
+        if (d.error) { showCausal(`<div style="color:#ef4444;">${d.error}</div>`); return; }
+        let h = `<div style="padding:10px;background:#eef2ff;border-radius:6px;border-left:3px solid #4338ca;">
+            <strong>Model Cards — ML Transparency Report</strong>
+            <span style="color:#666;font-size:0.85em;"> (${d.trained_models}/${d.total_models} trained)</span><br><br>`;
+
+        Object.entries(d.cards || {}).forEach(([key, card]) => {
+            const trained = card.is_trained ? '<span style="color:#10b981;">TRAINED</span>' : '<span style="color:#f59e0b;">RULE-BASED</span>';
+            h += `<div style="margin:6px 0;padding:8px;background:white;border-radius:4px;border-left:3px solid ${card.is_trained?'#10b981':'#f59e0b'};">
+                <strong>${card.model_name}</strong> (${card.model_version}) — ${trained}<br>
+                <span style="font-size:0.85em;color:#555;">${card.model_type}</span><br>
+                <span style="font-size:0.85em;">${card.intended_use?.primary_use?.substring(0,120) || ''}...</span><br>`;
+
+            // Performance
+            const perf = card.performance?.overall || {};
+            if (perf.noshow_rate !== undefined) {
+                h += `<span style="font-size:0.82em;color:#3b82f6;">No-show rate: ${(perf.noshow_rate*100).toFixed(1)}% (n=${perf.n_total})</span><br>`;
+            }
+
+            // Subgroup fairness
+            const fair = card.fairness_assessment || {};
+            Object.entries(fair).forEach(([grp, f]) => {
+                const pass4 = f.four_fifths_rule ? '<span style="color:#10b981;">PASS</span>' : '<span style="color:#ef4444;">FAIL</span>';
+                h += `<span style="font-size:0.8em;color:#666;">${grp}: disparity=${f.max_disparity}, 4/5 rule: ${pass4}</span> `;
+            });
+
+            // Ethical
+            if (card.ethical_considerations?.length > 0) {
+                h += `<br><span style="font-size:0.8em;color:#7c3aed;">Ethics: ${card.ethical_considerations[0]}</span>`;
+            }
+
+            h += `<br><button onclick="showModelCard('${key}')" style="margin-top:4px;padding:2px 8px;background:#4338ca;color:white;border:none;border-radius:3px;cursor:pointer;font-size:0.75em;">Full Card</button>`;
+            h += '</div>';
+        });
+        h += '</div>';
+        showCausal(h);
+    }).catch(e => showCausal(`<div style="color:#ef4444;">Error: ${e.message}</div>`));
+}
+
+function showModelCard(modelKey) {
+    clearCausal();
+    showCausal(`<div style="color:#5b21b6;">Loading Model Card for ${modelKey}...</div>`);
+    fetch(`/api/ml/model-cards/${modelKey}`).then(r=>r.json()).then(card => {
+        if (card.error) { showCausal(`<div style="color:#ef4444;">${card.error}</div>`); return; }
+        let h = `<div style="padding:10px;background:#eef2ff;border-radius:6px;border-left:3px solid #5b21b6;">
+            <strong style="font-size:1.1em;">${card.model_name}</strong> v${card.model_version}<br>
+            <em>${card.model_type}</em><br>
+            Trained: ${card.is_trained ? 'Yes' : 'No (rule-based fallback)'}<br><br>`;
+
+        // Intended Use
+        h += '<strong style="color:#4338ca;">Intended Use</strong><br>';
+        h += `<span style="font-size:0.88em;">${card.intended_use?.primary_use || ''}</span><br>`;
+        h += `<span style="font-size:0.82em;color:#555;">Users: ${(card.intended_use?.intended_users||[]).join(', ')}</span><br>`;
+        h += `<span style="font-size:0.82em;color:#ef4444;">Out of scope: ${(card.intended_use?.out_of_scope||[]).slice(0,2).join('; ')}</span><br><br>`;
+
+        // Performance
+        h += '<strong style="color:#3b82f6;">Performance</strong><br>';
+        const perf = card.performance?.overall || {};
+        Object.entries(perf).forEach(([k,v]) => {
+            h += `<span style="font-size:0.85em;">${k}: ${typeof v === 'number' ? v.toFixed(3) : v}</span> | `;
+        });
+        h += '<br>';
+
+        // Subgroup metrics
+        const subs = card.performance?.by_subgroup || [];
+        if (subs.length > 0) {
+            h += '<strong style="font-size:0.85em;">By Subgroup:</strong><br>';
+            subs.forEach(s => {
+                const barW = Math.min(100, s.score * 300);
+                h += `<div style="display:flex;align-items:center;gap:4px;font-size:0.82em;margin:1px 0;">
+                    <span style="width:120px;">${s.group}=${s.value}</span>
+                    <div style="background:#3b82f6;height:7px;width:${barW}px;border-radius:2px;"></div>
+                    <span>${(s.score*100).toFixed(1)}% (n=${s.n})</span>
+                </div>`;
+            });
+        }
+
+        // Fairness
+        h += '<br><strong style="color:#10b981;">Fairness Assessment</strong><br>';
+        Object.entries(card.fairness_assessment || {}).forEach(([grp, f]) => {
+            const pass4 = f.four_fifths_rule;
+            h += `<span style="font-size:0.85em;">${grp}: disparity=${f.max_disparity}, ratio=${f.min_max_ratio}, 4/5 rule: ${pass4 ? 'PASS' : 'FAIL'}</span><br>`;
+        });
+
+        // Limitations
+        h += '<br><strong style="color:#f59e0b;">Known Limitations</strong><br>';
+        (card.limitations?.known_limitations || []).forEach(l => {
+            h += `<span style="font-size:0.82em;">- ${l}</span><br>`;
+        });
+
+        // Ethical
+        h += '<br><strong style="color:#7c3aed;">Ethical Considerations</strong><br>';
+        (card.ethical_considerations || []).forEach(e => {
+            h += `<span style="font-size:0.82em;">- ${e}</span><br>`;
+        });
+
+        // Maintenance
+        h += `<br><span style="font-size:0.82em;color:#666;">Update: ${card.maintenance?.update_frequency || ''}<br>Monitor: ${card.maintenance?.monitoring_plan || ''}</span>`;
+
+        h += '</div>';
+        showCausal(h);
+    }).catch(e => showCausal(`<div style="color:#ef4444;">Error: ${e.message}</div>`));
+}
+
+function runSensitivityLocal() {
+    clearCausal();
+    showCausal('<div style="color:#0e7490;">Computing local sensitivity S_i = dy/dx_i ...</div>');
+    fetch('/api/ml/sensitivity/local', {method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({model:'noshow', perturbation:0.01})
+    }).then(r=>r.json()).then(d => {
+        if (d.error) { showCausal(`<div style="color:#ef4444;">${d.error}</div>`); return; }
+        const loc = d.local || {};
+        let h = `<div style="padding:10px;margin:4px 0;background:#ecfeff;border-radius:4px;border-left:3px solid #0e7490;">
+            <strong>Local Sensitivity Analysis</strong> (Patient: ${loc.patient_id || '?'})<br>
+            <em>${d.formulas?.local_sensitivity || ''}</em><br>
+            Base prediction: <strong>${loc.base_prediction}</strong><br><br>
+            <strong>Top features increasing prediction:</strong><br>`;
+        (loc.top_increasing||[]).forEach(f => {
+            h += `<span style="color:#ef4444;">+${f.sensitivity.toFixed(4)}</span> ${f.feature}<br>`;
+        });
+        h += `<br><strong>Top features decreasing prediction:</strong><br>`;
+        (loc.top_decreasing||[]).forEach(f => {
+            h += `<span style="color:#10b981;">${f.sensitivity.toFixed(4)}</span> ${f.feature}<br>`;
+        });
+        h += `<br><em>${loc.interpretation||''}</em></div>`;
+        showCausal(h);
+    }).catch(e => showCausal(`<div style="color:#ef4444;">Sensitivity error: ${e.message}</div>`));
+}
+
+function runSensitivityGlobal() {
+    clearCausal();
+    showCausal('<div style="color:#155e75;">Computing global importance I_j = (1/n) sum|S_ij| ...</div>');
+    fetch('/api/ml/sensitivity/global', {method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({model:'noshow', max_samples:100})
+    }).then(r=>r.json()).then(d => {
+        if (d.error) { showCausal(`<div style="color:#ef4444;">${d.error}</div>`); return; }
+        const gl = d.global || {};
+        let h = `<div style="padding:10px;margin:4px 0;background:#ecfeff;border-radius:4px;border-left:3px solid #155e75;">
+            <strong>Global Sensitivity Analysis</strong> (n=${gl.n_samples} samples)<br>
+            <em>${d.formulas?.global_importance || ''}</em><br><br>
+            <strong>Top 15 Most Important Features:</strong><br>`;
+        (gl.top_20_features||[]).slice(0,15).forEach((f,i) => {
+            const barW = Math.min(200, f.importance * 5000);
+            h += `<div style="margin:2px 0;display:flex;align-items:center;gap:6px;">
+                <span style="width:180px;font-size:0.85em;">${i+1}. ${f.feature}</span>
+                <div style="background:#0e7490;height:10px;width:${barW}px;border-radius:3px;"></div>
+                <span style="font-size:0.8em;color:#555;">${f.importance.toFixed(4)} (&plusmn;${f.std.toFixed(4)})</span>
+            </div>`;
+        });
+        if (gl.by_category) {
+            h += `<br><strong>By Category:</strong><br>`;
+            Object.entries(gl.by_category).forEach(([cat, features]) => {
+                h += `<div style="margin:4px 0;"><strong style="color:#0e7490;">${cat}:</strong> `;
+                h += features.slice(0,3).map(f => `${f.feature}(${f.importance.toFixed(3)})`).join(', ');
+                h += `</div>`;
+            });
+        }
+        h += `<br><em>${gl.interpretation||''}</em></div>`;
+        showCausal(h);
+    }).catch(e => showCausal(`<div style="color:#ef4444;">Sensitivity error: ${e.message}</div>`));
+}
+
+function runSensitivityFull() {
+    clearCausal();
+    showCausal('<div style="color:#164e63;">Running full sensitivity analysis (local + global + elasticity)...</div>');
+    fetch('/api/ml/sensitivity/full', {method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({model:'noshow', max_samples:100})
+    }).then(r=>r.json()).then(d => {
+        if (d.error) { showCausal(`<div style="color:#ef4444;">${d.error}</div>`); return; }
+        const loc = d.local || {};
+        const gl = d.global || {};
+        const el = d.elasticity || {};
+        let h = `<div style="padding:10px;margin:4px 0;background:#ecfeff;border-radius:4px;border-left:3px solid #164e63;">
+            <strong>Full Sensitivity Analysis</strong><br>
+            <em>S_i = d(y_hat)/d(x_i) | I_j = (1/n)&Sigma;|S_ij| | E_i = S_i*(x_i/y_hat)</em><br><br>`;
+
+        // Local
+        h += `<strong style="color:#0e7490;">LOCAL (Patient: ${loc.patient_id})</strong> Base: ${loc.base_prediction}<br>`;
+        (loc.top_increasing||[]).forEach(f => {
+            h += `<span style="color:#ef4444;">+${f.sensitivity.toFixed(4)}</span> ${f.feature} | `;
+        });
+        h += '<br>';
+        (loc.top_decreasing||[]).forEach(f => {
+            h += `<span style="color:#10b981;">${f.sensitivity.toFixed(4)}</span> ${f.feature} | `;
+        });
+
+        // Global
+        h += `<br><br><strong style="color:#155e75;">GLOBAL (n=${gl.n_samples})</strong><br>`;
+        (gl.top_20_features||[]).slice(0,10).forEach((f,i) => {
+            const barW = Math.min(150, f.importance * 4000);
+            h += `<div style="margin:1px 0;display:flex;align-items:center;gap:4px;font-size:0.85em;">
+                <span style="width:160px;">${i+1}. ${f.feature}</span>
+                <div style="background:#155e75;height:8px;width:${barW}px;border-radius:2px;"></div>
+                <span style="color:#555;">${f.importance.toFixed(4)}</span>
+            </div>`;
+        });
+
+        // Elasticity
+        h += `<br><strong style="color:#164e63;">ELASTICITY (% change)</strong><br>`;
+        (el.top_20||[]).slice(0,8).forEach(f => {
+            const col = f.elasticity > 0 ? '#ef4444' : '#10b981';
+            h += `<span style="color:${col};">${f.elasticity > 0 ? '+' : ''}${f.elasticity.toFixed(3)}</span> ${f.feature} | `;
+        });
+
+        h += `</div>`;
+        showCausal(h);
+    }).catch(e => showCausal(`<div style="color:#ef4444;">Sensitivity error: ${e.message}</div>`));
+}
+
+function loadRobustness() {
+    fetch('/api/schedule/robustness').then(r=>r.json()).then(d => {
+        const rob = d.details || {};
+        let h = `<div style="padding:10px;margin:4px 0;background:#f0fdf4;border-radius:4px;border-left:3px solid #059669;">
+            <strong>Schedule Robustness Metrics</strong><br>
+            <em>R(S) = (1/|P|) * &Sigma; min(1, Slack_p / Duration_p)</em><br><br>
+            <strong>R(S) = ${rob.R_S || d.robustness_score || '--'}</strong> (0 = fragile, 1 = maximally robust)<br>
+            Avg gap: ${rob.avg_gap_minutes || '--'} min<br>
+            <strong>Slack Distribution:</strong> <em>Slack_p = s_p - (s_{p-1} + d_{p-1})</em><br>
+            Mean: ${rob.slack_mean || '--'} min | Min: ${rob.slack_min || '--'} min | Max: ${rob.slack_max || '--'} min | Std: ${rob.slack_std || '--'} min<br>
+            <strong>Slot Classification:</strong>
+            <span style="color:#ef4444;">Critical(&lt;10min): ${rob.critical_slots||0}</span> |
+            <span style="color:#f59e0b;">Tight(10-20min): ${rob.tight_slots||0}</span> |
+            <span style="color:#3b82f6;">Adequate(20-60min): ${rob.adequate_slots||0}</span> |
+            <span style="color:#10b981;">Ample(&gt;60min): ${rob.ample_slots||0}</span><br>
+            Transitions: ${rob.total_transitions || '--'}`;
+        if (d.interpretation) {
+            h += '<br><br><strong>Interpretation:</strong><br>';
+            Object.values(d.interpretation).forEach(v => { h += v + '<br>'; });
+        }
+        h += '</div>';
+        showCausal(h);
+    }).catch(e => showCausal(`<div style="color:#ef4444;">Robustness: ${e.message}</div>`));
+}
+
+function loadMARLAgent() {
+    clearCausal();
+    showCausal('<div style="color:#6d28d9;">Loading Multi-Agent RL Chair Scheduler...</div>');
+    fetch('/api/ml/marl-scheduler').then(r=>r.json()).then(d => {
+        if (d.error) { showCausal(`<div style="color:#ef4444;">${d.error}</div>`); return; }
+        let h = `<div style="padding:10px;background:#f5f3ff;border-radius:6px;border-left:3px solid #6d28d9;">
+            <strong>Multi-Agent RL (MARL) — Independent Chair Agents</strong><br>
+            <em>${d.formulas?.per_agent_update || ''}</em><br><br>
+            <strong>Agents:</strong> ${d.n_agents} (one per chair)<br>
+            <strong>State per agent:</strong> ${d.state_per_agent || '?'}<br>
+            <strong>Actions:</strong> ${d.action_per_agent || '?'}<br>
+            <strong>Reward:</strong> <em>${d.formulas?.shared_reward || ''}</em><br>
+            <strong>Episodes:</strong> ${d.episodes} | Team reward: ${d.total_team_reward}<br>
+            <strong>Q-entries:</strong> ${d.total_q_entries}<br><br>
+            <strong>Top Agents:</strong><br>`;
+        (d.agents || []).forEach(a => {
+            h += `Chair ${a.chair_id}: ${a.q_entries} states, ${a.updates} updates, reward=${a.total_reward}<br>`;
+        });
+        h += `<br><button onclick="fetch('/api/ml/marl-scheduler/train',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'}).then(r=>r.json()).then(d=>{alert('MARL trained: '+JSON.stringify(d))})" style="padding:4px 10px;background:#6d28d9;color:white;border:none;border-radius:3px;cursor:pointer;font-size:0.8em;">Train MARL</button>`;
+        h += '</div>';
+        showCausal(h);
+    }).catch(e => showCausal(`<div style="color:#ef4444;">MARL error: ${e.message}</div>`));
+}
+
+function loadRLAgent() {
+    fetch('/api/ml/rl-scheduler').then(r=>r.json()).then(d => {
+        let h = `<div style="padding:10px;margin:4px 0;background:#f5f3ff;border-radius:4px;border-left:3px solid #7c3aed;">
+            <strong>RL Scheduling Agent (Q-Learning)</strong><br>
+            <em>${d.formula||''}</em><br><br>
+            Status: <strong>${d.status}</strong> | Episodes: ${d.total_episodes||0} | Avg reward: ${d.avg_reward||'--'}<br>
+            Q-table: ${d.q_table_size||0} states | ${d.state_space||''}<br>
+            Actions: ${d.action_space||''}<br>
+            Reward: ${d.reward||''}<br>`;
+        if (d.policy_distribution) {
+            h += '<strong>Learned Policy:</strong> ';
+            Object.entries(d.policy_distribution).forEach(([k,v]) => { h += `${k}=${(v*100).toFixed(0)}% `; });
+        }
+        if (d.parameters) {
+            h += `<br><strong>Params:</strong> alpha=${d.parameters.alpha}, gamma=${d.parameters.gamma}, epsilon=${d.parameters.epsilon}, lambda=${d.parameters.lambda_noshow}`;
+        }
+        h += '</div>';
+        showCausal(h);
+    }).catch(e => showCausal(`<div style="color:#ef4444;">RL Agent: ${e.message}</div>`));
+}
+
+function rlRecommend() {
+    fetch('/api/ml/rl-scheduler/recommend', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+        hour: new Date().getHours(), chairs_occupied: 8, queue_size: 4, avg_noshow_risk: 0.18, urgent_count: 1
+    })}).then(r=>r.json()).then(d => {
+        showCausal(`<div style="padding:10px;margin:4px 0;background:#ede9fe;border-radius:4px;border-left:3px solid #6d28d9;">
+            <strong>RL Recommendation:</strong><br>
+            Action: <strong>${d.recommended_action}</strong> | Chair: ${d.chair} | Q-value: ${d.q_value}<br>
+            State: Hour=${d.state?.hour}, Occupied=${d.state?.chairs_occupied}, Queue=${d.state?.queue_size}, Util=${d.state?.utilization}
+        </div>`);
+    }).catch(e => showCausal(`<div style="color:#ef4444;">RL Recommend: ${e.message}</div>`));
+}
+
+function loadOnlineLearning() {
+    fetch('/api/ml/online-learning').then(r=>r.json()).then(d => {
+        let h = `<div style="padding:8px;margin:4px 0;background:#f0fdf4;border-radius:4px;border-left:3px solid #10b981;">
+            <strong>Online Learning Status:</strong><br>
+            Total updates: ${d.total_updates} | SGD fitted: ${d.sgd_fitted}<br>
+            <strong>Formulas:</strong><br>
+            SGD: ${d.formulas?.sgd || '--'}<br>
+            Bayesian: ${d.formulas?.bayesian || '--'}<br>
+            EMA: ${d.formulas?.ema || '--'}<br>`;
+        if (d.posterior) {
+            const ns = d.posterior.noshow_rate;
+            const dur = d.posterior.duration_mean;
+            h += `<strong>Posterior:</strong><br>
+                No-show: Beta(${ns?.alpha}, ${ns?.beta}) mean=${ns?.mean}<br>
+                Duration: N(${dur?.mu}, ${dur?.sigma2}/${dur?.n_observations})<br>`;
+            if (d.posterior.ema_baselines) {
+                h += `<strong>EMA Baselines:</strong> noshow=${d.posterior.ema_baselines.noshow_rate?.toFixed(4)}, dur=${d.posterior.ema_baselines.avg_duration?.toFixed(1)}min<br>`;
+            }
+        }
+        h += '</div>';
+        showCausal(h);
+    }).catch(e => showCausal(`<div style="color:#ef4444;">Online learning: ${e.message}</div>`));
+}
+
+function testOnlineUpdate() {
+    const d = getPatientData();
+    fetch('/api/ml/online-learning/update', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+        attended: true, actual_duration: 145, weather_severity: 0.1,
+        previous_noshow_rate: 0.15, distance_km: 20, age: 65, cycle_number: 3, expected_duration: 180
+    })}).then(r=>r.json()).then(d => {
+        let h = `<div style="padding:8px;margin:4px 0;background:#eff6ff;border-radius:4px;border-left:3px solid #3b82f6;">
+            <strong>Online Update (SGD+Bayesian+EMA):</strong> ${d.total_updates} total updates<br>`;
+        (d.updates||[]).forEach(u => {
+            h += `${u.method.toUpperCase()}: ${u.model} — ${u.details}<br>`;
+        });
+        if (d.posterior) {
+            h += `Posterior no-show: Beta(${d.posterior.noshow_rate?.alpha}, ${d.posterior.noshow_rate?.beta}) = ${d.posterior.noshow_rate?.mean}<br>`;
+        }
+        h += '</div>';
+        showCausal(h);
+    }).catch(e => showCausal(`<div style="color:#ef4444;">Update error: ${e.message}</div>`));
+}
+
+function loadSequenceModel() {
+    fetch('/api/ml/sequence-model').then(r=>r.json()).then(d => {
+        showCausal(`<div style="padding:8px;margin:4px 0;background:#f8fafc;border-radius:4px;border-left:3px solid #888;">
+            <strong>Sequence Model (GRU):</strong> ${d.model_type||'--'}, Hidden=${d.hidden_size||'--'}, Patients with history=${d.patients_with_history||'--'}
+        </div>`);
+    }).catch(e => showCausal(`<div style="color:#ef4444;">Sequence model error: ${e.message}</div>`));
+}
+
+// ================================================================
+// SENTIMENT & EVENT IMPACT TOOLS
+// ================================================================
+function runSentiment() {
+    const text = document.getElementById('ml-evt-text').value;
+    if (!text) return;
+    fetch('/api/ml/events/analyze', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:text})}).then(r=>r.json()).then(d => {
+        document.getElementById('sentiment-result').innerHTML = `<div style="padding:10px;background:#fef3c7;border-radius:6px;border-left:3px solid #f59e0b;">
+            <strong>Sentiment Score:</strong> ${d.sentiment?.toFixed(3)||'--'} (${d.is_negative?'Negative':'Positive/Neutral'})<br>
+            <strong>Severity:</strong> ${d.severity||'--'} (value: ${d.severity_value||'--'})<br>
+            <strong>Keywords:</strong> ${(d.keywords||[]).join(', ')||'none detected'}
+        </div>`;
+    }).catch(e => { document.getElementById('sentiment-result').innerHTML = `<span style="color:#ef4444;">Error: ${e.message}</span>`; });
+}
+
+function runFullImpact() {
+    const text = document.getElementById('ml-evt-text').value;
+    if (!text) return;
+    fetch('/api/ml/events/impact', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({events:[{title:'User Event',description:text,type:'WEATHER',severity:3}]})}).then(r=>r.json()).then(d => {
+        document.getElementById('sentiment-result').innerHTML = `<div style="padding:10px;background:#fef2f2;border-radius:6px;border-left:3px solid #ef4444;">
+            <strong>Baseline No-Show:</strong> ${(d.baseline_noshow_rate*100).toFixed(1)}%<br>
+            <strong>Predicted No-Show:</strong> ${(d.predicted_noshow_rate*100).toFixed(1)}%<br>
+            <strong>Increase:</strong> +${(d.absolute_increase*100).toFixed(1)}% (${d.relative_increase?.toFixed(0)||'--'}% relative)<br>
+            ${d.recommendations ? '<strong>Recommendations:</strong> '+d.recommendations.join('; ') : ''}
+        </div>`;
+    }).catch(e => { document.getElementById('sentiment-result').innerHTML = `<span style="color:#ef4444;">Error: ${e.message}</span>`; });
+}
+
+// ================================================================
+// REMAINING API INTEGRATIONS (batch, comparison, patient-specific)
+// ================================================================
+function runHierVariance() {
+    fetch('/api/ml/hierarchical/variance-decomposition').then(r=>r.json()).then(d => {
+        showCausal(`<div style="padding:8px;margin:4px 0;background:#f0fdf4;border-radius:4px;border-left:3px solid #10b981;">
+            <strong>Variance Decomposition:</strong> ICC=${d.icc?.toFixed(3)||'--'}, Between-patient var=${d.between_patient_variance?.toFixed(2)||'--'}, Within-patient var=${d.within_patient_variance?.toFixed(2)||'--'}
+        </div>`);
+    }).catch(e => showCausal(`<div style="color:#888;">Variance decomposition: ${e.message}</div>`));
+}
+
+function runHierCompare() {
+    fetch('/api/ml/hierarchical/compare', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({patient_ids:[document.getElementById('ml-pid').value]})}).then(r=>r.json()).then(d => {
+        showCausal(`<div style="padding:8px;margin:4px 0;background:#f0fdf4;border-radius:4px;border-left:3px solid #10b981;">
+            <strong>Hierarchical Compare:</strong> ${JSON.stringify(d).substring(0,300)}
+        </div>`);
+    }).catch(e => showCausal(`<div style="color:#888;">Hierarchical compare: ${e.message}</div>`));
+}
+
+function runIVEstimate() {
+    fetch('/api/ml/causal/iv/estimate', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({})}).then(r=>r.json()).then(d => {
+        showCausal(`<div style="padding:8px;margin:4px 0;background:#fef3c7;border-radius:4px;border-left:3px solid #f59e0b;">
+            <strong>IV Formal Estimate:</strong> Effect=${d.causal_effect?.toFixed(4)||'--'}, F-stat=${d.first_stage_f_stat?.toFixed(1)||'--'}, Weak=${d.weak_instrument??'--'}
+        </div>`);
+    }).catch(e => showCausal(`<div style="color:#888;">IV estimate: ${e.message}</div>`));
+}
+
+function runInterventionCompare() {
+    fetch('/api/ml/causal/intervention-comparison', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({interventions:['reminder_sent','phone_call']})}).then(r=>r.json()).then(d => {
+        showCausal(`<div style="padding:8px;margin:4px 0;background:#fef3c7;border-radius:4px;border-left:3px solid #f59e0b;">
+            <strong>Intervention Comparison:</strong> ${JSON.stringify(d).substring(0,400)}
+        </div>`);
+    }).catch(e => showCausal(`<div style="color:#888;">Intervention compare: ${e.message}</div>`));
+}
+
+function runDMLCompare() {
+    fetch('/api/ml/dml/compare', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({treatments:['Reminder_Sent','Phone_Call_Made']})}).then(r=>r.json()).then(d => {
+        showCausal(`<div style="padding:8px;margin:4px 0;background:#fdf2f8;border-radius:4px;border-left:3px solid #ec4899;">
+            <strong>DML Treatment Comparison:</strong> ${JSON.stringify(d).substring(0,400)}
+        </div>`);
+    }).catch(e => showCausal(`<div style="color:#888;">DML compare: ${e.message}</div>`));
+}
+
+function runConformalCalibrate() {
+    fetch('/api/ml/conformal/calibrate', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model_type:'duration',alpha:0.1})}).then(r=>r.json()).then(d => {
+        showCausal(`<div style="padding:8px;margin:4px 0;background:#ecfeff;border-radius:4px;border-left:3px solid #06b6d4;">
+            <strong>Conformal Calibration:</strong> ${JSON.stringify(d).substring(0,300)}
+        </div>`);
+    }).catch(e => showCausal(`<div style="color:#888;">Conformal calibrate: ${e.message}</div>`));
+}
+
+function runUpliftImpact() {
+    fetch('/api/ml/uplift/impact', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({intervention:'phone_call'})}).then(r=>r.json()).then(d => {
+        showMLResult(`<div style="padding:8px;margin:4px 0;background:#fff7ed;border-radius:4px;border-left:3px solid #f97316;">
+            <strong>Uplift Impact:</strong> ${JSON.stringify(d).substring(0,300)}
+        </div>`);
+    }).catch(e => showMLResult(`<div style="color:#888;">Uplift impact: ${e.message}</div>`));
+}
+
+function runQRFNoshow() {
+    fetch('/api/ml/quantile-forest/noshow', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(getPatientData())}).then(r=>r.json()).then(d => {
+        showMLResult(`<div style="padding:8px;margin:4px 0;background:#fefce8;border-radius:4px;border-left:3px solid #eab308;">
+            <strong>QRF No-Show:</strong> ${JSON.stringify(d).substring(0,300)}
+        </div>`);
+    }).catch(e => showMLResult(`<div style="color:#888;">QRF no-show: ${e.message}</div>`));
+}
+
+// Patient-specific endpoints (use patient ID from ML tools input)
+function runPatientHazardCurve() {
+    const pid = document.getElementById('ml-pid').value;
+    fetch('/api/ml/survival/hazard-curve/'+pid).then(r=>r.json()).then(d => {
+        showMLResult(`<div style="padding:8px;margin:4px 0;background:#eff6ff;border-radius:4px;border-left:3px solid #3b82f6;"><strong>Hazard Curve (${pid}):</strong> ${JSON.stringify(d).substring(0,300)}</div>`);
+    }).catch(e => showMLResult(`<div style="color:#888;">Hazard curve: ${e.message}</div>`));
+}
+
+function runPatientUpliftRecommend() {
+    const pid = document.getElementById('ml-pid').value;
+    fetch('/api/ml/uplift/recommend/'+pid).then(r=>r.json()).then(d => {
+        showMLResult(`<div style="padding:8px;margin:4px 0;background:#fff7ed;border-radius:4px;border-left:3px solid #f97316;"><strong>Uplift Recommendation (${pid}):</strong> ${d.recommended_intervention||'--'}, Expected reduction: ${d.expected_reduction||'--'}</div>`);
+    }).catch(e => showMLResult(`<div style="color:#888;">Uplift recommend: ${e.message}</div>`));
+}
+
+function runPatientHierarchical() {
+    const pid = document.getElementById('ml-pid').value;
+    fetch('/api/ml/hierarchical/patient/'+pid).then(r=>r.json()).then(d => {
+        showMLResult(`<div style="padding:8px;margin:4px 0;background:#f0fdf4;border-radius:4px;border-left:3px solid #10b981;"><strong>Hierarchical (${pid}):</strong> Effect=${d.patient_effect?.toFixed(2)||'--'}, Shrinkage=${d.shrinkage_factor?.toFixed(2)||'--'}</div>`);
+    }).catch(e => showMLResult(`<div style="color:#888;">Hierarchical patient: ${e.message}</div>`));
+}
+
+// Batch endpoints
+function runBatchMCDropout() {
+    fetch('/api/ml/mc-dropout/batch', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({patients:[getPatientData()],n_forward_passes:50})}).then(r=>r.json()).then(d => {
+        showMLResult(`<div style="padding:8px;margin:4px 0;background:#f5f3ff;border-radius:4px;border-left:3px solid #8b5cf6;"><strong>MC Dropout Batch:</strong> ${d.count||0} predictions</div>`);
+    }).catch(e => showMLResult(`<div style="color:#888;">MC batch: ${e.message}</div>`));
+}
+
+function runBatchUplift() {
+    fetch('/api/ml/uplift/batch-recommend', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({patient_ids:[document.getElementById('ml-pid').value]})}).then(r=>r.json()).then(d => {
+        showMLResult(`<div style="padding:8px;margin:4px 0;background:#fff7ed;border-radius:4px;border-left:3px solid #f97316;"><strong>Batch Uplift:</strong> ${JSON.stringify(d).substring(0,300)}</div>`);
+    }).catch(e => showMLResult(`<div style="color:#888;">Batch uplift: ${e.message}</div>`));
+}
+
+function runMultitaskCorrelation() {
+    fetch('/api/ml/multitask/correlation').then(r=>r.json()).then(d => {
+        showCausal(`<div style="padding:8px;margin:4px 0;background:#f5f3ff;border-radius:4px;border-left:3px solid #8b5cf6;"><strong>Task Correlation:</strong> ${d.correlation?.toFixed(3)||JSON.stringify(d).substring(0,200)}</div>`);
+    }).catch(e => showCausal(`<div style="color:#888;">Correlation: ${e.message}</div>`));
+}
+
+function runQRFCompare() {
+    fetch('/api/ml/quantile-forest/compare', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(getPatientData())}).then(r=>r.json()).then(d => {
+        showMLResult(`<div style="padding:8px;margin:4px 0;background:#fefce8;border-radius:4px;border-left:3px solid #eab308;"><strong>QRF Compare:</strong> ${JSON.stringify(d).substring(0,300)}</div>`);
+    }).catch(e => showMLResult(`<div style="color:#888;">QRF compare: ${e.message}</div>`));
+}
+
+// System endpoints
+function loadAppointments() {
+    fetch('/api/appointments').then(r=>r.json()).then(d => {
+        console.log('Appointments API:', d);
+    }).catch(()=>{});
+}
+
+function loadEvents() {
+    fetch('/api/events').then(r=>r.json()).then(d => {
+        console.log('Events API:', d);
+    }).catch(()=>{});
+}
+
+function loadConfig() {
+    fetch('/api/config').then(r=>r.json()).then(d => {
+        console.log('Config:', d);
+    }).catch(()=>{});
+}
+
+function runDurationTest() {
+    fetch('/api/ml/duration-test', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(getPatientData())}).then(r=>r.json()).then(d => {
+        showMLResult(`<div style="padding:8px;margin:4px 0;background:#f8fafc;border-radius:4px;border-left:3px solid #888;"><strong>Duration Test:</strong> ${JSON.stringify(d).substring(0,300)}</div>`);
+    }).catch(e => showMLResult(`<div style="color:#888;">Duration test: ${e.message}</div>`));
+}
+
+function runUrgentInsert() {
+    fetch('/api/urgent/insert', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+        patient_id: document.getElementById('sq-pid').value,
+        priority: parseInt(document.getElementById('sq-priority').value),
+        duration: parseInt(document.getElementById('sq-dur').value),
+        postcode: document.getElementById('sq-postcode').value,
+    })}).then(r=>r.json()).then(d => {
+        document.getElementById('sq-result').style.display='block';
+        document.getElementById('sq-result').innerHTML = `<div style="padding:10px;background:#f0fdf4;border-radius:6px;border-left:3px solid #10b981;"><strong>Inserted:</strong> ${JSON.stringify(d).substring(0,300)}</div>`;
+    }).catch(e => { document.getElementById('sq-result').innerHTML = `<span style="color:#ef4444;">${e.message}</span>`; });
+}
+
+function loadData() {
+    fetch('/api/data/load', {method:'POST'}).then(r=>r.json()).then(d => {
+        alert('Data loaded: ' + (d.message || JSON.stringify(d)));
+        init();
+    }).catch(e => alert('Load error: '+e.message));
+}
+
+function checkNHSNow() {
+    const s = document.getElementById('auto-update-status');
+    s.style.display = 'block';
+    s.innerHTML = '<span style="color:#3b82f6;">Checking NHS data sources...</span>';
+    fetch('/api/data/nhs/check-updates', {method:'POST'}).then(r=>r.json()).then(d => {
+        let msg = '';
+        (d.results||[]).forEach(r => {
+            const icon = r.success ? (r.is_new_data ? '&#9733;' : '&#10004;') : '&#10008;';
+            const color = r.success ? (r.is_new_data ? '#f59e0b' : '#22c55e') : '#ef4444';
+            msg += `<span style="color:${color}">${icon}</span> ${r.source}: ${r.success ? (r.is_new_data ? r.records+' new records downloaded' : 'Up to date') : (r.error||'Failed')}<br>`;
+        });
+        s.innerHTML = msg;
+        loadMLTab(); // Refresh the ML tab data
+    }).catch(() => { s.innerHTML = '<span style="color:#ef4444;">Failed to check</span>'; });
+}
+
+function runRecalNow() {
+    const level = parseInt(document.getElementById('recal-level').value);
+    const levelNames = {0:'Parameter Refresh', 1:'Baseline Recalibration', 2:'Feature Weight Update', 3:'Full Model Retrain'};
+    const s = document.getElementById('auto-update-status');
+    s.style.display = 'block';
+    s.innerHTML = `<span style="color:#10b981;">Running Level ${level} (${levelNames[level]})...</span>`;
+    fetch('/api/ml/recalibration/run', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({level:level,source:'manual'})}).then(r=>r.json()).then(d => {
+        const color = d.success ? '#10b981' : '#ef4444';
+        s.innerHTML = `<span style="color:${color};">&#10004; Level ${d.level} ${levelNames[d.level]||''} ${d.success?'complete':'failed'}</span> (${d.duration_seconds}s)<br>Models updated: ${(d.models_updated||[]).join(', ')||'none'}<br><span style="color:#888;">${d.details||''}</span>`;
+        loadMLTab();
+    }).catch(() => { s.innerHTML = '<span style="color:#ef4444;">Recalibration failed</span>'; });
+}
+
+// Start
+init();
+</script>
+</body>
+</html>

@@ -1,0 +1,10 @@
+{
+  "source": "SACT Dataset Page",
+  "url": "https://digital.nhs.uk/ndrs/data/data-sets/sact",
+  "title": "Systemic Anti-Cancer Therapy (SACT) data set - NDRS",
+  "fetched_at": "2026-04-19T20:56:55.069505",
+  "page_size": 505182,
+  "status": "v4.0 collection commenced 1 April 2026 (3-month rollout period)",
+  "dashboard_url": "https://nhsd-ndrs.shinyapps.io/sact_activity/",
+  "note": "SACT v4.0: Data collection commenced 1 April 2026. Rollout period April-June 2026 (partial trust submissions). Full conformance expected 1 July 2026. First COMPLETE monthly dataset expected August 2026. Data NOT available to external systems until after rollout (post June 2026). Interactive Shiny dashboard - data downloadable via dashboard UI. Auto-download not supported for Shiny apps."
+}

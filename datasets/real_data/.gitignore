@@ -1,0 +1,9 @@
+# Ignore all real patient data files
+*.xlsx
+*.xls
+*.csv
+*.json
+
+# Keep the README
+!README.md
+!.gitignore

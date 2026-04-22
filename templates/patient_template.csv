@@ -1,0 +1,6 @@
+patient_id,postcode,priority,name,phone,requires_bed,preferred_site,notes
+P001,CF14 4XW,P2,John Smith,07700900001,FALSE,WC,Regular patient
+P002,NP20 1AB,P1,Jane Doe,07700900002,TRUE,WC,Requires bed - mobility issues
+P003,CF23 5PQ,P3,Robert Johnson,07700900003,FALSE,,
+P004,CF37 1AA,P2,Sarah Williams,07700900004,FALSE,WC,
+P005,SA1 1AA,P4,Michael Brown,07700900005,FALSE,,Long distance patient

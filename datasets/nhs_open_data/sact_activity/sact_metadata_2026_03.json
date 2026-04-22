@@ -1,0 +1,10 @@
+{
+  "source": "SACT Dataset Page",
+  "url": "https://digital.nhs.uk/ndrs/data/data-sets/sact",
+  "title": "Systemic Anti-Cancer Therapy (SACT) data set - NDRS",
+  "fetched_at": "2026-03-24T00:20:02.148595",
+  "page_size": 505178,
+  "status": "v4.0 going live April 2026",
+  "dashboard_url": "https://nhsd-ndrs.shinyapps.io/sact_activity/",
+  "note": "Interactive dashboard - data downloadable via dashboard UI. Auto-download not supported for Shiny apps."
+}
