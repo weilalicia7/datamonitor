@@ -166,6 +166,30 @@ def _handle_validation_error(exc: _ValidationError):
     return _validation_error_response(exc)
 
 
+# -----------------------------------------------------------------------------
+# T4.3 — CSRF + session hardening
+# -----------------------------------------------------------------------------
+from session_config import (
+    apply_session_cookie_config as _apply_session_cookie_config,
+    exempt_json_api_routes as _exempt_json_api_routes,
+    init_csrf as _init_csrf,
+)
+
+_session_config_applied = _apply_session_cookie_config(app)
+logger.info(
+    "session: cookie hardening applied — "
+    f"SameSite={_session_config_applied['SESSION_COOKIE_SAMESITE']}, "
+    f"Secure={_session_config_applied['SESSION_COOKIE_SECURE']}, "
+    f"HTTPOnly={_session_config_applied['SESSION_COOKIE_HTTPONLY']}, "
+    f"Lifetime={_session_config_applied['PERMANENT_SESSION_LIFETIME']}s"
+)
+_csrf = _init_csrf(app)
+if _csrf is not None:
+    logger.info("csrf: CSRFProtect enabled (JSON /api/* + /auth/* exempted lazily)")
+else:
+    logger.info("csrf: disabled (CSRF_ENABLED=false or flask_wtf missing)")
+
+
 @app.route('/auth/login', methods=['POST'])
 def auth_login():
     """Session auth for browser clients.
@@ -12486,6 +12510,16 @@ def api_drift_attribution_last():
         return jsonify({'success': True, 'attribution': last.to_dict()})
     except Exception as exc:
         return jsonify({'success': False, 'error': str(exc)}), 500
+
+
+# =============================================================================
+# Post-registration hook — exempt /api/* + /auth/* + /health/* + /metrics from
+# CSRF, now that every @app.route has been declared.  Keeps browser-form
+# endpoints (if any are added in future) protected by default.
+# =============================================================================
+_csrf_exempted = _exempt_json_api_routes(app, _csrf)
+if _csrf is not None:
+    logger.info(f"csrf: exempted {len(_csrf_exempted)} JSON API routes from CSRF token check")
 
 
 # =============================================================================

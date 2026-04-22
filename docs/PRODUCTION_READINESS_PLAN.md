@@ -112,10 +112,12 @@ Execution protocol per module: (a) Read source, (b) write failure-mode checklist
 - [x] 4.2.6 — `tests/test_validators.py` — 40 tests covering clamp_int/clamp_float, ENDPOINT_BOUNDS + env override, whitelist single + many, error-response shape, rate-limiter factory, MAX_CONTENT_LENGTH via Flask test client, end-to-end errorhandler. Full suite 480 → 520 green.
 
 ### T4.3 — CSRF + session hardening  *(~2 h)*
-- [ ] 4.3.1 — `CSRFProtect(app)` for browser flows
-- [ ] 4.3.2 — `SESSION_COOKIE_SAMESITE='Strict'`, `HTTPONLY=True`, `SECURE=True`
-- [ ] 4.3.3 — `PERMANENT_SESSION_LIFETIME=1800`
-- [ ] 4.3.4 — `@csrf.exempt` on JSON API endpoints that require API key
+- [x] 4.3.1 — `session_config.py:init_csrf()` instantiates `CSRFProtect(app)` for browser flows (fail-safe default); env-gated via `CSRF_ENABLED` — `flask_app.py:184-189`
+- [x] 4.3.2 — `session_config.py:apply_session_cookie_config()` sets `SESSION_COOKIE_SAMESITE='Strict'`, `HTTPONLY=True`, `SECURE=false` (dev default; prod must set `SESSION_COOKIE_SECURE=true` in env); plus Chromium fix-up when SameSite=None without Secure — `flask_app.py:176-182`
+- [x] 4.3.3 — `PERMANENT_SESSION_LIFETIME=1800` (30 min idle) via `SESSION_LIFETIME_SECONDS` env override
+- [x] 4.3.4 — `exempt_json_api_routes()` called post-registration (end of `flask_app.py`) auto-exempts every view under `/api/*`, `/auth/*`, `/health`, `/metrics`; browser routes (`/`, `/dashboard`) stay protected
+- [x] 4.3.5 — `tests/test_session_config.py` — 19 tests across 5 classes: cookie defaults + env overrides, SameSite/Secure fixup, CSRF init gating, exempt-prefix matching (positive + negative), end-to-end Flask client verifying `/api/*` allowed without token and `/form/*` blocked (400). Full suite 520 → 539 green.
+- [x] 4.3.6 — `.env.example` updated: `CSRF_ENABLED`, `SESSION_COOKIE_*`, `SESSION_LIFETIME_SECONDS`, plus T4.2 rate-limit + validator-cap examples
 
 ### T4.4 — Structured logging + audit trail  *(~4 h)*
 - [ ] 4.4.1 — Replace raw `logger.info(f"...{patient_id}...")` with structured logger that redacts IDs outside debug mode
