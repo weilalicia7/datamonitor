@@ -1,0 +1,73 @@
+# =============================================================================
+# SACT Scheduler — local / staging compose stack
+# =============================================================================
+# Services:
+#   app   : the Flask app behind gunicorn (port 1421, internal)
+#   nginx : TLS terminator + security headers + proxy to app:1421
+#
+# The stack is intentionally simple.  Production deployments are expected to
+# run behind a proper ingress (Kubernetes NGINX / AWS ALB + ACM), but this
+# stack demonstrates a working TLS-terminated pair that NHS IG reviewers can
+# spin up locally to audit the runtime surface.
+#
+# Usage:
+#   # one-time: generate self-signed cert for local TLS
+#   ./scripts/dev-tls-cert.sh
+#
+#   # boot
+#   docker compose up --build
+#
+#   # run tests inside the image (optional)
+#   docker compose run --rm --no-deps app python -m pytest -q
+# =============================================================================
+
+services:
+  app:
+    build: .
+    image: sact-scheduler:local
+    restart: unless-stopped
+    # Do NOT expose 1421 directly in production — keep it on the internal
+    # docker network only and proxy through nginx.
+    expose:
+      - "1421"
+    env_file:
+      - .env
+    environment:
+      # Hard defaults for the compose stack; .env can override.
+      FLASK_SECRET_KEY: "${FLASK_SECRET_KEY:-change-me-in-.env}"
+      LOG_FORMAT: "json"
+      METRICS_ENABLED: "true"
+      SESSION_COOKIE_SECURE: "true"    # mandatory behind HTTPS
+      AUTH_ENABLED: "${AUTH_ENABLED:-false}"
+      RATE_LIMIT_ENABLED: "${RATE_LIMIT_ENABLED:-true}"
+    volumes:
+      - audit:/app/data_cache/audit
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:1421/health/live"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+  nginx:
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    depends_on:
+      app:
+        condition: service_healthy
+    ports:
+      - "8443:443"    # expose the TLS port on the host
+      - "8080:80"     # HTTP → 301 → HTTPS
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/certs:/etc/nginx/certs:ro
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  # Named volume — persists audit trail across container recreations.
+  # Backup / rotation handled externally (T4.8 data-protection playbook).
+  audit:

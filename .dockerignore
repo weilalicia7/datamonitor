@@ -1,0 +1,50 @@
+# Prevent data + tests + VCS metadata + editor artefacts from bloating the
+# image.  The container should carry only source code + runtime deps.
+
+# VCS
+.git
+.gitignore
+.github
+
+# Editor / IDE
+.vscode
+.idea
+*.iml
+
+# Python bytecode
+__pycache__
+*.pyc
+*.pyo
+
+# Test + dev
+tests
+.pytest_cache
+.mypy_cache
+.ruff_cache
+htmlcov
+.coverage*
+
+# Data / model / cache artefacts (also matches .gitignore)
+data_cache
+models
+*.pkl
+*.pt
+*.joblib
+*.onnx
+*.log
+*.log.*
+
+# Real patient data
+datasets/real_data
+
+# Docs / diagrams / notebooks (not shipped in the prod image)
+docs
+*.ipynb
+
+# Env / secrets
+.env
+.env.*
+
+# Build artefacts from prior Docker runs
+Dockerfile.bak
+docker-compose.override.yml

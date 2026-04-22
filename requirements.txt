@@ -4,9 +4,11 @@
 # =============================================================================
 # Core Framework
 # =============================================================================
-streamlit==1.31.0
-pandas==2.2.0
-numpy==1.26.3
+# Security pins (T4.6): upper bound unpinned so patch releases flow through,
+# lower bound set to the first release that picked up known-CVE fixes.
+streamlit>=1.39.0        # CVE patches for websocket handling
+pandas>=2.2.0
+numpy>=1.26.4            # CVE-2024-8090 fix (object-dtype buffer overflow)
 
 # =============================================================================
 # Excel Processing
@@ -38,9 +40,10 @@ spacy==3.7.2
 # =============================================================================
 # External Data & APIs
 # =============================================================================
-requests==2.31.0
-feedparser==6.0.10
-geopy==2.4.1
+requests>=2.32.0         # CVE-2024-35195 fix (.netrc credential leak)
+urllib3>=2.0.0           # TLS verification hardening (transitively via requests)
+feedparser>=6.0.10
+geopy>=2.4.1
 
 # =============================================================================
 # Visualization

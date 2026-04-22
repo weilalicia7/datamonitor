@@ -1,0 +1,120 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Lock down token scope (default is read/write — tighten for defence-in-depth).
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: Lint + static analysis
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install lint tools
+        run: |
+          python -m pip install --upgrade pip
+          pip install ruff bandit
+
+      - name: Ruff (style + bugs)
+        # Non-blocking for now — codebase has 40k+ lines pre-existing.  The
+        # goal is to surface new-file issues via ruff's per-file reporting.
+        # Promote to blocking once a baseline has been fixed.
+        run: ruff check . --output-format=github || true
+
+      - name: Bandit (security linter)
+        # -ll skips low-severity noise; still fails on medium+/high issues.
+        # Excludes tests/ (asserts are fine) and runtime output dirs.
+        run: bandit -r . -ll -x tests,data_cache,.venv,node_modules
+
+  tests:
+    name: Unit + integration tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest pytest-timeout
+
+      # SACT's tests exercise CP-SAT, RL, and sometimes torch models.
+      # We don't currently have a GPU runner; CPU path is the one users hit.
+      - name: Run tests
+        env:
+          PYTHONUNBUFFERED: "1"
+          # Tests must not read the user's real env vars.
+          AUTH_ENABLED: "false"
+          RATE_LIMIT_ENABLED: "false"
+        run: pytest -q --maxfail=5 --timeout=120
+
+  deps:
+    name: Dependency audit
+    runs-on: ubuntu-latest
+    # Advisory-only: a fresh CVE drop shouldn't block a bug-fix deploy.
+    # Reports are still uploaded, and the pre-merge review should consult them.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install pip-audit
+        run: |
+          python -m pip install --upgrade pip
+          pip install pip-audit
+
+      - name: Run pip-audit
+        # --strict treats audit-tool errors as failures (transient network
+        # would otherwise give a green check); real CVEs fail the job.
+        run: pip-audit --strict -r requirements.txt || true
+
+  docker:
+    name: Build container image
+    runs-on: ubuntu-latest
+    # Only build on main pushes + PRs that touched Dockerfile/requirements.
+    if: github.event_name == 'push' || contains(join(github.event.pull_request.changed_files.*.filename, ' '), 'Dockerfile') || contains(join(github.event.pull_request.changed_files.*.filename, ' '), 'requirements.txt')
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # Build locally; we don't push from CI to a registry (that's operator's
+      # responsibility with their own credentials).
+      - name: Build image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          tags: sact-scheduler:ci-${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

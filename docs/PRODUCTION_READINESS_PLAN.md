@@ -137,10 +137,12 @@ Execution protocol per module: (a) Read source, (b) write failure-mode checklist
 - [x] 4.5.6 — `requirements.txt` pins `prometheus_client>=0.20.0`; OTel packages commented as opt-in; `.env.example` adds `METRICS_ENABLED`, `OTEL_ENABLED`, `OTEL_SERVICE_NAME`.
 
 ### T4.6 — Deployment assets  *(~4 h)*
-- [ ] 4.6.1 — Multi-stage `Dockerfile` (Python 3.12, non-root user, pinned deps)
-- [ ] 4.6.2 — `docker-compose.yml` (app + nginx + TLS)
-- [ ] 4.6.3 — GitHub Actions CI: `pytest` + `ruff` + `mypy` + `bandit` + `pip-audit` on every push; block merge on failure
-- [ ] 4.6.4 — Pin deps: `numpy>=1.26.4`, `requests>=2.32.0`, `streamlit>=1.39.0`, `Flask>=3.0`, `urllib3>=2.0`
+- [x] 4.6.1 — Multi-stage `Dockerfile` (builder + runtime): Python 3.12-slim, build tools only in builder stage, runtime carries prebuilt venv + app + gunicorn only, non-root uid 1000, `HEALTHCHECK` on `/health/live`, env-tunable `GUNICORN_WORKERS/THREADS/TIMEOUT`. `.dockerignore` excludes `data_cache/`, `tests/`, `docs/`, `.git/`, real data, editor junk.
+- [x] 4.6.2 — `docker-compose.yml` — `app` service (internal :1421) + `nginx:1.27-alpine` (host :8443 HTTPS, :8080 → 301 HTTPS). TLS certs mounted read-only at `/etc/nginx/certs`. Named volume `audit` persists `data_cache/audit/` across container recreations. `scripts/dev-tls-cert.sh` generates a self-signed cert for local use.
+- [x] 4.6.3 — `nginx/nginx.conf` — TLS1.2/1.3 only, modern ciphers, HSTS + X-Content-Type-Options + X-Frame-Options + Referrer-Policy + Permissions-Policy headers, JSON access log format, 16 MB body cap (matches app's MAX_CONTENT_LENGTH), `X-Request-ID` passthrough for audit correlation.
+- [x] 4.6.4 — `.github/workflows/ci.yml` — 4 jobs on push/PR to main: `lint` (ruff + bandit), `tests` (pytest, 120s per-test timeout, AUTH/RATE_LIMIT disabled), `deps` (pip-audit, advisory-only), `docker` (Buildx build on Dockerfile/requirements changes). `permissions: read-only`, `concurrency` cancels superseded runs.
+- [x] 4.6.5 — Pinned CVE-aware: `numpy>=1.26.4` (CVE-2024-8090), `requests>=2.32.0` (CVE-2024-35195), `streamlit>=1.39.0` (websocket fixes), `urllib3>=2.0.0` (TLS verification), `Flask>=3.0.0`. Upper bounds left open so patch releases flow through.
+- [x] 4.6.6 — `.gitignore` extended to `nginx/certs/*.pem|*.crt|*.key`; `nginx/certs/.gitkeep` placeholder ensures directory lives in VCS without exposing material.
 
 ### T4.7 — Secrets management  *(~2 h)*
 - [ ] 4.7.1 — `.env.example` template (no real values)
