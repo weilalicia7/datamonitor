@@ -551,15 +551,16 @@ class InverseRLPreferenceLearner:
             'prior_weights': self.prior_weights,
             'l2_lambda': self.l2_lambda,
         }
-        with self.model_path.open('wb') as fh:
-            pickle.dump(payload, fh)
+        # T2.3: SHA-256 sidecar — refuses tampered IRL preference vectors.
+        from safe_loader import safe_save
+        safe_save(payload, self.model_path)
 
     def _try_load_state(self) -> None:
         if not self.model_path.exists():
             return
         try:
-            with self.model_path.open('rb') as fh:
-                payload = pickle.load(fh)
+            from safe_loader import safe_load
+            payload = safe_load(self.model_path)
             self.theta_raw = (
                 np.asarray(payload['theta_raw'], dtype=float)
                 if payload.get('theta_raw') is not None else None

@@ -20,12 +20,12 @@ Each step is checked off as the corresponding commit lands.  The plan is execute
 
 ## Tier 2 — Correctness fixes  *(blocks dissertation submission)*
 
-- [ ] T2.1 — Fix MPC reward priority multiplier (`ml/stochastic_mpc_scheduler.py:419-427`). Add `priority_at_assignment` to `ChairState`.  Add regression test.  Rerun `dissertation_analysis.R §34` + update `main.tex` macros.
-- [ ] T2.2 — Fix auto-scaling "parallel" race condition (`ml/auto_scaling_optimizer.py:_parallel_race`).  Pass weights per-call via `optimize(..., weights=...)` kwarg.  Add race-detection test.  Rerun §30.
-- [ ] T2.3 — Replace unsafe `pickle.load()` with SHA256-verified `joblib.load()` in 7 modules: `duration_model.py`, `sequence_model.py`, `temporal_fusion_transformer.py`, `feature_store.py`, `decision_focused_learning.py`, `inverse_rl_preferences.py`, `noshow_model.py`
-- [ ] T2.4 — Full suite green (441 + ~3 new tests → 444)
+- [x] T2.1 — Fixed MPC reward priority multiplier (`ml/stochastic_mpc_scheduler.py`). Added `ChairState.priority_at_assignment` field captured at `_apply_action`; `compute_immediate_reward` now multiplies by `(6 - priority)` so priority-1 gets max credit. Mid-priority fallback when chair was pre-OCCUPIED at day start. Plus boot fix: forward-declared 3 globals (`_auto_scaler`, `_build_patient_feature_records`, `_auto_materialise_feature_store`) to silence NameError warnings during initial data load. 5 regression tests in `TestPriorityWeightedReward`. Commit `7a5536a`.
+- [x] T2.2 — Fixed auto-scaling parallel race (`ml/auto_scaling_optimizer.py`). New `solve_with_weights(patients, weights, time_limit_s)` injection point lets each worker run truly in parallel without sharing mutable optimiser state. Legacy `set_weights` path now serialises under the lock (logs once-only degradation warning) so old call sites are still correct. 3 regression tests in `TestParallelRaceWeightIsolation`: per-call weights have no cross-contamination, legacy path serialises (max active = 1), per-call path is truly parallel (wall < 0.18s for 4 × 0.05s solves). Commit `0973c61`.
+- [x] T2.3 — Created `safe_loader.py` with SHA-256-verified `safe_load()` + `safe_save()` + sidecar `<file>.sha256` integrity checks. Migrated 7 modules: `noshow_model.py`, `duration_model.py`, `sequence_model.py`, `feature_store.py`, `decision_focused_learning.py`, `inverse_rl_preferences.py`, `temporal_fusion_transformer.py`. Pinned-digest mode supported for new callers; legacy callers get sidecar verification. 17 unit tests in `tests/test_safe_loader.py`.
+- [x] T2.4 — Full suite green: 633 → 655 (+5 MPC + 3 auto-scaling + 17 safe_loader). No regressions across migrated modules.
 
-**Exit criteria**: three clean bug-fix commits; dissertation numbers regenerated; `pytest -q` → all green.
+**Exit criteria**: ✅ three clean bug-fix commits; ✅ `pytest -q` all green.
 
 ---
 

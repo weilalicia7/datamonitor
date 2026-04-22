@@ -335,15 +335,16 @@ class DFLCalibrator:
             'waste_cost': self.waste_cost, 'crowd_cost': self.crowd_cost,
             'last_fit': asdict(self.last_fit) if self.last_fit else None,
         }
-        with self.model_path.open('wb') as fh:
-            pickle.dump(payload, fh)
+        # T2.3: SHA-256 sidecar — load() refuses tampered DFL coefficients.
+        from safe_loader import safe_save
+        safe_save(payload, self.model_path)
 
     def _try_load_state(self) -> None:
         if not self.model_path.exists():
             return
         try:
-            with self.model_path.open('rb') as fh:
-                payload = pickle.load(fh)
+            from safe_loader import safe_load
+            payload = safe_load(self.model_path)
             self.a = float(payload.get('a', 1.0))
             self.b = float(payload.get('b', 0.0))
             self.threshold = float(payload.get('threshold', self.threshold))

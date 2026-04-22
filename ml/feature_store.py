@@ -623,15 +623,17 @@ class FeatureStore:
         self.schema_path.write_text(json.dumps(payload, indent=2), encoding='utf-8')
 
     def _save_online(self) -> None:
-        with self.online_path.open('wb') as fh:
-            pickle.dump(self._online, fh)
+        # T2.3: SHA-256 sidecar lets a future _try_load_online() refuse a
+        # tampered cache before unpickling.
+        from safe_loader import safe_save
+        safe_save(self._online, self.online_path)
 
     def _try_load_online(self) -> None:
         if not self.online_path.exists():
             return
         try:
-            with self.online_path.open('rb') as fh:
-                self._online = pickle.load(fh)
+            from safe_loader import safe_load
+            self._online = safe_load(self.online_path)
         except Exception as exc:  # pragma: no cover
             logger.warning(f"FeatureStore online-state load failed: {exc}")
             self._online = {}

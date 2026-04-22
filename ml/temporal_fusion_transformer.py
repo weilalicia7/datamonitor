@@ -694,8 +694,9 @@ class TFTTrainer:
                 'duration_std': self.duration_std,
                 'last_fit': asdict(self.last_fit) if self.last_fit else None,
             }
-            with self.meta_path.open('wb') as fh:
-                pickle.dump(meta, fh)
+            # T2.3: SHA-256 sidecar — load() refuses tampered TFT meta.
+            from safe_loader import safe_save
+            safe_save(meta, self.meta_path)
         except Exception as exc:  # pragma: no cover
             logger.warning(f"TFT save failed: {exc}")
 
@@ -703,8 +704,8 @@ class TFTTrainer:
         if not self.model_path.exists() or not self.meta_path.exists():
             return
         try:
-            with self.meta_path.open('rb') as fh:
-                meta = pickle.load(fh)
+            from safe_loader import safe_load
+            meta = safe_load(self.meta_path)
             self.past_window = meta.get('past_window', self.past_window)
             self.d_model = meta.get('d_model', self.d_model)
             self.n_heads = meta.get('n_heads', self.n_heads)

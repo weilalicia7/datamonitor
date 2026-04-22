@@ -948,8 +948,10 @@ class NoShowModel:
             'min_sequence_length': self.min_sequence_length
         }
 
-        with open(path, 'wb') as f:
-            pickle.dump(model_data, f)
+        # T2.3: SHA-256-verified pickle write — sidecar lets load() reject
+        # tampered weights at boot.
+        from safe_loader import safe_save
+        safe_save(model_data, path)
 
         # Save sequence model separately if trained
         if self.use_sequence_model and self.sequence_model is not None and self.sequence_model.is_trained:
@@ -961,8 +963,9 @@ class NoShowModel:
 
     def load(self, path: str):
         """Load model from disk"""
-        with open(path, 'rb') as f:
-            model_data = pickle.load(f)
+        # T2.3: verify SHA-256 sidecar before unpickling.
+        from safe_loader import safe_load
+        model_data = safe_load(path)
 
         self.models = model_data['models']
         self.scaler = model_data['scaler']

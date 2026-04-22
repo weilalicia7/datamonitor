@@ -511,15 +511,18 @@ class DurationModel:
             'is_trained': self.is_trained
         }
 
-        with open(path, 'wb') as f:
-            pickle.dump(model_data, f)
+        # T2.3: SHA-256-verified pickle write — sidecar lets load() reject
+        # tampered weights at boot.
+        from safe_loader import safe_save
+        safe_save(model_data, path)
 
         logger.info(f"Model saved to {path}")
 
     def load(self, path: str):
         """Load model from disk"""
-        with open(path, 'rb') as f:
-            model_data = pickle.load(f)
+        # T2.3: verify SHA-256 sidecar before unpickling.
+        from safe_loader import safe_load
+        model_data = safe_load(path)
 
         self.models = model_data['models']
         self.scaler = model_data['scaler']
