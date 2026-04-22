@@ -64,7 +64,9 @@ scan_diff_for() {
     local pattern="$1"
     local label="$2"
     local hits
-    hits="$(git diff --cached -U0 | grep -E "^\+" | grep -E "$pattern" | head -20 || true)"
+    # Double-dash guards against a pattern that starts with `-` (e.g. a
+    # PEM header) from being parsed as grep flags.
+    hits="$(git diff --cached -U0 | grep -E -- "^\+" | grep -E -- "$pattern" | head -20 || true)"
     if [ -n "$hits" ]; then
         SECRET_HITS+="  - ${label}:\n$(echo "$hits" | sed 's/^/      /')\n"
     fi
