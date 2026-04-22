@@ -155,10 +155,12 @@ Execution protocol per module: (a) Read source, (b) write failure-mode checklist
 - [ ] 4.7.3 — Document production-secrets backends (AWS Secrets Manager / Vault / K8s Secrets)
 
 ### T4.8 — Data-protection playbook  *(~3 h, NHS-specific)*
-- [ ] 4.8.1 — `docs/DATA_PROTECTION.md` covering lawful basis, DSPT cite, data-sharing agreement slot
-- [ ] 4.8.2 — Data-retention policy + auto-delete for events older than N days
-- [ ] 4.8.3 — Right-to-erasure flow (cascade delete across caches + models + deletion log)
-- [ ] 4.8.4 — Pre-export anonymisation check (DRO + identifier-leak scan)
+- [x] 4.8.1 — `docs/DATA_PROTECTION_PLAYBOOK.md` covering lawful basis (Art 6(1)(e) + 9(2)(h)), 6-row PII inventory, data-minimisation enforcement points, retention schedule table, encryption posture (at-rest + in-transit), access controls cross-referenced to T4.1, incident-response playbook (contain/preserve/notify/remediate), 90-day audit checklist. Plus `docs/DPIA.md` — Data Protection Impact Assessment template: system description, data-flow diagram, necessity + proportionality, 10-row risk register with residual grading, mitigation tier progress, sign-off table.
+- [x] 4.8.2 — `scripts/retention_enforcer.py` (300 lines) — TTL pruning by mtime with `files_older_than()` + `prune(dir, ttl_days)`. Env vars `EVENT_RETENTION_DAYS` (default 30), `AUDIT_RETENTION_DAYS` (default 2557 = 7 years), `EVENT_CACHE_DIR` / `AUDIT_LOG_DIR` for path override. Intended daily cron / systemd timer / k8s CronJob.
+- [x] 4.8.3 — Right-to-erasure via `retention_enforcer.py --erase <hash>`: scans every JSONL under `data_cache/events/` + `data_cache/audit/`, rewrites without matching rows via tempfile + atomic rename, preserves original mtime so TTL enforcement still works after erasure. Matches `patient_id` / `actor` / `target` fields; preserves unparseable lines so operator sees them next scan.
+- [x] 4.8.4 — Pre-export anonymisation is delegated to existing `datasets/_nhs_calibration.py:_anonymise()` (postcode sector truncation + SHA-256 + salt on NHS numbers before any ML/optimiser call) and T4.4 `logging_config.PatientIdRedactor` (log-line PII scrub). Playbook § 2 + 5 document the enforcement points.
+- [x] 4.8.5 — `tests/test_retention_enforcer.py` — 18 tests across 5 classes: `files_older_than` (empty/missing/mixed/pattern), `prune` (dry-run/real/fresh-kept), `erase_hash_in_file` (patient_id/actor/target match, unparseable line preservation, missing-file no-op, mtime preservation), `erase_hash_across` (multi-dir walk, missing dir skip), CLI integration (prune exit=0, dry-run, erase flow). Full suite 615 → 633 green.
+- [x] 4.8.6 — `.env.example` updated: `AUDIT_RETENTION_DAYS`, `EVENT_CACHE_DIR`.
 
 ### T4.9 — Pentest readiness  *(~2 h)*
 - [ ] 4.9.1 — `bandit -r . -ll` → 0 HIGH
