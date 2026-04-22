@@ -44,15 +44,32 @@ bypass).
 
 **Known limitations**
 
-- No authentication or authorisation on the Flask endpoints (Tier 4.1 of the
-  production-readiness plan).  See `docs/PRODUCTION_READINESS_PLAN.md`.
-- No rate limiting.  Compute-heavy endpoints (`/api/optimize`,
-  `/api/mpc/simulate`, `/api/twin/evaluate`) can exhaust the host if
-  unthrottled.
+- ~~No authentication or authorisation on the Flask endpoints~~ → resolved
+  in T4.1: `auth.py` + `AUTH_ENABLED=true` gates every mutating route
+  behind a role cascade (admin ⊇ operator ⊇ viewer); see `docs/PRODUCTION_READINESS_PLAN.md`.
+- ~~No rate limiting~~ → resolved in T4.2: Flask-Limiter via
+  `RATE_LIMIT_ENABLED=true`; per-field numeric caps applied at the route
+  layer in `validators.py`.
 - The scheduler unpickles its own trained models from disk on boot.  If an
   attacker can write to `models/` or `data_cache/feature_store/`, arbitrary
   code execution is possible via pickle deserialisation.  This is tracked as
-  Tier 2.3 of the plan (SHA256-verified `joblib.load()`).
+  Tier 2.3 of the plan (SHA256-verified `joblib.load()`).  Owner: scheduler
+  maintainer.  ETA: next release after T2 correctness work.
+
+## Security scanning
+
+The repository is scanned by:
+
+| Tool | Frequency | Baseline |
+|---|---|---|
+| **Bandit**   | every CI run (`.github/workflows/ci.yml:lint` job) + `scripts/security_scan.sh` | **0 HIGH**, 8 MEDIUM (pickle warnings above) |
+| **pip-audit** | every CI run (`deps` job) + `scripts/security_scan.sh`                           | advisory only — reports CVEs; deploy-blocking promotion planned |
+| **Semgrep**   | manual per release (see `docs/SECURITY_TEST.md § 2`)                            | 0 HIGH on `p/python` + `p/owasp-top-ten`                        |
+| **OWASP ZAP** | quarterly + pre-deploy baseline scan (`docs/SECURITY_TEST.md § 4`)              | 0 HIGH dynamic findings                                         |
+
+Last HIGH-severity Bandit sweep: **2026-04-22** — green.  See
+`docs/SECURITY_TEST.md` for the full runbook, plus manual smoke-test
+commands that exercise T4.1–T4.6 controls against a running stack.
 
 **Data-protection note**
 

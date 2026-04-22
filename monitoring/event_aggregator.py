@@ -114,7 +114,9 @@ class EventAggregator:
     def _generate_event_id(self, source: str, identifier: str) -> str:
         """Generate unique event ID"""
         hash_input = f"{source}-{identifier}-{datetime.now().date()}"
-        return hashlib.md5(hash_input.encode()).hexdigest()[:12]
+        return hashlib.md5(
+            hash_input.encode(), usedforsecurity=False
+        ).hexdigest()[:12]
 
     def _classify_news_event(self, news_item: NewsItem) -> List[EventType]:
         """Classify news item into event types"""
