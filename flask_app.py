@@ -131,6 +131,40 @@ if _auth_enabled():
 else:
     logger.info("auth: AUTH_ENABLED=false (default) — decorators no-op")
 
+# -----------------------------------------------------------------------------
+# T4.2 — Input caps + rate limits
+# -----------------------------------------------------------------------------
+from validators import (
+    DEFAULT_MAX_CONTENT_LENGTH as _MAX_CONTENT_LENGTH,
+    ValidationError as _ValidationError,
+    clamp_int as _clamp_int,
+    clamp_float as _clamp_float,
+    DML_TREATMENT_ALLOWED as _DML_TREATMENT_ALLOWED,
+    DML_OUTCOME_ALLOWED as _DML_OUTCOME_ALLOWED,
+    DML_COVARIATES_ALLOWED as _DML_COVARIATES_ALLOWED,
+    init_rate_limiter as _init_rate_limiter,
+    rate_limit_enabled as _rate_limit_enabled,
+    validate_whitelist as _validate_whitelist,
+    validate_whitelist_many as _validate_whitelist_many,
+    validation_error_response as _validation_error_response,
+)
+
+# Hard cap on request body size (16 MB) — stops JSON bombs.
+app.config['MAX_CONTENT_LENGTH'] = _MAX_CONTENT_LENGTH
+
+# Rate limiter: default 60/min + 600/hour per remote IP; opt in via env var.
+_rate_limiter, _rate_limit_active = _init_rate_limiter(app)
+if _rate_limit_active:
+    logger.info("rate-limit: RATE_LIMIT_ENABLED=true — default 60/min per IP")
+else:
+    logger.info("rate-limit: RATE_LIMIT_ENABLED=false (default) — limits disabled")
+
+
+# Translate ValidationError into a 400 consistently across every handler.
+@app.errorhandler(_ValidationError)
+def _handle_validation_error(exc: _ValidationError):
+    return _validation_error_response(exc)
+
 
 @app.route('/auth/login', methods=['POST'])
 def auth_login():
@@ -4830,10 +4864,23 @@ def api_dml_estimate():
         return jsonify({'error': 'Causal model not available'}), 503
 
     data = request.json or {}
-    treatment = data.get('treatment', 'Reminder_Sent')
-    outcome = data.get('outcome', 'no_show')
-    covariates = data.get('covariates')
-    n_folds = data.get('n_folds', 5)
+    treatment = _validate_whitelist(
+        data.get('treatment', 'Reminder_Sent'),
+        field='treatment', allowed=_DML_TREATMENT_ALLOWED,
+    )
+    outcome = _validate_whitelist(
+        data.get('outcome', 'no_show'),
+        field='outcome', allowed=_DML_OUTCOME_ALLOWED,
+    )
+    covariates_raw = data.get('covariates')
+    if covariates_raw is not None:
+        covariates = _validate_whitelist_many(
+            covariates_raw, field='covariates', allowed=_DML_COVARIATES_ALLOWED,
+        )
+    else:
+        covariates = None
+    n_folds = _clamp_int(data.get('n_folds'), field='n_folds',
+                         default=5, min_value=2, max_value=20)
 
     try:
         # Get historical data
@@ -4991,8 +5038,19 @@ def api_dml_compare_treatments():
         return jsonify({'error': 'Causal model not available'}), 503
 
     data = request.json or {}
-    treatments = data.get('treatments', ['SMS_Reminder', 'Phone_Call'])
-    outcome = data.get('outcome', 'no_show')
+    treatments = _validate_whitelist_many(
+        data.get('treatments', ['SMS_Reminder', 'Phone_Call']),
+        field='treatments', allowed=_DML_TREATMENT_ALLOWED,
+    )
+    if len(treatments) > 10:
+        raise _ValidationError(
+            f"'treatments' supports at most 10 entries, got {len(treatments)}",
+            field='treatments',
+        )
+    outcome = _validate_whitelist(
+        data.get('outcome', 'no_show'),
+        field='outcome', allowed=_DML_OUTCOME_ALLOWED,
+    )
 
     try:
         from ml.causal_model import DoubleMachineLearning
@@ -5843,7 +5901,8 @@ def api_irl_reset():
 @app.route('/api/irl/overrides', methods=['GET'])
 def api_irl_overrides():
     """List recent override records (most recent first). ?limit=50"""
-    limit = int(request.args.get('limit', 50))
+    limit = _clamp_int(request.args.get('limit'),
+                       field='limit', default=50, min_value=1)
     learner = _get_irl_learner()
     records = learner.load_overrides()
     records.reverse()
@@ -6468,9 +6527,12 @@ def api_twin_evaluate():
         twin = _get_digital_twin()
         body = request.json or {}
         policy = PolicySpec.from_dict(body.get('policy') or {})
-        horizon = int(body.get('horizon_days', 7))
-        step_hours = int(body.get('step_hours', 1))
-        seed = int(body.get('rng_seed', 42))
+        horizon = _clamp_int(body.get('horizon_days'),
+                             field='horizon_days', default=7, min_value=1)
+        step_hours = _clamp_int(body.get('step_hours'),
+                                field='step_hours', default=1, min_value=1)
+        seed = _clamp_int(body.get('rng_seed'),
+                          field='rng_seed', default=42)
         use_snap = bool(body.get('use_last_snapshot', True))
         snap = twin.last_snapshot if use_snap else None
         if snap is None:
@@ -6517,9 +6579,12 @@ def api_twin_compare():
         if not pols:
             return jsonify({'success': False,
                             'error': 'no policies provided'}), 400
-        horizon = int(body.get('horizon_days', 7))
-        step_hours = int(body.get('step_hours', 1))
-        seed = int(body.get('rng_seed', 42))
+        horizon = _clamp_int(body.get('horizon_days'),
+                             field='horizon_days', default=7, min_value=1)
+        step_hours = _clamp_int(body.get('step_hours'),
+                                field='step_hours', default=1, min_value=1)
+        seed = _clamp_int(body.get('rng_seed'),
+                          field='rng_seed', default=42)
         out = twin.compare_policies(
             policies=pols,
             horizon_days=horizon,
@@ -6541,7 +6606,8 @@ def api_twin_evaluations():
     """List prior policy evaluations (summaries only)."""
     try:
         twin = _get_digital_twin()
-        limit = int(request.args.get('limit', 50))
+        limit = _clamp_int(request.args.get('limit'),
+                           field='limit', default=50, min_value=1)
         return jsonify({'success': True, 'evaluations': twin.list_evaluations(limit=limit)})
     except Exception as exc:
         return jsonify({'success': False, 'error': str(exc)}), 500
@@ -7867,8 +7933,15 @@ def api_mpc_simulate():
         )
         body = request.json or {}
         policies = list(body.get('policies', ['greedy', 'mpc']))
-        total_minutes = int(body.get('total_minutes', 240))
-        rng_seed = int(body.get('rng_seed', 42))
+        if not isinstance(policies, list) or len(policies) > 10:
+            raise _ValidationError(
+                f"'policies' must be a list of up to 10 entries, got {len(policies)}",
+                field='policies',
+            )
+        total_minutes = _clamp_int(body.get('total_minutes'),
+                                   field='total_minutes', default=240, min_value=1)
+        rng_seed = _clamp_int(body.get('rng_seed'),
+                              field='rng_seed', default=42)
         state = state_from_app_state(app_state)
         results = get_controller().simulate_day(
             state, policies=policies,
@@ -7926,10 +7999,28 @@ def api_mpc_config():
     try:
         from ml.stochastic_mpc_scheduler import get_controller
         data = request.json or {}
+        n_scenarios_raw = data.get('n_scenarios')
+        lookahead_raw = data.get('lookahead_minutes')
+        timeout_raw = data.get('total_timeout_s')
+        n_scenarios_val = (
+            _clamp_int(n_scenarios_raw, field='n_scenarios',
+                       default=50, min_value=1)
+            if n_scenarios_raw is not None else None
+        )
+        lookahead_val = (
+            _clamp_int(lookahead_raw, field='lookahead_minutes',
+                       default=240, min_value=1)
+            if lookahead_raw is not None else None
+        )
+        timeout_val = (
+            _clamp_int(timeout_raw, field='total_timeout_s',
+                       default=60, min_value=1, max_value=3600)
+            if timeout_raw is not None else None
+        )
         cfg = get_controller().update_config(
-            n_scenarios=data.get('n_scenarios'),
-            lookahead_minutes=data.get('lookahead_minutes'),
-            total_timeout_s=data.get('total_timeout_s'),
+            n_scenarios=n_scenarios_val,
+            lookahead_minutes=lookahead_val,
+            total_timeout_s=timeout_val,
         )
         return jsonify({'success': True, 'config': cfg})
     except Exception as exc:
@@ -11100,9 +11191,12 @@ def api_uncertainty_evaluate():
     try:
         from optimization.uncertainty_optimization import UncertaintyAwareOptimizer
         data = request.json or {}
-        epsilon = data.get('epsilon', 0.05)
-        alpha = data.get('alpha', 0.90)
-        n_scenarios = data.get('n_scenarios', 50)
+        epsilon = _clamp_float(data.get('epsilon'), field='epsilon',
+                               default=0.05, min_value=0.0, max_value=1.0)
+        alpha = _clamp_float(data.get('alpha'), field='alpha',
+                             default=0.90, min_value=0.0, max_value=1.0)
+        n_scenarios = _clamp_int(data.get('n_scenarios'), field='n_uncertainty_scenarios',
+                                 default=50, min_value=1)
 
         dro = UncertaintyAwareOptimizer(epsilon=epsilon, alpha=alpha, n_scenarios=n_scenarios)
 
@@ -11148,8 +11242,10 @@ def api_uncertainty_metrics():
     try:
         from optimization.uncertainty_optimization import UncertaintyAwareOptimizer
         data = request.json or {}
-        epsilon = data.get('epsilon', 0.05)
-        n_scenarios = data.get('n_scenarios', 30)
+        epsilon = _clamp_float(data.get('epsilon'), field='epsilon',
+                               default=0.05, min_value=0.0, max_value=1.0)
+        n_scenarios = _clamp_int(data.get('n_scenarios'), field='n_uncertainty_scenarios',
+                                 default=30, min_value=1)
 
         dro = UncertaintyAwareOptimizer(epsilon=epsilon, alpha=0.90)
 

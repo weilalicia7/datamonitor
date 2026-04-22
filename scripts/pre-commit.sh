@@ -48,8 +48,10 @@ block '^data_cache/'                'data_cache/ is a runtime output directory'
 # 5. Smoke-test scratch files
 block '^data_cache/_|^_smoketest_' 'scratch / smoke-test leftovers'
 
-# 6. .env secrets
-block '^\.env(\..*)?$'             '.env files may contain API keys'
+# 6. .env secrets (but allow .env.example / .env.sample / .env.template which
+# are documented templates carrying no real secrets)
+block '^\.env$|^\.env\.(local|production|staging|development|dev|prod|stage)$' \
+      '.env files may contain API keys (templates ending .example/.sample/.template are allowed)'
 
 # 7. Config locals
 block '^config_local\.py$|^secrets\.ya?ml$|^credentials\.json$' \

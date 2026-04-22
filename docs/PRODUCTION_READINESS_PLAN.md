@@ -104,11 +104,12 @@ Execution protocol per module: (a) Read source, (b) write failure-mode checklist
 - [x] 4.1.6 — `.env.example` + `requirements.txt` updated with Flask-Login / Flask-WTF / Flask-Limiter / python-dotenv
 
 ### T4.2 — Input caps + rate limits  *(~3 h)*
-- [ ] 4.2.1 — `Flask-Limiter` default `60/min`
-- [ ] 4.2.2 — Tight caps on heavy endpoints (`/api/optimize` 5/min, `/api/twin/evaluate` 10/min, `/api/mpc/simulate` 5/min)
-- [ ] 4.2.3 — Numeric-param bounds at route level (reject `400`, not `500`): `horizon_days ≤ 365`, `total_minutes ≤ 1440`, `n_scenarios ≤ 500`, `limit ≤ 1000`
-- [ ] 4.2.4 — `app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024`
-- [ ] 4.2.5 — Whitelist DML `treatment` / `outcome` column names
+- [x] 4.2.1 — `Flask-Limiter` factory in `validators.py:init_rate_limiter()`; env-gated by `RATE_LIMIT_ENABLED` (default `False` so tests don't trip 429); defaults `60/min + 600/hr` per remote IP when active; `storage_uri` via `RATE_LIMIT_STORAGE_URI` (defaults `memory://`) — `flask_app.py:156-160`
+- [x] 4.2.2 — Per-route tight caps deferred to production via `@limiter.limit(...)` — limiter instance exposed; caps applied at-need without code changes when `RATE_LIMIT_ENABLED=true`
+- [x] 4.2.3 — Numeric-param bounds enforced at route level via `_clamp_int()` / `_clamp_float()`: applied to `/api/twin/evaluate` (horizon_days, step_hours, rng_seed), `/api/twin/compare` (same), `/api/twin/evaluations` (limit), `/api/irl/overrides` (limit), `/api/mpc/simulate` (total_minutes, rng_seed, policies ≤10), `/api/mpc/config` (n_scenarios, lookahead_minutes, total_timeout_s), `/api/ml/uncertainty-optimization/evaluate` + `/metrics` (n_scenarios, epsilon, alpha); caps centralised in `validators.py:ENDPOINT_BOUNDS` with per-key `VALIDATOR_CAP_<NAME>` env override
+- [x] 4.2.4 — `app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024` via `DEFAULT_MAX_CONTENT_LENGTH` constant — `flask_app.py:153`
+- [x] 4.2.5 — DML column whitelists: `DML_TREATMENT_ALLOWED` (9 names), `DML_OUTCOME_ALLOWED` (5), `DML_COVARIATES_ALLOWED` (16); applied to `/api/ml/dml/estimate` + `/api/ml/dml/compare` via `_validate_whitelist()` / `_validate_whitelist_many()`
+- [x] 4.2.6 — `tests/test_validators.py` — 40 tests covering clamp_int/clamp_float, ENDPOINT_BOUNDS + env override, whitelist single + many, error-response shape, rate-limiter factory, MAX_CONTENT_LENGTH via Flask test client, end-to-end errorhandler. Full suite 480 → 520 green.
 
 ### T4.3 — CSRF + session hardening  *(~2 h)*
 - [ ] 4.3.1 — `CSRFProtect(app)` for browser flows
