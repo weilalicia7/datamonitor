@@ -2502,7 +2502,14 @@ $$
 \end{cases}
 $$
 
-Default $\tau_{\text{suggest}} = 0.80$ per the §5.2 brief. The "no improvement" guard ensures the system stays silent when it cannot propose anything better — bad advice is worse than no advice.
+where $\tau_{\text{suggest}} \in [0, 1]$ is the **suggestion threshold** — the minimum override probability the system must assign to the proposed slot before it offers any alternative.  Default $\tau_{\text{suggest}} = 0.80$ (per the §5.2 brief): the model must be at least 80\% confident the clinician would override the optimiser's pick before the system speaks up.  Tunable at runtime via `POST /api/override/config` and persisted on the `OverrideLearner` instance as the `suggest_threshold` attribute (see `ml/override_learning.py`).
+
+The two-clause rule combines:
+
+1. \emph{Confidence gate} — $\Pr(\text{override} \mid \text{appt}) \geq \tau_{\text{suggest}}$ ensures we only intervene on high-confidence override predictions.
+2. \emph{Improvement gate} — $\min_a \Pr(\text{override} \mid a) < \Pr(\text{override} \mid \text{appt})$ ensures the proposed alternative scores strictly lower than the current pick.
+
+The "no improvement" guard means the system stays silent when it cannot propose anything better — bad advice is worse than no advice.
 
 #### 9b.10.5 Integration
 
