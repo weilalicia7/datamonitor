@@ -26,6 +26,7 @@ This document describes all mathematical formulas, algorithms, and optimization 
 
 ### Core Models
 1. [Data Requirements (SACT v4.0)](#1-data-requirements)
+   - 1.3 [Data Flow Pipeline (end-to-end function composition)](#13-data-flow-pipeline-end-to-end-function-composition)
 2. [Constraint Programming Optimization](#2-constraint-programming-optimization) — CP-SAT with 6 objectives + fairness constraints
    - 2.10 [Warm-Start with Solution Hints](#210-warm-start-with-solution-hints)
    - 2.11 [GNN Feasibility Pre-Filter](#211-gnn-feasibility-pre-filter)
@@ -248,6 +249,123 @@ Where:
 | 20 | Previous_NoShows | Integer | 0-10 | No-show prediction |
 | 21 | Previous_Cancellations | Integer | 0-10 | Risk scoring |
 | 22 | Contact_Preference | Categorical | SMS/Phone/Email/Post | Engagement analysis |
+
+---
+
+## 1.3 Data Flow Pipeline (end-to-end function composition)
+
+The transformation from raw SACT v4.0 inputs to a published schedule is
+a composition of well-typed functions; every stage has an explicit
+mathematical signature so a reader can trace a single value end-to-end.
+
+ASCII overview (reads top-to-bottom; each arrow is one function call,
+boxed labels point at the section that defines the function):
+
+```
+                ┌──────────────────────────────────────┐
+                │  Raw SACT v4.0 inputs                │
+                │  R = {patients.xlsx,                 │
+                │       historical_appointments.xlsx,  │
+                │       appointments.xlsx}             │
+                └──────────────────────────┬───────────┘
+                                           │  A  (version adapter, §A.12)
+                                           ▼
+                ┌──────────────────────────────────────┐
+                │  D_canonical  ∈ R^{n × 24}           │
+                │  Canonical schema (24 cols)          │
+                └──────────────────────────┬───────────┘
+                                           │  F  (feature engineering, §5)
+                                           ▼
+                ┌──────────────────────────────────────┐
+                │  X  ∈ R^{n × f},  f = 60+            │
+                │  Feature matrix (5 categories)       │
+                └─────────────┬────────────────────────┘
+                              │
+              ┌───────────────┴────────────────┐
+              │                                │
+              │ M_ns (§3 + §3.6 RNN + §3.8 TFT)│  M_dur (§4)
+              ▼                                ▼
+   ┌──────────────────────┐         ┌──────────────────────┐
+   │  π ∈ [0, 1]^n        │         │  d ∈ R^n_+           │
+   │  No-show prob/patient│         │  Duration (min)      │
+   └──────────┬───────────┘         └──────────┬───────────┘
+              │  M_DFL  (calibration head, §3.7, optional)
+              ▼
+   ┌──────────────────────┐
+   │  π'  ∈ [0, 1]^n      │
+   │  π'_p = σ(a·logit(π_p) + b),  a ≥ 0
+   └──────────┬───────────┘
+              │
+              │ + constraints (chairs C, horizon H, fairness §2.4,
+              │   safety §A.7, lipschitz §A.6, DRO §A.5)
+              │ + weights λ ∈ Δ⁵ (§2.2 Quick Reference §2.2.1)
+              ▼
+   ┌──────────────────────────────────────────────────────┐
+   │  O — CP-SAT solve (§2)                               │
+   │  with warm-start (§2.10) + GNN pre-filter (§2.11) +  │
+   │  column generation (§2.12) + auto-scaling (§A.9)     │
+   └──────────┬───────────────────────────────────────────┘
+              │
+              ▼
+   ┌──────────────────────────────────────────────────────┐
+   │  S  = published schedule  (appointment list)         │
+   └──────────┬───────────────────────────────────────────┘
+              │
+              │  steady-state real-time refinement
+              │
+       ┌──────┴───────┬──────────────────────┐
+       │              │                      │
+       │  B (§A.2)    │  R_MPC (§A.13)       │  Audit + Observability
+       │  micro-batch │  stochastic MPC      │  (T4.4 + T4.5)
+       ▼              ▼                      ▼
+   ┌────────┐    ┌─────────────────┐    ┌────────────────────┐
+   │ S_t+δ  │    │ S_t+1 = R_MPC   │    │ Prometheus metrics │
+   │ live    │   │ (S_t, Q_t,      │    │ + audit JSONL +    │
+   │ update │    │       λ(t))     │    │ /health/* probes   │
+   └────────┘    └─────────────────┘    └────────────────────┘
+```
+
+Formal function signatures (one line per stage):
+
+| Stage | Function | Type | §                  |
+|-------|----------|------|--------------------|
+| Adapter        | $\mathcal{A}: R \to D_{\text{canonical}}$                                                       | raw → 24-col canonical    | §A.12 |
+| Features       | $\mathcal{F}: D_{\text{canonical}} \to \mathbf{X} \in \mathbb{R}^{n \times f},\ f \approx 60$ | canonical → feature matrix | §5    |
+| No-show        | $\mathcal{M}_{\text{ns}}: \mathbf{X} \to \boldsymbol{\pi} \in [0, 1]^{n}$                       | features → P(no-show)      | §3    |
+| Duration       | $\mathcal{M}_{\text{dur}}: \mathbf{X} \to \mathbf{d} \in \mathbb{R}_{+}^{n}$                    | features → minutes         | §4    |
+| Calibration    | $\mathcal{M}_{\text{DFL}}: \pi \mapsto \sigma(a\cdot\operatorname{logit}(\pi) + b),\ a \geq 0$  | scalar calibration head    | §3.7  |
+| Optimisation   | $\mathcal{O}: (\boldsymbol{\pi}', \mathbf{d}, P, C, H, \boldsymbol{\lambda}) \to S$              | CP-SAT solve               | §2    |
+| Micro-batch    | $\mathcal{B}: (S_t,\ \Delta\text{events}) \to S_{t+\delta}$                                     | streaming patch            | §A.2  |
+| MPC            | $\mathcal{R}_{\text{MPC}}: (S_t, Q_t, \lambda(t)) \to S_{t+1}$                                  | receding-horizon refit     | §A.13 |
+
+The composition is
+
+$$
+S = \mathcal{O}\bigl(\,\mathcal{M}_{\text{DFL}}(\mathcal{M}_{\text{ns}}(\mathbf{X}))
+,\ \mathcal{M}_{\text{dur}}(\mathbf{X})
+,\ P,\ C,\ H,\ \boldsymbol{\lambda}\bigr)
+\quad\text{where}\quad
+\mathbf{X} = \mathcal{F}(\mathcal{A}(R))
+$$
+
+with $\mathcal{B}$ + $\mathcal{R}_{\text{MPC}}$ applied in steady state to
+keep $S_t$ aligned with live arrivals, no-shows, and cancellations.
+
+**Reproducibility invariants** (every intermediate written to JSONL):
+
+| Stage | Log file                                              | Used by                               |
+|-------|-------------------------------------------------------|---------------------------------------|
+| Adapter        | `data_cache/sact_adapter/events.jsonl`               | dissertation §32                      |
+| Feature store  | `data_cache/feature_store/serving_latency.jsonl`     | dissertation §28                      |
+| Predictions    | `data_cache/predictions/latest.json`                  | downstream callers                    |
+| Optimiser      | `data_cache/auto_scaling/runs.jsonl`                  | dissertation §30                      |
+| Micro-batch    | `data_cache/micro_batch/latency.jsonl`               | dissertation §29                      |
+| MPC            | `data_cache/mpc_scheduler/{decisions,simulations}.jsonl` | dissertation §34                  |
+| Audit          | `data_cache/audit/<YYYY-MM-DD>.jsonl`                 | T4.4 audit trail + GDPR Art 30       |
+
+This composition + log inventory is what makes every dissertation
+number reproducible from a fresh checkout: replay the JSONL trail
+through `dissertation_analysis.R` and the macros regenerate exactly.
 
 ---
 
