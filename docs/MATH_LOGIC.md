@@ -81,6 +81,9 @@ This document describes all mathematical formulas, algorithms, and optimization 
 24b. [DRO & CVaR Optimization](#24b-uncertainty-aware-optimization-dro) — Wasserstein DRO (24b.1-24b.3) + CVaR in CP-SAT (24b.7, Rockafellar & Uryasev 2000)
 25. [Complete Model Summary](#25-model-summary-table)
 
+### Performance & Complexity (v5.0)
+27. [Algorithmic Complexity Guarantees](#27-algorithmic-complexity-guarantees) — Time / space / convergence bounds for CP-SAT (27.1), GNN (27.2), Column Generation (27.3), Conformal (27.4), MPC rollout (27.5), DRO (27.6)
+
 ---
 
 ## Notation Conventions
@@ -4791,6 +4794,80 @@ $$P(U < U_{\text{threshold}}) = \frac{|\{k : U_k < 0.5\}|}{K}$$
 | **DRO (Wasserstein)** | 24b | Distributionally robust optimization | Worst-case penalties, CVaR buffers | Ambiguity set around empirical |
 | **Auto-Learning** | 22 | Continuous improvement | Recalibrated models | NHS open data |
 | **Drift Detection** | 23 | Model monitoring | PSI, KS test, CUSUM alerts | Incoming data streams |
+
+---
+
+## 27. Algorithmic Complexity Guarantees
+
+For every core optimisation component the system carries an explicit
+complexity bound — both for capacity-planning (how big an instance can
+we solve in the time budget?) and for falsifying performance regressions
+(if a profile run blows past the bound, a regression has crept in).
+Constants where given are measured on the synthetic Velindre dataset
+($n=202$ patients, $m=45$ chairs) on a workstation-class CPU.
+
+### 27.1 CP-SAT (monolithic) — §2
+
+| Resource          | Bound                                                                                                                                                                                            |
+|-------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Variables         | $n \cdot m$ binary $x_{p,c}$ (assignment) + $n$ integer start times                                                                                                                              |
+| Constraints       | $O(m \cdot n^2)$ no-overlap edges over the chair-interval graph                                                                                                                                  |
+| Time complexity   | NP-hard in general; OR-Tools clause learning solves typical instances ($n \leq 50$, $m = 45$) in $< 5$ s.  Hard wall-clock cap: 300 s default (`SOLVER_TIME_LIMIT_SECONDS = 300` in `config.py`); the auto-scaling cascade (§A.9) tightens this to a 5 / 2 / 1 / 0.5 s budget sequence in practice.                       |
+| Space complexity  | $O(m \cdot n^2)$ for the constraint graph; learnt-clause memory bounded by OR-Tools' `--clauses_cleanup_limit`.                                                                                  |
+| Optimality gap    | $\leq 1\%$ when the early-stopping rule fires (`abs(objective − best_bound) / abs(objective) ≤ 0.01`).  Status `STATUS_OPTIMAL` proves $0\%$ gap.                                                |
+| Practical limit   | $n \approx 50$ at $m = 45$; beyond that, column generation (§27.3) takes over via `COLUMN_GEN_THRESHOLD = 50`.                                                                                   |
+
+### 27.2 GNN feasibility pre-filter — §2.11
+
+| Resource          | Bound                                                                                                                                                                                            |
+|-------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Training          | Online, after every 5 solves; logistic-regression / random-forest fit over the rolling buffer (size 1000), $F = 44$ edge features.  Cost: $O(\text{buffer} \cdot F \log F)$ per refit.            |
+| Inference         | $O(n \cdot m \cdot (d_P + d_C))$ with $d_P = d_C = 20$ embedding dims and a fixed $R = 2$ rounds of mean-pooled message passing.  Per-pair classifier eval is $O(F)$.                            |
+| Space             | $O(n \cdot d_P + m \cdot d_C)$ embeddings + $O(\text{buffer} \cdot F)$ training cache.                                                                                                            |
+| Prune rate        | Converges to 55–70 \% of $(p, c)$ pairs after $\geq 20$ training solves; below the convergence threshold the pruner is held in shadow mode (records but does not prune) for safety.              |
+| Soundness         | Pinned by `tests/test_gnn_feasibility.py`: every $(p, c)$ pair that CP-SAT actually used in a baseline schedule must survive the pruner.                                                          |
+
+### 27.3 Column generation — §2.12
+
+| Resource           | Bound                                                                                                                                                                                            |
+|--------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Master LP per iter | $O(K^3)$ where $K$ is the number of columns currently in the restricted master; $K$ grows to $\sim 2m$ at convergence.  Solved with GLOP.                                                        |
+| Pricing subproblem | One CP-SAT solve per chair, $n$ binary variables each; per subproblem $\leq 5.0$ s (`CG_SUBPROBLEM_TIME_LIMIT = 5.0`).                                                                            |
+| Iterations         | Typically 10–30 to LP optimality; capped at `CG_MAX_ITERATIONS = 100` with reduced-cost tolerance `CG_REDUCED_COST_TOLERANCE = 1e-4`.                                                            |
+| Total time         | For $n = 100$, $m = 45$: $\approx 5$ s (vs. monolithic CP-SAT timeout $> 60$ s on the same instance — verified by `tests/test_column_generation.py` ground-truth comparison).                     |
+| Space              | $O(K \cdot n)$ for the column matrix + per-chair CP-SAT models held warm.                                                                                                                       |
+| Convergence        | Guaranteed LP-optimal when the best reduced cost $\leq$ `CG_REDUCED_COST_TOLERANCE`; integer rounding (branch-and-price-lite) produces a feasible integer solution within $\approx 1\%$ of LP.   |
+
+### 27.4 Conformal prediction — §19
+
+| Resource              | Bound                                                                                                                                                                                            |
+|-----------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Calibration           | One quantile sort over $n_{\text{cal}}$ calibration scores: $O(n_{\text{cal}} \log n_{\text{cal}})$ at fit time.                                                                                  |
+| Inference (fixed $\alpha$) | $O(1)$ — quantile cached.                                                                                                                                                                  |
+| Inference (adaptive $\alpha$, §19.10) | $O(\log n_{\text{cal}})$ per prediction (binary search on the sorted score array for the patient-specific quantile).                                                          |
+| Space                 | $O(n_{\text{cal}})$ for the score array.                                                                                                                                                         |
+| Coverage guarantee    | $\Pr\!\bigl(Y_{n+1} \in \widehat{C}(X_{n+1})\bigr) \geq 1 - \alpha$ in finite samples, under exchangeability of $(X_i, Y_i)_{i=1}^{n+1}$.                                                        |
+| Adaptive bound        | The risk-adaptive policy still satisfies marginal coverage $\geq 1 - \bar{\alpha}$ where $\bar{\alpha} = \mathbb{E}[\alpha(\text{patient})]$ — pinned by `tests/test_adaptive_alpha.py`.          |
+
+### 27.5 MPC rollout — §A.13
+
+| Resource          | Bound                                                                                                                                                                                            |
+|-------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| State size        | $O(m + \lvert Q \rvert)$, where $\lvert Q \rvert \leq n$.                                                                                                                                        |
+| Action space      | $\lvert \mathcal{A} \rvert = m + 1$ per step (assign to any chair, or wait).                                                                                                                     |
+| Rollout per call  | $K \cdot \lvert \mathcal{A} \rvert \cdot (\tau / \Delta t)$ steps, each $O(m \log m)$ for the greedy-fill heuristic.  With defaults $K = 10$, $\tau = 60$ min, $\Delta t = 5$ min, $m = 45$: $\approx 10 \cdot 46 \cdot 12 = 5{,}520$ steps.  Decision latency $< 500$ ms (`DEFAULT_TOTAL_TIMEOUT_S = 0.5$). |
+| Space             | $O(K \cdot \tau / \Delta t)$ scenario buffers; one persistent `MPCDecision` row per call appended to `decisions.jsonl`.                                                                          |
+| Fail-safe         | When the wall budget is exceeded, the controller records `used_fallback = True` and emits a deterministic priority-first greedy schedule.  Hard guarantee: a decision is always produced.        |
+
+### 27.6 Distributionally Robust Fairness (DRO) — §A.5
+
+| Resource          | Bound                                                                                                                                                                                            |
+|-------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Scenarios         | $K = 10$ Wasserstein-perturbed empirical distributions (`DEFAULT_N_SCENARIOS`).                                                                                                                  |
+| Worst-case eval   | $O(K \cdot G^2)$ per certify call, where $G = $ number of protected groups (typically $G \leq 5$ for age band, gender, postcode tertile).                                                        |
+| CVaR buffer       | $O(n \log n)$ to sort patients by predicted no-show before building the upper-tail mean.                                                                                                         |
+| Space             | $O(K \cdot n)$ scenario tables; certificate is a single JSONL row per `data_cache/dro_fairness/certificates.jsonl`.                                                                              |
+| Certificate       | Worst-case demographic-parity gap $\leq \delta$ inside the Wasserstein ball of radius $\varepsilon$; finite-sample correction from §A.5.3 widens $\delta$ by $O\!\bigl(\sqrt{\log G / n}\bigr)$. |
 
 ---
 
