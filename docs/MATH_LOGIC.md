@@ -108,6 +108,48 @@ $\mathbf{x}^{(t)}$ — denote a value at decision epoch $t$.
 
 ---
 
+## Global Notation Table (Symbol Glossary)
+
+A single reference for every symbol that recurs across multiple sections.
+Local symbols introduced and discharged within one subsection are not
+listed here — see the section text for those.
+
+| Symbol                  | Description                                                       | First used        | Domain / Constraints                                              |
+|-------------------------|-------------------------------------------------------------------|-------------------|-------------------------------------------------------------------|
+| $P$                     | Set of patients to schedule                                       | §2.1              | $\lvert P \rvert = n$                                            |
+| $C$                     | Set of chairs                                                     | §2.1              | $\lvert C \rvert = m$, typically 45                              |
+| $H$                     | Operating horizon (minutes)                                       | §2.1              | 480–600 (8–10 h working day)                                     |
+| $d_p$                   | Expected treatment duration for patient $p$ (min)                 | §2.1              | $\mathbb{R}^+$                                                   |
+| $\pi_p$                 | ML-predicted no-show probability for $p$                          | §2.2              | $[0, 1]$                                                         |
+| $\lambda_i$             | Weight of objective $i$ in CP-SAT scalarisation                   | §2.2              | $\sum_i \lambda_i = 1,\ \lambda_i \geq 0$                        |
+| $Z_{\text{pri}}$        | Priority-weighted assignment score                                | §2.2              | $100 \cdot (5 - \text{priority}_p)$                              |
+| $Z_{\text{util}}$       | Early-start preference (negative of start time)                   | §2.2              | $-\sum_p s_p$                                                    |
+| $Z_{\text{noshow}}$     | No-show risk penalty                                              | §2.2              | $-\lfloor 100 \pi_p \rfloor$                                     |
+| $Z_{\text{wait}}$       | Waiting-time bonus                                                | §2.2              | $\min(\text{days\_waiting}, 62) \cdot 5$                         |
+| $Z_{\text{robust}}$     | Schedule robustness                                               | §2.2              | $-\max(0, \lfloor (D_p - 120)/30 \rfloor)$                       |
+| $Z_{\text{travel}}$     | Travel-distance penalty                                           | §2.2              | $-\lfloor t_p^{\text{travel}}/10 \rfloor$                        |
+| $R(S)$                  | Normalised schedule robustness                                    | §2.2              | $\frac{1}{\lvert P \rvert}\sum_p \min(1,\ \text{Slack}_p / d_p)$ |
+| $\varepsilon$           | Wasserstein radius for DRO                                        | §24b.1            | $\varepsilon \geq 0$, default $0.05$                             |
+| $\alpha$                | CVaR quantile / conformal miscoverage level                       | §19, §24b.4       | $\alpha \in (0, 1)$, default $0.10$                              |
+| $\beta_1, \beta_2$      | Risk-adaptive conformal coefficients                              | §19.10            | $\beta_1 = 0.15,\ \beta_2 = 0.08$                                |
+| $\boldsymbol{\theta}$   | Inverse-RL preference vector                                      | §2.13             | $\boldsymbol{\theta} \in \mathbb{R}^6_{\geq 0},\ \sum_i \theta_i = 1$ |
+| $\tau$                  | Double-booking threshold (lowest tier)                            | §9.4              | $0.10$                                                           |
+| $\tau_{\text{suggest}}$ | Override-suggestion threshold                                     | §A.10.4           | $0.80$                                                           |
+| $L$                     | Lipschitz constant for individual fairness                        | §A.6              | $L \geq 0$, default $1.0$                                        |
+| $\delta$                | Fairness parity budget                                            | §2.4, §A.5        | $0.15$ (demographic), $0.10$ (equal opportunity)                  |
+| $K$                     | Number of DRO scenarios / MPC rollouts                            | §24b.7, §A.13     | $K = 10$ (default)                                               |
+| $T$                     | Number of MC-Dropout forward passes                               | §20               | $T = 100$ (default)                                              |
+| $\text{PSI}$            | Population Stability Index                                        | §23.1             | $\text{PSI} \in [0, \infty)$                                     |
+
+When a symbol is overloaded across sections (e.g., $\alpha$ for both the
+CVaR quantile and the Gamma-distribution shape parameter in the
+Bayesian arrival model of §A.13.5), the local meaning is fixed by the
+nearest defining sentence; the glossary above lists the most common
+usage.  Where a section needs a private alias for a glossary symbol, it
+is introduced immediately and discharged before the next subsection.
+
+---
+
 ## 1. Data Requirements
 
 The system uses a data model aligned with **SACT v4.0** (NHS England, April 2026). Fields are organized into the 7 SACT sections plus scheduling-specific extensions.
