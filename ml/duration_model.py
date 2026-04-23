@@ -275,6 +275,16 @@ class DurationModel:
         Returns:
             DurationPrediction object
         """
+        try:
+            from observability import observe_ml_prediction
+            _obs_ctx = observe_ml_prediction("duration")
+        except Exception:                                 # pragma: no cover
+            from contextlib import nullcontext
+            _obs_ctx = nullcontext()
+        with _obs_ctx:
+            return self._predict_impl(patient_data, appointment_data, external_data)
+
+    def _predict_impl(self, patient_data, appointment_data, external_data=None):
         # Create features
         features = self.feature_engineer.create_patient_features(
             patient_data, appointment_data, external_data

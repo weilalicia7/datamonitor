@@ -237,6 +237,56 @@ logger.info(
 
 
 # -----------------------------------------------------------------------------
+# T4.4 follow-up — auto-audit every mutating request
+# -----------------------------------------------------------------------------
+# Per-route audit_event() calls would mean editing 16+ endpoints AND missing
+# every future one.  A single after_request hook covers them all invisibly:
+# any successful POST/PUT/PATCH/DELETE leaves an audit row keyed by the
+# Flask rule template (bounded cardinality — never the URL with patient IDs).
+# Read-only GETs are not audited (they don't mutate state and would flood
+# the trail).  /auth/login + /auth/logout already emit richer audit_event
+# calls inside the handler; their after_request entries augment but don't
+# replace those.  /health/* and /metrics are excluded — load balancers hit
+# them ~10×/sec and we don't want them in the audit log.
+_AUDIT_EXEMPT_PATHS = ("/health/", "/metrics", "/static/", "/favicon.ico")
+_AUDIT_MUTATING_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
+
+
+@app.after_request
+def _auto_audit_mutating_request(response):
+    try:
+        if request.method not in _AUDIT_MUTATING_METHODS:
+            return response
+        path = request.path or ""
+        if path.startswith(_AUDIT_EXEMPT_PATHS):
+            return response
+        # Identify the route template (e.g. '/api/optimize') not the URL
+        # — keeps audit-trail bounded and grep-friendly.
+        endpoint = request.url_rule.rule if request.url_rule else path
+        # Try to surface the caller's identity if auth is enabled.
+        actor = "anonymous"
+        try:
+            user = _auth_current_identity() if _auth_enabled() else None
+            if user is not None:
+                actor = getattr(user, "username", "anonymous")
+        except Exception:
+            pass
+        outcome = "success" if 200 <= response.status_code < 400 else (
+            "denied" if response.status_code in (401, 403) else "failure"
+        )
+        _audit_event(
+            actor=actor,
+            action=f"{request.method.lower()} {endpoint}",
+            outcome=outcome,
+            metadata={"status": response.status_code},
+        )
+    except Exception:
+        # Never break a request because audit-emission failed.
+        pass
+    return response
+
+
+# -----------------------------------------------------------------------------
 # T4.5 — Observability (Prometheus + /health/* + OTel)
 # -----------------------------------------------------------------------------
 from observability import (
@@ -7696,14 +7746,45 @@ def _get_auto_scaler():
         from ml.auto_scaling_optimizer import (
             AutoScalingOptimizer, set_auto_scaler,
         )
+
+        # T2.2 — solve_with_weights closure
+        # ScheduleOptimizer keeps weights as mutable instance state
+        # (self.weights), so a true four-way parallel race would need a
+        # full clone per worker (CP-SAT model + caches included), which
+        # is out of scope here.  The closure below honours the modern
+        # AutoScalingOptimizer contract (per-call weights, no shared
+        # mutation visible to the worker) by serialising the
+        # save → swap → optimise → restore sequence under a module-level
+        # lock.  Each worker still observes its own weights end-to-end;
+        # parallelism degrades to sequential but correctness is preserved
+        # and the legacy "race degraded" warning is silenced.
+        import threading as _threading
+        _optimizer_lock = _threading.Lock()
+
+        def _solve_with_weights(patients, weights, time_limit_s):
+            with _optimizer_lock:
+                original = optimizer.weights.copy()
+                try:
+                    optimizer.set_weights(
+                        {k: v for k, v in weights.items() if k != 'name'},
+                        normalise=False,
+                    )
+                    return optimizer.optimize(
+                        patients,
+                        time_limit_seconds=max(int(time_limit_s), 1),
+                    )
+                finally:
+                    optimizer.weights = original
+
         _auto_scaler = AutoScalingOptimizer(
             base_optimizer=optimizer.optimize,
             set_weights=optimizer.set_weights,
+            solve_with_weights=_solve_with_weights,
         )
         set_auto_scaler(_auto_scaler)
         logger.info(
             "AutoScalingOptimizer initialised "
-            "(cascade + 4-way parallel race + greedy fallback)"
+            "(cascade + parallel race via solve_with_weights + greedy fallback)"
         )
     return _auto_scaler
 

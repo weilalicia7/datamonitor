@@ -383,6 +383,20 @@ class ScheduleOptimizer:
         Returns:
             OptimizationResult object
         """
+        # T4.5 — Prometheus + OTel hot-path instrumentation.  Imported
+        # locally so the module remains usable when prometheus_client
+        # isn't installed.  No-op if OTEL_ENABLED is false.
+        try:
+            from observability import observe_optimizer_solve
+            _obs_ctx = observe_optimizer_solve("cpsat")
+        except Exception:                                 # pragma: no cover
+            from contextlib import nullcontext
+            _obs_ctx = nullcontext()
+
+        with _obs_ctx:
+            return self._optimize_impl(patients, date, time_limit_seconds)
+
+    def _optimize_impl(self, patients, date, time_limit_seconds):
         date = date or datetime.now().replace(hour=0, minute=0, second=0)
 
         if not patients:

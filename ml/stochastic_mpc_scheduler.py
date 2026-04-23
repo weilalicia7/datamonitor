@@ -747,6 +747,17 @@ class MPCController:
         candidate_actions: Optional[Sequence[ScheduleAction]] = None,
     ) -> MPCDecision:
         """Pick the best immediate action under scenario rollout."""
+        # T4.5 — Prometheus + OTel hot-path instrumentation.
+        try:
+            from observability import observe_optimizer_solve
+            _obs_ctx = observe_optimizer_solve("mpc")
+        except Exception:                                 # pragma: no cover
+            from contextlib import nullcontext
+            _obs_ctx = nullcontext()
+        with _obs_ctx:
+            return self._decide_impl(state, candidate_actions)
+
+    def _decide_impl(self, state, candidate_actions=None):
         t0 = time.perf_counter()
         candidates = list(candidate_actions) if candidate_actions else \
             self._generate_candidate_actions(state)

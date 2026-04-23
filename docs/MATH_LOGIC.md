@@ -2385,7 +2385,7 @@ CP-SAT solve time is structurally unpredictable — the same instance can take 0
 
 1. **Cascade**: try [5s, 2s, 1s, 0.5s] budgets sequentially; if all fail → greedy fallback.
 2. **Early stopping**: abort when `|objective - best_bound| / |objective| ≤ 0.01` (1% optimality gap).
-3. **Parallel search**: race 4 weight configurations in a ThreadPoolExecutor; take best by `(-n_scheduled, solve_time, config_name)` (deterministic tie-break).
+3. **Parallel search**: race 4 weight configurations in a ThreadPoolExecutor; take best by `(-n_scheduled, solve_time, config_name)` (deterministic tie-break).  Each worker calls the injected `solve_with_weights(patients, weights, time_limit)` callable so weights flow through as a per-call argument — workers never share mutable optimiser state, and no two workers can trample each other's weights mid-solve (T2.2 race fix).  When the host caller injects only the legacy `set_weights` callable (no `solve_with_weights`), the race serialises behind a single lock — correct but no parallelism, with a one-shot `auto-scaling parallel race degraded to serial` warning logged.
 
 #### 9b.9.3 Weight configurations raced
 
@@ -2423,6 +2423,7 @@ JSONL log at `data_cache/auto_scaling/runs.jsonl`. §30 of `dissertation_analysi
 - Greedy schedule: no chair overlaps, respects site capacity, priority-1 patient gets earliest slot
 - `early_stopped == True` iff solve_time < 0.9 × budget AND success
 - No base optimizer ⇒ falls straight through to greedy
+- **Race-isolation invariants (T2.2):** with `solve_with_weights` injected, four configs racing in parallel each observe their OWN weights — no cross-contamination (`TestParallelRaceWeightIsolation.test_per_call_weights_no_cross_contamination`), wall-time is dominated by ONE solve not all four (`...test_solve_with_weights_truly_parallel`); with the legacy `set_weights` path, max concurrent active solves is 1 (`...test_legacy_set_weights_serialises_under_lock`)
 
 ---
 
@@ -2695,10 +2696,20 @@ $$
 **Reward** (per §S-1.4):
 
 $$
-R_t = \underbrace{\sum_c \mathbb{1}_{\text{complete}_c} \cdot (5 - \text{prio}_p) \cdot 10}_{\text{completion credit}} - \underbrace{\sum_{p \in Q_t} w_{\text{wait}} \min(\text{wait}_p / 60, 2)}_{\text{waiting cost}} - \underbrace{\sum_c \mathbb{1}_{\text{idle \& queue non-empty}} \cdot 5}_{\text{idle penalty}}
+R_t = \underbrace{\sum_c \mathbb{1}_{\text{complete}_c} \cdot (6 - \text{prio}_p) \cdot b_{\text{complete}}}_{\text{completion credit}} - \underbrace{\sum_{p \in Q_t} w_{\text{wait}} \min(\text{wait}_p / 60, 2)}_{\text{waiting cost}} - \underbrace{\sum_c \mathbb{1}_{\text{idle \& queue non-empty}} \cdot w_{\text{idle}}}_{\text{idle penalty}}
 $$
 
-**Terminal penalty** at $t = H$: $R_H = - \sum_{p \in Q_H} (5 - \text{prio}_p) \cdot 20$.
+with $b_{\text{complete}} = $ `DEFAULT_PRIORITY_COMPLETE_BASE` and $w_{\text{idle}} = $ `DEFAULT_IDLE_PENALTY`.  The multiplier is $(6 - \text{prio}_p)$ rather than $(5 - \text{prio}_p)$ — applied to $\text{prio}_p \in \{1,\dots,5\}$ this gives priority-1 (most urgent) the largest credit ($5 b_{\text{complete}}$) and priority-5 a positive but minimal credit ($1 \cdot b_{\text{complete}}$).  The +1 floor matters clinically: every completed chemotherapy session must be rewarded, even when the patient was lowest priority, otherwise the optimiser has no incentive to ever schedule routine cycles.  When a chair was already `OCCUPIED` at day-start (no captured priority), the formula falls back to $\text{prio}_p = 3$ (mid).
+
+`prio_p` is recovered from `ChairState.priority_at_assignment` (T2.1 fix), which the planner stamps onto the chair at `_apply_action` time and preserves across the `OCCUPIED→IDLE` transition for the duration of the step so the reward function can read it after the patient finishes.
+
+**Terminal penalty** at $t = H$:
+
+$$
+R_H = - \sum_{p \in Q_H} \max(5 - \text{prio}_p,\ 1) \cdot u
+$$
+
+with $u = $ `DEFAULT_TERMINAL_UNSCHEDULED_PENALTY`.  The $\max(\cdot, 1)$ floor mirrors the $(6 - \text{prio})$ choice in $R_t$: an unscheduled priority-5 patient still incurs a non-zero terminal penalty so the planner cannot park them indefinitely.
 
 #### 9b.13.3 MPC with scenario rollout
 
@@ -2768,6 +2779,9 @@ JSONL logs at `data_cache/mpc_scheduler/{events,decisions,simulations}.jsonl`. �
 - Priority-1 patient in queue ⇒ assigned to first idle chair under greedy fill
 - `evaluate_action` returns finite reward + valid final state
 - `simulate_day` returns per-policy metrics with `0 ≤ urgent_acceptance_rate ≤ 1` and `utilisation ≤ 1`
+- **Priority-weighted completion credit (T2.1):** completing a priority-1 patient yields strictly more reward than completing a priority-5 patient, monotone across $\text{prio} \in \{1,\dots,5\}$ (`TestPriorityWeightedReward.test_priority_multiplier_is_monotone`)
+- `ChairState.priority_at_assignment` is captured at `RolloutPlanner._apply_action` time and copied through `ChairState.copy()` (`TestPriorityWeightedReward.test_chairstate_copy_preserves_priority`)
+- A chair `OCCUPIED` at day-start with no captured priority falls back to mid-priority (3) and still produces a positive completion reward (`TestPriorityWeightedReward.test_missing_priority_defaults_to_mid`)
 
 ---
 
