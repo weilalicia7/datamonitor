@@ -27,6 +27,8 @@ from ml.decision_focused_learning import (
     DEFAULT_DOUBLE_BOOK_THRESHOLD,
     DEFAULT_WASTE_COST,
     DEFAULT_CROWD_COST,
+    _DFL_SLOPE_BOUNDS,
+    _DFL_BIAS_BOUNDS,
 )
 
 
@@ -141,6 +143,92 @@ class TestDFLCalibrator(unittest.TestCase):
     def test_calibrate_scalar_returns_float(self):
         out = self.cal.calibrate_scalar(0.3)
         self.assertIsInstance(out, float)
+
+    def test_ce_does_not_collapse_under_extreme_bias(self):
+        """
+        Regression for the §4.5.4 bug: with the original ±20 bounds, SPO+
+        on this exact data shape (seed=7, n=2000, 20% base rate, p_raw ~
+        Beta(3, 7)) drove the bias to b=-20 and inflated cross-entropy
+        7.3× (verified empirically by reverting bounds in-process).  The
+        tightened bounds in _DFL_BIAS_BOUNDS = (-3, 3) cap σ(b) ∈
+        [0.05, 0.95] and keep the ratio below 1.5× on the same scenario.
+
+        DO NOT widen the bounds without re-running this assertion.
+        """
+        rng = np.random.RandomState(7)
+        n = 2000
+        # 20 % no-show base rate, raw probabilities ~ Beta(3, 7) mean ≈ 0.30 —
+        # the over-confident regime where SPO+ most aggressively pushes the
+        # bias toward the negative wall.
+        y = (rng.rand(n) < 0.20).astype(int)
+        p_raw = np.clip(rng.beta(3, 7, n), 0.01, 0.99)
+
+        fit = self.cal.fit(p_raw=p_raw, y_true=y)
+
+        # Primary assertion — would have caught the original 5× blow-up
+        # (the empirically-measured old-bounds ratio on this scenario is 7.3×).
+        ratio = fit.ce_after / max(fit.ce_before, 1e-9)
+        self.assertLess(
+            ratio,
+            5.0,
+            f"CE blow-up unbounded: ce_before={fit.ce_before:.3f} → "
+            f"ce_after={fit.ce_after:.3f} (ratio {ratio:.2f}× ≥ 5×). "
+            "Has _DFL_BIAS_BOUNDS been widened?",
+        )
+
+        # Secondary assertion — calibration should never produce a NaN/Inf CE
+        # even when SPO+ pushes hard on the boundary.
+        self.assertTrue(np.isfinite(fit.ce_after))
+
+        # Tertiary assertion — slope/bias must respect the published bounds.
+        slope_lo, slope_hi = _DFL_SLOPE_BOUNDS
+        bias_lo, bias_hi = _DFL_BIAS_BOUNDS
+        self.assertGreaterEqual(fit.a, slope_lo - 1e-6)
+        self.assertLessEqual(fit.a, slope_hi + 1e-6)
+        self.assertGreaterEqual(fit.b, bias_lo - 1e-6)
+        self.assertLessEqual(fit.b, bias_hi + 1e-6)
+
+    def test_bound_active_flag_true_when_optimiser_hits_wall(self):
+        """
+        Diagnostic field: bound_active must flip to True exactly when the
+        L-BFGS-B optimum sits on either box edge — that's the early signal
+        operators need that the data wants more than the bound permits.
+
+        Uses the same over-confident regime as the CE-collapse test so the
+        bias bound is reliably saturated.
+        """
+        rng = np.random.RandomState(7)
+        n = 2000
+        y = (rng.rand(n) < 0.20).astype(int)
+        p_raw = np.clip(rng.beta(3, 7, n), 0.01, 0.99)
+        fit = self.cal.fit(p_raw=p_raw, y_true=y)
+
+        self.assertTrue(
+            fit.bound_active,
+            f"Expected bound_active=True on the over-confident regime "
+            f"(a={fit.a:.3f}, b={fit.b:.3f}); diagnostic flag is broken.",
+        )
+
+    def test_bound_active_flag_false_for_interior_fit(self):
+        """
+        Negative case: when the data is trivially separable and the predicted
+        probabilities sit far from τ=0.4, SPO+ has no reason to push the bias
+        to a boundary.  bound_active must remain False so that operators can
+        trust it as a real "data is fighting the bound" signal.
+        """
+        rng = np.random.RandomState(7)
+        n = 400
+        y = rng.randint(0, 2, n)
+        # Predictions perfectly aligned with y, well clear of τ=0.4 in both
+        # directions — the optimum sits comfortably inside the box.
+        p_raw = np.where(y == 1, 0.95, 0.05)
+        fit = self.cal.fit(p_raw=p_raw, y_true=y)
+
+        self.assertFalse(
+            fit.bound_active,
+            f"Expected bound_active=False on an interior fit "
+            f"(a={fit.a:.3f}, b={fit.b:.3f}).",
+        )
 
 
 if __name__ == '__main__':

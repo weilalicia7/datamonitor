@@ -87,6 +87,19 @@ DEFAULT_CROWD_COST: float = 100.0 * float(OPTIMIZATION_WEIGHTS.get('robustness',
 DFL_MODEL_FILE: Path = MODELS_DIR / 'dfl_calibrator.pkl'
 DFL_HISTORY_FILE: Path = DATA_CACHE_DIR / 'dfl_history.jsonl'
 
+# L-BFGS-B box bounds for the calibration head (a, b).
+#   slope a ∈ _DFL_SLOPE_BOUNDS keeps the calibration monotone and caps the
+#     logit amplification factor; ≤ 5× is ample for a single-feature head.
+#   bias  b ∈ _DFL_BIAS_BOUNDS  keeps σ(b) ∈ [σ(-3), σ(3)] ≈ [0.05, 0.95],
+#     i.e. the calibrated probability cannot collapse to the saturating ends
+#     of the sigmoid.  An earlier ±20 bound let the optimiser push every
+#     probability to ≈0/1 on the synthetic dataset, blowing cross-entropy
+#     up by 5× — the regression test_ce_does_not_collapse_under_extreme_bias
+#     guards against any future widening.
+_DFL_SLOPE_BOUNDS: Tuple[float, float] = (1e-4, 5.0)
+_DFL_BIAS_BOUNDS: Tuple[float, float] = (-3.0, 3.0)
+_DFL_BOUND_ACTIVE_TOL: float = 1e-3  # |param − bound| < tol ⇒ optimiser hit the wall
+
 
 # ---------------------------------------------------------------------------
 # Primitives
@@ -161,6 +174,7 @@ class DFLFitResult:
     iterations: int
     converged: bool
     fit_ts: str
+    bound_active: bool = False  # True when the optimiser hit the slope/bias bound
 
 
 class DFLCalibrator:
@@ -279,18 +293,24 @@ class DFLCalibrator:
             x0=np.array([1.0, 0.0]),             # identity warm-start
             jac=True,
             method='L-BFGS-B',
-            # Tightened bounds to prevent the bias from saturating at ±20
-            # (which destroys cross-entropy by collapsing every probability
-            # to ≈ 0 or ≈ 1).  The new bounds still let the calibration
-            # span ~95% of the sigmoid range (σ(±3) ≈ 0.05 / 0.95) and let
-            # the slope amplify by ≤ 5×.
-            bounds=[(1e-4, 5.0), (-3.0, 3.0)],
+            bounds=[_DFL_SLOPE_BOUNDS, _DFL_BIAS_BOUNDS],
             options={'maxiter': max_iterations, 'ftol': tol, 'gtol': tol},
         )
         self.a = float(result.x[0])
         self.b = float(result.x[1])
         converged = bool(result.success)
         it = int(result.nit)
+
+        # Bound-saturation diagnostic: if the optimum sits on either box edge
+        # the data wants more amplification than the bound permits.  Surfaced
+        # via DFLFitResult.bound_active so the JSONL audit row + downstream
+        # monitoring can flag it without re-deriving from raw (a, b).
+        bound_active = (
+            abs(self.a - _DFL_SLOPE_BOUNDS[0]) < _DFL_BOUND_ACTIVE_TOL
+            or abs(self.a - _DFL_SLOPE_BOUNDS[1]) < _DFL_BOUND_ACTIVE_TOL
+            or abs(self.b - _DFL_BIAS_BOUNDS[0]) < _DFL_BOUND_ACTIVE_TOL
+            or abs(self.b - _DFL_BIAS_BOUNDS[1]) < _DFL_BOUND_ACTIVE_TOL
+        )
 
         # Diagnostics after
         p_cal = self.calibrate(p_raw)
@@ -319,6 +339,7 @@ class DFLCalibrator:
             auc_before=auc_before, auc_after=auc_after,
             iterations=it + 1, converged=converged,
             fit_ts=datetime.utcnow().isoformat(timespec='seconds'),
+            bound_active=bound_active,
         )
         self.last_fit = fit
         self._save_state()
@@ -328,6 +349,7 @@ class DFLCalibrator:
             f"regret {fit.regret_before:.1f}→{fit.regret_after:.1f} "
             f"({fit.regret_improvement_pct:+.1f}%), "
             f"CE {fit.ce_before:.3f}→{fit.ce_after:.3f}"
+            f"{' [BOUND ACTIVE]' if fit.bound_active else ''}"
         )
         return fit
 
