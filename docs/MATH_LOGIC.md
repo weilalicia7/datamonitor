@@ -4,7 +4,8 @@
 
 This document describes all mathematical formulas, algorithms, and optimization logic used in the SACT (Systemic Anti-Cancer Therapy) Scheduling System for Velindre Cancer Centre.
 
-**Version:** 5.0 (Updated April 2026)
+**Version:** 5.0.1 (Updated April 2026)
+**New in v5.0.1:** §2.12.6 Column-generation wall-clock guard — `ColumnGenerator(time_limit_s=...)` now honours the outer `time_limit_seconds` passed by `_optimize_column_generation`, breaking the master loop at iteration boundaries (and mid-pricing-pass) when the budget is exhausted and returning a feasible solution tagged `CG_TIME_LIMIT`. Without this guard the §A.9 auto-scaler's per-worker budgets were unenforceable on instances that routed to CG: a 2 s budget on a 202-patient cohort previously took $\approx 350$ s (175× overshoot). Regression-tested at `tests/test_column_generation.py::test_cg_respects_wall_clock_time_limit`. Pre-fix evidence preserved at `data_cache/auto_scaling/runs.pre_cg_time_limit_fix.jsonl.bak`.
 **New in v5.0:** Production-readiness sweep across the prediction pipeline.  (i) MPC reward §A.13.2 corrected from $(5 - \text{prio})$ to $(6 - \text{prio})$ + matching $\max(5 - \text{prio}, 1)$ floor in the terminal penalty so priority-5 patients still reward completion / penalise abandonment; `ChairState.priority_at_assignment` field carries priority through the `OCCUPIED→IDLE` transition.  (ii) Auto-scaling §A.9 parallel race exposes a new `solve_with_weights(patients, weights, time_limit)` injection point so each worker observes its own weights — no shared mutable optimiser state, no cross-contamination.  (iii) SHA-256-verified pickle loader (`safe_loader.py`) gates every model `save`/`load` in 7 modules; sidecar `<file>.sha256` lets boot-time integrity probes refuse tampered weights before deserialisation.  (iv) Production hardening: role-based auth (admin ⊇ operator ⊇ viewer), input caps + DML whitelist + `MAX_CONTENT_LENGTH=16MB`, CSRF + session-cookie hardening, structured JSON logging with patient-ID redaction, audit trail (after_request hook auto-emits one row per mutating request, route-template keyed for bounded cardinality), Prometheus `/metrics` (HTTP + `sact_optimizer_solve_seconds{cpsat,mpc}` + `sact_ml_prediction_seconds{noshow,duration}` histograms), `/health/{live,ready}`, optional OpenTelemetry, CVE-pinned deps, multi-stage Dockerfile + nginx TLS + GitHub Actions CI, `secrets_manager.py` (env > .env > AWS/Vault) with rotation runbook, NHS data-protection playbook + DPIA, `retention_enforcer.py` for TTL pruning + GDPR right-to-erasure.  Test suite grew from 441 to 961 (every untested module covered).  No new UI panels — every integration is invisible to the prediction pipeline; observability lives at `/api/*/status`, `/health/*`, `/metrics`.
 **New in v4.9:** Column generation for large instances (Section 2.12). Dantzig-Wolfe decomposition splits the monolithic CP-SAT into a master set-partitioning LP (GLOP) + per-chair pricing subproblems (CP-SAT). Handles 100+ patients/day where the monolithic formulation becomes impractical. Integrates with warm-start cache and GNN pruning. `/api/optimizer/colgen` endpoint for CG diagnostics.
 **New in v4.8:** GNN feasibility pre-filter (Section 2.11). Bipartite message-passing GNN (numpy + sklearn, no deep-learning framework required) prunes infeasible (patient, chair) pairs before CP-SAT runs. 2–5× solve-time reduction after warm-up. `/api/optimizer/gnn` endpoint for live training stats and prune rates.
@@ -882,9 +883,12 @@ If rc_c > ε (tolerance = 10⁻⁴), the new column is added to the master. Othe
 
 The CG loop terminates when:
 1. **No improving column**: all subproblems return rc ≤ ε, OR
-2. **Iteration limit**: 100 iterations reached.
+2. **Iteration limit**: 100 iterations reached, OR
+3. **Wall-clock budget exhausted**: `time.time() − t0 ≥ time_limit_s` (status `CG_TIME_LIMIT`).
 
-At termination the LP relaxation is optimal (case 1) or near-optimal (case 2).
+At termination the LP relaxation is optimal (case 1) or near-optimal (cases 2/3). The wall-clock check fires at iteration boundaries *and* mid-iteration during the per-chair pricing pass, so a single slow subproblem cannot blow past the budget by more than one subproblem's runtime. The integer-rounding step always runs after the loop exits, so all three termination paths return a feasible (possibly suboptimal) schedule.
+
+**Why a hard wall-clock guard.** Without the `time_limit_s` parameter the CG loop ran to `max_iterations` regardless of wall time. On a 202-patient cohort with `max_iterations=100` and 14 chairs, total wall time reached $\approx 350$ s for a 2 s budget — a $175\times$ overshoot that defeated the auto-scaling wrapper's per-worker timing guarantees (§A.9). The fix passes the outer `time_limit_seconds` from `_optimize_column_generation` straight into `ColumnGenerator(time_limit_s=...)`; the master loop checks elapsed time every iteration and breaks gracefully. Regression-tested at `tests/test_column_generation.py::test_cg_respects_wall_clock_time_limit` (a 0.1 s budget must terminate within 1 s).
 
 #### 2.12.7 Integer Rounding (Branch-and-Price Lite)
 
@@ -2694,6 +2698,7 @@ JSONL log at `data_cache/auto_scaling/runs.jsonl`. §30 of `dissertation_analysi
 - `early_stopped == True` iff solve_time < 0.9 × budget AND success
 - No base optimizer ⇒ falls straight through to greedy
 - **Race-isolation invariants:** with `solve_with_weights` injected, four configs racing in parallel each observe their OWN weights — no cross-contamination (`TestParallelRaceWeightIsolation.test_per_call_weights_no_cross_contamination`), wall-time is dominated by ONE solve not all four (`...test_solve_with_weights_truly_parallel`); with the legacy `set_weights` path, max concurrent active solves is 1 (`...test_legacy_set_weights_serialises_under_lock`)
+- **Wall-clock budget invariant (§2.12.6):** every parallel worker honours its `parallel_time_limit_s` — for instances large enough to route to column generation, `ColumnGenerator.solve()` checks elapsed time at every iteration boundary and returns a feasible solution tagged `CG_TIME_LIMIT` when the budget is hit (regression: `tests/test_column_generation.py::test_cg_respects_wall_clock_time_limit`). Before this guard a 2 s budget could blow past 300 s on a 202-patient cohort; the historical pre-fix evidence is preserved at `data_cache/auto_scaling/runs.pre_cg_time_limit_fix.jsonl.bak`.
 
 ---
 

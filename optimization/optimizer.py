@@ -1088,7 +1088,11 @@ class ScheduleOptimizer:
             cached_sol['hits'] = cached_sol.get('hits', 0) + 1
             logger.info(f"CG warm-start: using cached solution (hits={cached_sol['hits']})")
 
-        # Run column generation
+        # Run column generation — pass the outer wall-clock budget through
+        # so the master loop honours it (was the root cause of the §4.5.16
+        # 350-second blow-up: CG used to ignore time_limit_seconds entirely
+        # and only scale the subproblem budget, so a 2-second auto-scaler
+        # budget could balloon to 350 s on large cohorts).
         cg = ColumnGenerator(
             patients=patients,
             chairs=self.chairs,
@@ -1098,6 +1102,7 @@ class ScheduleOptimizer:
             reduced_cost_tol=1e-4,
             subproblem_time_limit=min(5.0, time_limit_seconds / 20),
             gnn_valid_pairs=gnn_valid_pairs,
+            time_limit_s=float(time_limit_seconds),
         )
 
         cg_result = cg.solve(warm_start_assignments=warm_start_assigns)

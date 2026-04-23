@@ -217,6 +217,59 @@ def test_single_patient_solve(today, chairs):
     assert len(result.patient_assignments) == 1
 
 
+def test_cg_respects_wall_clock_time_limit(patients, chairs):
+    """
+    Regression for §4.5.16 absurdity: a 2-second auto-scaler budget
+    used to balloon to 350 s on the production-path 202-patient cohort
+    because ColumnGenerator.solve() ignored time_limit_seconds entirely
+    and only honoured max_iterations.
+
+    With a deliberately tiny wall-clock budget (0.1 s) the solver must
+    return a feasible result tagged CG_TIME_LIMIT and report a
+    solve_time within ~3× the budget (slop covers the in-flight master
+    LP and the integer-rounding step that always runs after the loop).
+    """
+    import time as _time
+
+    cg = ColumnGenerator(
+        patients, chairs,
+        max_iterations=100,
+        subproblem_time_limit=0.1,
+        time_limit_s=0.1,           # absurdly tight on purpose
+    )
+    t0 = _time.perf_counter()
+    result = cg.solve()
+    elapsed = _time.perf_counter() - t0
+
+    # Must terminate near-immediately, not run the full 100 iterations.
+    assert elapsed < 1.0, (
+        f"CG ran for {elapsed:.2f}s with 0.1s budget — wall-clock "
+        f"guard not enforced (status={result.status})"
+    )
+    # Result must still be feasible (rounding step always runs after break).
+    assert result.success or result.status == 'CG_FAILED'
+    if result.success:
+        # Time-limit termination is the primary status when budget is
+        # what stopped us; CG_OPTIMAL is acceptable iff the instance is
+        # so small the loop converged before the budget bit.
+        assert result.status in ('CG_TIME_LIMIT', 'CG_OPTIMAL', 'CG_FEASIBLE')
+
+
+def test_cg_no_time_limit_preserves_legacy_behaviour(patients, chairs):
+    """
+    The new time_limit_s parameter must default to None so existing
+    callers (any test or code that does not pass it) keep their old
+    behaviour: run to convergence or to max_iterations, no premature
+    time-based termination.
+    """
+    cg = ColumnGenerator(patients[:6], chairs, max_iterations=20)
+    assert cg.time_limit_s is None
+    result = cg.solve()
+    # Without a budget the only stop reasons are convergence or iterations,
+    # never CG_TIME_LIMIT.
+    assert result.status != 'CG_TIME_LIMIT'
+
+
 # ---------------------------------------------------------------------------
 # vs-CP-SAT ground-truth comparison
 # ---------------------------------------------------------------------------

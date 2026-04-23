@@ -107,7 +107,7 @@ class CGResult:
     columns_generated: int
     solve_time: float
     lp_bound: float
-    status: str  # 'CG_OPTIMAL', 'CG_FEASIBLE', 'CG_MAX_ITER', 'CG_FAILED'
+    status: str  # 'CG_OPTIMAL', 'CG_FEASIBLE', 'CG_MAX_ITER', 'CG_TIME_LIMIT', 'CG_FAILED'
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -136,6 +136,15 @@ class ColumnGenerator:
         CP-SAT time limit per subproblem in seconds (default 5).
     gnn_valid_pairs : set or None
         If provided, restricts (patient_idx, chair_idx) pairs in subproblems.
+    time_limit_s : float or None
+        Hard wall-clock deadline for the whole CG run (default None = no
+        wall-clock limit, only ``max_iterations``).  When set, the master
+        loop breaks at the next iteration boundary once the budget is
+        exhausted and returns the best feasible solution found so far,
+        flagging ``status='CG_TIME_LIMIT'``.  Required for the auto-
+        scaling wrapper's per-config budget enforcement (§5.1) — without
+        it, large instances ignore the outer ``time_limit_seconds`` and
+        run for whatever it takes to converge.
     """
 
     def __init__(
@@ -148,6 +157,7 @@ class ColumnGenerator:
         reduced_cost_tol: float = 1e-4,
         subproblem_time_limit: float = 5.0,
         gnn_valid_pairs: Optional[Set[Tuple[int, int]]] = None,
+        time_limit_s: Optional[float] = None,
     ):
         self.patients = patients
         self.chairs = chairs
@@ -160,6 +170,7 @@ class ColumnGenerator:
         self.reduced_cost_tol = reduced_cost_tol
         self.subproblem_time_limit = subproblem_time_limit
         self.gnn_valid_pairs = gnn_valid_pairs
+        self.time_limit_s = float(time_limit_s) if time_limit_s is not None else None
 
         # All generated columns
         self._columns: List[Column] = []
@@ -682,9 +693,25 @@ class ColumnGenerator:
         # Step 2-5: iterate
         best_lp_obj = 0.0
         iterations = 0
+        time_limit_hit = False
 
         for iteration in range(self.max_iterations):
             iterations = iteration + 1
+
+            # Wall-clock deadline check — break BEFORE the next master solve
+            # so we never start an iteration that we can't finish honestly
+            # within the caller's budget.  The integer-rounding step still
+            # runs after the loop exits, so we always return a feasible
+            # solution from whatever columns we have generated so far.
+            if self.time_limit_s is not None and (time.time() - t0) >= self.time_limit_s:
+                time_limit_hit = True
+                logger.info(
+                    f"CG time-limit hit at iteration {iterations} "
+                    f"(elapsed {time.time() - t0:.2f}s ≥ budget "
+                    f"{self.time_limit_s:.2f}s); returning best-feasible-so-far"
+                )
+                iterations = max(iteration, 0)  # don't count the aborted iter
+                break
 
             # Solve master LP
             lambda_vals, pi_duals, mu_duals = self._solve_master()
@@ -701,9 +728,23 @@ class ColumnGenerator:
             # Pricing: generate new columns
             new_cols = 0
             for ci in range(self.n_chairs):
+                # Mid-iteration deadline check too — pricing is the dominant
+                # cost on large instances and we don't want to overshoot the
+                # budget by a whole pricing pass.
+                if self.time_limit_s is not None and (time.time() - t0) >= self.time_limit_s:
+                    time_limit_hit = True
+                    break
                 col = self._solve_pricing(ci, pi_duals, mu_duals[ci])
                 if col is not None:
                     new_cols += 1
+
+            if time_limit_hit:
+                logger.info(
+                    f"CG time-limit hit during pricing at iteration {iterations} "
+                    f"(elapsed {time.time() - t0:.2f}s ≥ budget "
+                    f"{self.time_limit_s:.2f}s); returning best-feasible-so-far"
+                )
+                break
 
             if new_cols == 0:
                 logger.info(
@@ -747,6 +788,11 @@ class ColumnGenerator:
         )
         if not converged and assignments:
             status = 'CG_MAX_ITER'
+        if time_limit_hit and assignments:
+            # Wall-clock budget is the primary terminator — surface that even
+            # if max_iterations would also have fired.  The auto-scaling
+            # wrapper uses this status to know the run honoured its budget.
+            status = 'CG_TIME_LIMIT'
 
         logger.info(
             f"CG complete: {len(assignments)}/{self.n_patients} assigned, "
