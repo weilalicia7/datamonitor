@@ -386,6 +386,45 @@ Where $t_p^{travel}$ = estimated travel time in minutes.
 | Robustness | 0.10 | Schedule stability for operational reliability |
 | Travel | 0.05 | Patient convenience (secondary) |
 
+#### 2.2.1 Quick Reference: CP-SAT Six Objectives
+
+Compact one-row-per-objective summary so you don't have to chase the
+formulas across §2.2 + §2.3.  $a_p \in \{0, 1\}$ is the assignment
+indicator (1 iff patient $p$ is scheduled); $s_p$ is the integer start
+time in minutes; the other symbols follow §2.1 + the Global Notation
+Table.
+
+| Symbol                  | Objective              | Direction | Default $\lambda_i$ | Mathematical form                                                       | Live in `optimization/optimizer.py`     |
+|-------------------------|------------------------|-----------|---------------------|-------------------------------------------------------------------------|------------------------------------------|
+| $Z_{\text{priority}}$   | Clinical priority      | Maximise  | $0.30$              | $\sum_p (5 - \text{prio}_p) \cdot 100 \cdot a_p$                        | `optimizer.py:683` (`* w_priority`)      |
+| $Z_{\text{util}}$       | Chair utilisation      | Maximise  | $0.25$              | $-\sum_p s_p$                                                            | `optimizer.py:689` (`-pvars['start'] * w_util`) |
+| $Z_{\text{noshow}}$     | No-show risk           | Minimise  | $0.15$              | $-\sum_p \lfloor 100 \pi_p \rfloor \cdot a_p$                            | `optimizer.py:702–703` (`-noshow_penalty * w_noshow`) |
+| $Z_{\text{wait}}$       | Waiting time           | Minimise  | $0.15$              | $\sum_p \min(\text{days\_waiting}_p, 62) \cdot 5 \cdot a_p$              | `optimizer.py:712` (`waiting_bonus * w_waiting`) |
+| $Z_{\text{robust}}$     | Schedule robustness    | Maximise  | $0.10$              | $-\sum_p \max\!\bigl(0,\ \lfloor (d_p - 120)/30 \rfloor\bigr)$           | `optimizer.py:721` (`-duration_risk * w_robust`) |
+| $Z_{\text{travel}}$     | Travel distance        | Minimise  | $0.05$              | $-\sum_p \lfloor t_p^{\text{travel}} / 10 \rfloor$                       | `optimizer.py:728` (`-travel_penalty * w_travel`) |
+
+All six $Z_k$ are scaled so that their typical magnitudes sit within one
+order of magnitude before weighting (the leading constants $100$, $5$,
+$10$, etc. exist only to keep CP-SAT's integer coefficients in a
+balanced range).  The composite objective fed to CP-SAT is the
+weighted sum
+
+$$
+Z(S) = \sum_{k=1}^{6} \lambda_k \cdot Z_k(S),
+\qquad
+\sum_k \lambda_k = 1,\ \lambda_k \geq 0,
+$$
+
+with the weights drawn from `OPTIMIZATION_WEIGHTS` in `config.py:38–45`
+or any of the `PARETO_WEIGHT_SETS` profiles (`config.py:48–54`).
+
+The "Direction" column is the maximisation/minimisation intent — every
+term is *expressed* with a sign such that the CP-SAT solver always
+maximises a single composite ($Z_{\text{util}}$, $Z_{\text{noshow}}$,
+$Z_{\text{robust}}$, $Z_{\text{travel}}$ already negate inside the
+formula so a smaller $s_p$ / $\pi_p$ / $d_p$ / $t_p^{\text{travel}}$
+yields a larger contribution).
+
 ### 2.3 Pareto Frontier Generation
 
 Since objectives conflict (e.g., maximizing utilization may reduce robustness), the system generates a **Pareto frontier** by solving with multiple weight vectors:
