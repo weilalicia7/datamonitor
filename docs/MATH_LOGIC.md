@@ -83,6 +83,7 @@ This document describes all mathematical formulas, algorithms, and optimization 
 
 ### Performance & Complexity (v5.0)
 27. [Algorithmic Complexity Guarantees](#27-algorithmic-complexity-guarantees) — Time / space / convergence bounds for CP-SAT (27.1), GNN (27.2), Column Generation (27.3), Conformal (27.4), MPC rollout (27.5), DRO (27.6)
+28. [Numerical Stability Notes](#28-numerical-stability-notes) — log/exp/sqrt/division safeguards across modules
 
 ---
 
@@ -4868,6 +4869,37 @@ Constants where given are measured on the synthetic Velindre dataset
 | CVaR buffer       | $O(n \log n)$ to sort patients by predicted no-show before building the upper-tail mean.                                                                                                         |
 | Space             | $O(K \cdot n)$ scenario tables; certificate is a single JSONL row per `data_cache/dro_fairness/certificates.jsonl`.                                                                              |
 | Certificate       | Worst-case demographic-parity gap $\leq \delta$ inside the Wasserstein ball of radius $\varepsilon$; finite-sample correction from §A.5.3 widens $\delta$ by $O\!\bigl(\sqrt{\log G / n}\bigr)$. |
+
+---
+
+## 28. Numerical Stability Notes
+
+Many of the closed-form expressions in this document involve logarithms,
+divisions, exponentials, or square roots that can underflow / overflow
+when their argument approaches a degenerate value (zero probabilities,
+empty groups, perfect-fit residuals).  The implementation applies the
+following safeguards uniformly so a corner case in the input distribution
+never propagates as a NaN or `-inf` to a CP-SAT objective term or a
+calibration cost.  Each row is a verified live behaviour, citing
+file:line.
+
+| Operation / Site                                              | Safeguard                                                              | Rationale                                                                                              | Live in code                                              |
+|---------------------------------------------------------------|------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------|-----------------------------------------------------------|
+| $\log(p)$ in BMA log-likelihood                              | $\log(\max(p,\ 10^{-15}))$ via `epsilon = 1e-15`                       | Prevents $-\infty$ when an ensemble base learner predicts $p = 0$ on the BMA hold-out fold             | `ml/noshow_model.py:217`                                  |
+| Softmax $w_i = \exp(\text{LL}_i / T) / \sum_j \exp(\text{LL}_j / T)$ over BMA log-likelihoods | Subtract $\max_j \text{LL}_j$ before exponentiation                    | Prevents `exp` overflow on log-likelihoods of order $10^3$ for large calibration sets                 | `ml/noshow_model.py:231–233`                              |
+| CP-SAT no-show penalty term                                   | `int(p.noshow_probability * 100)` after upstream sigmoid clamp to $[0,1]$ | Keeps the integer objective coefficient bounded in $[0, 100]$; CP-SAT requires `int64` coefficients   | `optimization/optimizer.py:702`                           |
+| Standard-error $\sqrt{p(1-p)/n}$ in DRO and RCT              | $\sqrt{\max(\cdot,\ 0)}$ (and $\sqrt{\max(\cdot,\ 10^{-12})}$ for RCT pooled SE) | Defends against tiny negative values from floating-point rounding when the empirical rate is 0 or 1   | `ml/dro_fairness.py:330–331`; `ml/rct_randomization.py:334` |
+| $1/\pi_g$ in Wasserstein DRO worst-case bound                | $\pi_g \mapsto \max(\pi_g,\ 10^{-6})$ before reciprocation             | Prevents blow-up when a protected group is empty in the calibration sample                            | `ml/dro_fairness.py:323–324`                              |
+| Hierarchical-Bayes posterior $\sigma$, $\tau$                | $\sqrt{\max(\sigma^2,\ 1)},\ \sqrt{\max(\tau^2,\ 1)}$                  | Floors variance components at 1 (one-minute resolution) to stop the duration sampler collapsing       | `ml/hierarchical_model.py:371, 376`                       |
+| Probability outputs from QRF + sequence model                | `np.clip(preds, 0, 1)` post-prediction                                 | Quantile interpolation can fall a hair outside $[0,1]$; the clip keeps downstream consumers honest    | `ml/quantile_forest.py:548, 555`; `ml/sequence_model.py:763` |
+| Conformal split-quantile fraction $(n_{\text{cal}}+1)\alpha / n_{\text{cal}}$ | `min(1.0, ...)` clamp                                                  | Stops the quantile lookup from sliding past the largest calibration score when $\alpha$ is near 0    | `ml/conformal_prediction.py:209–211`                      |
+| Adaptive conformal $\alpha(p)$                               | `np.clip(raw_alpha, alpha_floor, alpha_ceil)` with $\alpha_{\text{floor}} = 0.01$, $\alpha_{\text{ceil}} = 0.20$ | Keeps the per-patient miscoverage in a range where the calibration-array index is well-defined        | `ml/adaptive_alpha.py:122, 124`                           |
+| Inverse-RL MLE under L-BFGS-B                                | `bounds=[(0, None)]*6` non-negativity + L2 ridge $\lambda = 0.05$       | Guarantees non-negative weights and a strictly convex objective so the optimiser converges in $\leq 500$ iterations | `ml/inverse_rl_preferences.py:80, 471–472`                |
+
+When debugging a NaN regression, the test in `tests/test_safe_loader.py`
+plus the per-module property tests (e.g. `test_quantile_forest.py` checks
+that all clipped probabilities land in $[0,1]$) are the first place to
+look — they catch the symptom; this table indexes where to fix it.
 
 ---
 
