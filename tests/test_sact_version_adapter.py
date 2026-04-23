@@ -322,3 +322,81 @@ class TestCoerceBool:
     def test_missing(self):
         for v in [None, "", "nan", "NULL"]:
             assert pd.isna(_coerce_bool_flag(v))
+
+
+# --------------------------------------------------------------------------- #
+# 10. Edge cases (Wave 3.8)
+# --------------------------------------------------------------------------- #
+
+
+class TestEdgeCases:
+    """Error-path / degenerate-input coverage per Wave 3.8.  The adapter
+    must never crash on real-world messy input; it should fall back
+    defensively to v4.0 and always return the canonical schema."""
+
+    def test_unknown_version_string_falls_back_to_v40(self, df_v40):
+        """Passing version='v9.9' (unregistered) must not raise — the
+        adapter logs a warning and returns the v4.0 mapping."""
+        out, event = adapt(df_v40, version="v9.9")
+        assert event.version == "v4.0"
+        # Output still conforms to the canonical schema
+        assert list(out.columns) == list(CANONICAL_COLUMNS)
+        assert len(out) == len(df_v40)
+
+    def test_malformed_empty_dataframe_returns_empty_canonical(self):
+        """Empty DataFrame → empty canonical output, version v4.0,
+        no rows in or out, no exceptions."""
+        empty = pd.DataFrame()
+        out, event = adapt(empty)
+        assert len(out) == 0
+        assert list(out.columns) == list(CANONICAL_COLUMNS)
+        assert event.rows_in == 0
+        assert event.rows_out == 0
+        assert event.version == "v4.0"
+
+    def test_missing_required_columns_still_produces_canonical(self):
+        """Random-junk columns → falls back to v4.0 and records the
+        missing required fields in event.columns_missing."""
+        df = pd.DataFrame({"totally_unrelated_col": [1, 2, 3]})
+        out, event = adapt(df)
+        assert list(out.columns) == list(CANONICAL_COLUMNS)
+        assert len(out) == 3
+        # Required v4.0 fields are reported missing
+        assert set(event.columns_missing) >= {
+            "Patient_ID", "Regimen_Code", "Cycle_Number",
+        }
+
+    def test_mixed_v40_v41_columns_picks_v41(self):
+        """When both v4.0 and v4.1 signature columns are present,
+        auto-detect picks the higher (v4.1) version and applies its
+        rename rules consistently."""
+        mixed = pd.DataFrame({
+            "Patient_ID": ["P1"],
+            "Regimen_Code": ["X"],
+            "Cycle_Number": [1],
+            # Both naming conventions present
+            "Person_Stated_Gender_Code": ["M"],
+            "Gender_Identity_Code": ["F"],
+            "Ethnic_Category_Code": ["A"],
+            "Ethnic_Category": ["A"],
+            "Molecular_Marker_Status": ["BRCA1+"],
+            "Biomarker_Panel_Code": ["P001"],
+            "Commissioning_Organisation_Code": ["7A2"],
+        })
+        assert auto_detect_version(mixed) == "v4.1"
+        out, event = adapt(mixed)
+        assert event.version == "v4.1"
+        # v4.1 canonical map reads Gender_Identity_Code → Gender_Code,
+        # so the output must reflect the v4.1 field, not the v4.0 duplicate.
+        assert list(out["Gender_Code"]) == ["F"]
+        assert list(out["Molecular_Marker_Status"]) == ["BRCA1+"]
+
+    def test_idempotency_on_canonical_input(self, df_v40):
+        """Adapting an already-canonical DataFrame twice must yield the
+        same column set both times (round-trip stability)."""
+        out1, _ = adapt(df_v40)
+        out2, _ = adapt(out1, version="v4.0")
+        out3, _ = adapt(out2, version="v4.0")
+        assert list(out1.columns) == list(out2.columns) == list(out3.columns)
+        # Row count preserved across repeated adapts
+        assert len(out1) == len(out2) == len(out3) == len(df_v40)

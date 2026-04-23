@@ -385,3 +385,101 @@ class TestHelpers:
         out = _serialise_appt(appt)
         assert out["start_time"] == datetime(2026, 4, 22, 9, 0)
         assert out["end_time"] == datetime(2026, 4, 22, 10, 0)
+
+
+# --------------------------------------------------------------------------- #
+# 8. Edge cases (Wave 3.8)
+# --------------------------------------------------------------------------- #
+
+
+class TestEdgeCases:
+    """Error-path / degenerate-input coverage per Wave 3.8.  The explainer
+    is called from the Flask layer with whatever ``run_optimization``
+    returns; it must gracefully handle empty and malformed inputs."""
+
+    def test_empty_patient_list_returns_empty_explanations(
+        self, explainer, chairs, today,
+    ):
+        """``explain_all([], ...)`` returns the empty list (not None)
+        without raising.  Status counter still ticks — one run was made."""
+        out = explainer.explain_all(
+            [], schedule=[], chairs=chairs, current_date=today,
+        )
+        assert out == []
+        assert isinstance(out, list)
+        assert explainer.status()["total_runs"] == 1
+
+    def test_malformed_result_without_unscheduled_key(
+        self, explainer, chairs, today,
+    ):
+        """A caller passing an ``OptimizationResult``-shaped dict that
+        lacks the ``unscheduled`` key must not crash the explainer.  The
+        canonical pattern is ``result.get('unscheduled') or []``; applying
+        that defensive read yields an empty list of explanations."""
+        fake_result = {
+            "success": True,
+            "appointments": [],
+            # 'unscheduled' key deliberately missing
+        }
+        # Direct dict access would raise KeyError
+        with pytest.raises(KeyError):
+            _ = fake_result["unscheduled"]
+        # Defensive read + explain_all must not crash
+        unscheduled = fake_result.get("unscheduled") or []
+        out = explainer.explain_all(
+            unscheduled, schedule=[], chairs=chairs, current_date=today,
+        )
+        assert out == []
+
+    def test_all_scheduled_no_rejections_to_explain(
+        self, explainer, chairs, today,
+    ):
+        """When every patient landed in ``appointments`` and
+        ``unscheduled`` is empty, explain_all iterates over zero
+        rejections and the status reports no narrative."""
+        # Simulate "all scheduled" — explicitly pass an empty unscheduled
+        # list.  The explainer must report 0 explanations and no last
+        # narrative (nothing to say).
+        out = explainer.explain_all(
+            [], schedule=[_appt("P1", "WC-C01", 9)],
+            chairs=chairs, current_date=today,
+        )
+        assert len(out) == 0
+        status = explainer.status()
+        assert status["last_n_explanations"] == 0
+        # No narrative recorded because no rejection was explained
+        assert status["last_narrative"] is None
+
+    def test_explain_all_single_patient_empty_schedule(
+        self, explainer, chairs, today,
+    ):
+        """One rejected patient, empty schedule, full chair availability
+        — the explainer should emit one explanation (possibly still
+        with blockers, e.g. travel) and NOT crash even with no
+        existing appointments to reason about."""
+        patient = {
+            "Patient_ID": "SINGLE", "priority": 3,
+            "expected_duration": 60,
+            "earliest_time": today.replace(hour=9),
+        }
+        out = explainer.explain_all(
+            [patient], schedule=[], chairs=chairs, current_date=today,
+        )
+        assert len(out) == 1
+        assert out[0].patient_id == "SINGLE"
+
+    def test_explain_all_preserves_order(
+        self, explainer, chairs, today,
+    ):
+        """Explanations are returned in the same order as the input
+        patient list — callers rely on this to correlate with the
+        ``unscheduled`` sequence from the optimiser."""
+        patients = [
+            {"Patient_ID": f"O{i}", "priority": 3, "expected_duration": 60,
+             "earliest_time": today.replace(hour=9)}
+            for i in range(3)
+        ]
+        out = explainer.explain_all(
+            patients, schedule=[], chairs=chairs, current_date=today,
+        )
+        assert [e.patient_id for e in out] == ["O0", "O1", "O2"]

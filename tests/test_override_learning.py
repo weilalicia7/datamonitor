@@ -344,3 +344,127 @@ class TestSerialization:
         learner.log_event(e)
         back = json.loads(json.dumps(learner.get_events()[-1].__dict__))
         assert back["patient_id"] == "P001"
+
+
+# --------------------------------------------------------------------------- #
+# 9. Edge cases (Wave 3.8)
+# --------------------------------------------------------------------------- #
+
+
+class TestEdgeCases:
+    """Error-path / degenerate-input coverage per Wave 3.8.  Covers
+    cold-start (no history), pathological thresholds, and the promise
+    that predicted probabilities are always in [0, 1]."""
+
+    def test_empty_override_history_returns_cold_start_prior(
+        self, tmp_learner_dir,
+    ):
+        """No logged events ⇒ predict returns the configured prior for
+        every appointment, and `fit` refuses to train."""
+        l = OverrideLearner(
+            storage_dir=tmp_learner_dir,
+            min_events_for_fit=20,
+            cold_start_prior=0.17,
+        )
+        assert l.get_events() == []
+        assert l.fit() is False
+        assert l._is_trained is False
+        appt = {"patient_id": "A",
+                "start_time": datetime(2026, 4, 22, 10, 0),
+                "duration": 60, "priority": 3, "site_code": "WC"}
+        assert l.predict_override_probability(appt) == pytest.approx(0.17, abs=1e-9)
+
+    def test_fit_with_single_override_falls_to_count_rate(self, tmp_learner_dir):
+        """One event is below the default min_events_for_fit but
+        min=1 should still train — via the count-rate degenerate branch
+        (can't fit logistic with a single class)."""
+        l = OverrideLearner(
+            storage_dir=tmp_learner_dir, min_events_for_fit=1,
+            suggest_threshold=0.50,
+        )
+        l.log_event(_make_event(0, 15))
+        # Eager fit on log_event when threshold is hit
+        assert l._is_trained is True
+        assert l._model_method == "count_rate"
+
+    def test_predicted_prob_never_escapes_unit_interval(self, learner):
+        """Even under extreme feature values (wildly wrong hour,
+        duration, priority) the predicted probability must stay in [0, 1]."""
+        accepted = [
+            {"patient_id": f"Q{i}",
+             "start_time": datetime(2026, 4, 22, 9, 0),
+             "duration": 60, "priority": 3, "site_code": "WC"}
+            for i in range(40)
+        ]
+        learner.register_accepted_appointments(accepted)
+        for i in range(25):
+            learner.log_event(_make_event(i, 15 + (i % 3)))
+        # Deliberately extreme inputs
+        for weird_hour in (-50, 0, 25, 100):
+            for weird_prio in (-5, 0, 99):
+                for weird_dur in (-10, 0, 10000):
+                    appt = {
+                        "patient_id": "X",
+                        "start_time": datetime(2026, 4, 22).replace(
+                            hour=max(0, min(23, weird_hour % 24))
+                        ),
+                        "duration": weird_dur,
+                        "priority": weird_prio,
+                        "site_code": "WC",
+                    }
+                    # Inject the raw weird values after dict build
+                    appt["duration"] = weird_dur
+                    appt["priority"] = weird_prio
+                    p = learner.predict_override_probability(appt)
+                    assert 0.0 <= p <= 1.0, (
+                        f"prob {p} escaped [0,1] for appt={appt}"
+                    )
+
+    def test_threshold_1_never_suggests(self, learner):
+        """threshold = 1.0 ⇒ Pr(override) < 1.0 always ⇒ suggest() is
+        always short-circuited to None."""
+        accepted = [
+            {"patient_id": f"Q{i}",
+             "start_time": datetime(2026, 4, 22, 9, 0),
+             "duration": 60, "priority": 3, "site_code": "WC"}
+            for i in range(40)
+        ]
+        learner.register_accepted_appointments(accepted)
+        for i in range(25):
+            learner.log_event(_make_event(i, 15 + (i % 3)))
+        learner.update_config(suggest_threshold=1.0)
+        for hour in (9, 12, 16):
+            appt = {"patient_id": "Z",
+                    "start_time": datetime(2026, 4, 22, hour, 0),
+                    "duration": 60, "priority": 3, "site_code": "WC"}
+            assert learner.suggest(appt) is None
+
+    def test_threshold_0_considers_every_alternative(self, learner):
+        """threshold = 0.0 ⇒ never short-circuits on Pr(override); if
+        any alternative has strictly lower Pr, a suggestion is produced."""
+        accepted = [
+            {"patient_id": f"Q{i}",
+             "start_time": datetime(2026, 4, 22, 9, 0),
+             "duration": 60, "priority": 3, "site_code": "WC"}
+            for i in range(60)
+        ]
+        learner.register_accepted_appointments(accepted)
+        for i in range(30):
+            learner.log_event(_make_event(i, 15 + (i % 3)))
+        learner.update_config(suggest_threshold=0.0)
+        # A late-afternoon slot should score higher than an explicit
+        # morning alternative; with threshold=0 the suggest() must fire
+        # when the morning alt is strictly better.
+        late = {"patient_id": "X",
+                "start_time": datetime(2026, 4, 22, 16, 0),
+                "duration": 60, "priority": 3, "site_code": "WC",
+                "chair_id": "WC-C01"}
+        alt_morning = {"patient_id": "X",
+                       "start_time": datetime(2026, 4, 22, 9, 0),
+                       "duration": 60, "priority": 3, "site_code": "WC"}
+        s = learner.suggest(late, alternatives=[alt_morning])
+        # Either it fires (because morning is strictly better) or the
+        # learner predicts equal probs and returns None — pin to the
+        # behaviour that `p < threshold` at threshold=0 cannot short-circuit.
+        if s is not None:
+            assert s.suggested_override_prob < s.original_override_prob

@@ -496,3 +496,122 @@ class TestNoBaseOptimizer:
         result, report = opt.optimize(patients)
         assert report.winner_stage == 'greedy'
         assert result.status == 'GREEDY_FALLBACK'
+
+
+# --------------------------------------------------------------------------- #
+# 9. Edge cases (Wave 3.8)
+# --------------------------------------------------------------------------- #
+
+
+class TestEdgeCases:
+    """Error-path / degenerate-input coverage per Wave 3.8.  These tests
+    exercise (a) recovery when the base optimiser misbehaves, (b) degenerate
+    configurations like parallel_configs=0 or negative budgets, and (c) the
+    truncation contract when weight_configs exceeds parallel_configs."""
+
+    def test_base_optimizer_raising_midcascade_propagates(
+        self, patients, tmp_autoscale_dir,
+    ):
+        """Current behaviour (Wave 3.8): when the base optimiser raises
+        inside the cascade, the exception is NOT caught — it bubbles up.
+        This pins the status quo so any future hardening (wrap each
+        attempt in try/except) will fail this test loudly and prompt an
+        intentional update.  (Flagged as a real bug in the report.)"""
+        def _raiser(patients, time_limit_seconds=60, **kwargs):
+            raise RuntimeError("simulated CP-SAT crash")
+
+        opt = AutoScalingOptimizer(
+            base_optimizer=_raiser,
+            storage_dir=tmp_autoscale_dir,
+            enable_parallel=False,          # force cascade path
+            enable_greedy_fallback=True,    # should save us, but doesn't today
+        )
+        with pytest.raises(RuntimeError, match="simulated CP-SAT crash"):
+            opt.optimize(patients)
+
+    def test_all_configs_fail_triggers_greedy_fallback(
+        self, patients, tmp_autoscale_dir,
+    ):
+        """When every CP-SAT-style attempt returns a failed result, the
+        greedy fallback must fire and produce a GREEDY_FALLBACK status."""
+        opt = AutoScalingOptimizer(
+            base_optimizer=_fail_result,
+            storage_dir=tmp_autoscale_dir,
+        )
+        result, report = opt.optimize(patients)
+        assert report.greedy_fallback is True
+        assert report.winner_stage == 'greedy'
+        assert result.status == 'GREEDY_FALLBACK'
+        # Parallel + cascade attempts all failed — every non-greedy
+        # attempt must carry success=False.
+        non_greedy = [a for a in report.attempts if a.stage != 'greedy']
+        assert non_greedy
+        assert all(a.success is False for a in non_greedy)
+
+    def test_update_config_negative_budget_stored_as_is_but_solver_clamps(
+        self, patients, tmp_autoscale_dir,
+    ):
+        """Current behaviour: ``update_config`` accepts negative budgets
+        without validation; the cascade's ``_single_solve`` clamps with
+        ``max(int(budget), 1)`` so the solver never sees ≤0.  If future
+        hardening tightens this to raise ValueError, that's desirable —
+        flip this test to ``pytest.raises`` at that point.  (Flagged as
+        a real bug: no input validation at the config boundary.)"""
+        calls: list = []
+
+        def _spy(patients, time_limit_seconds=60, **kwargs):
+            calls.append(time_limit_seconds)
+            return _good_result(patients)
+
+        opt = AutoScalingOptimizer(
+            base_optimizer=_spy,
+            storage_dir=tmp_autoscale_dir,
+            enable_parallel=False,
+            enable_greedy_fallback=False,
+        )
+        cfg = opt.update_config(cascade_budgets=[-5.0, -2.0])
+        # Config stored raw (no validation today)
+        assert cfg['cascade_budgets'] == [-5.0, -2.0]
+        opt.optimize(patients)
+        # Solver saw the clamped minimum of 1 second
+        assert calls and all(c >= 1 for c in calls)
+
+    def test_parallel_configs_zero_disables_race(
+        self, patients, tmp_autoscale_dir,
+    ):
+        """``parallel_configs=0`` must skip the parallel stage entirely
+        and proceed to the cascade (and then greedy if needed)."""
+        opt = AutoScalingOptimizer(
+            base_optimizer=_good_result,
+            parallel_configs=0,
+            storage_dir=tmp_autoscale_dir,
+        )
+        result, report = opt.optimize(patients)
+        # No attempts were flagged 'parallel'
+        parallel_attempts = [a for a in report.attempts if a.stage == 'parallel']
+        assert parallel_attempts == []
+        # The cascade still produced a winner
+        assert report.winner_stage == 'cascade'
+        assert result.success is True
+
+    def test_weight_configs_longer_than_parallel_configs_truncated(
+        self, tmp_autoscale_dir,
+    ):
+        """Excess weight_configs past ``parallel_configs`` are dropped at
+        ``__init__``, keeping the race bounded by ``max_workers``."""
+        extra_configs = list(DEFAULT_PARALLEL_WEIGHT_CONFIGS) + [
+            {'name': 'extra_1', 'priority': 0.5},
+            {'name': 'extra_2', 'priority': 0.6},
+        ]
+        opt = AutoScalingOptimizer(
+            weight_configs=extra_configs,
+            parallel_configs=2,
+            storage_dir=tmp_autoscale_dir,
+        )
+        assert len(opt.weight_configs) == 2
+        kept_names = [w.get('name') for w in opt.weight_configs]
+        # The first two entries of the provided list are kept; the
+        # 'extra_*' entries must have been truncated.
+        assert 'extra_1' not in kept_names
+        assert 'extra_2' not in kept_names
+        assert kept_names == [extra_configs[0]['name'], extra_configs[1]['name']]

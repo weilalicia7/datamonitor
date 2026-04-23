@@ -496,3 +496,107 @@ class TestSerialization:
         back = json.loads(json.dumps(d.to_dict(), default=str))
         assert "action" in back
         assert back["n_scenarios"] == 5
+
+
+# --------------------------------------------------------------------------- #
+# 12. Edge cases (Wave 3.8)
+# --------------------------------------------------------------------------- #
+
+
+class TestEdgeCases:
+    """Error-path / degenerate-input coverage per Wave 3.8 of the
+    production-readiness plan.  These tests pin behaviour on inputs that
+    should either succeed with a trivial output or raise a clear signal."""
+
+    def test_empty_queue_with_chairs_idle_returns_all_none(
+        self, controller,
+    ):
+        """No patients waiting — every idle chair should stay None (wait)."""
+        state = MDPState(
+            time_min=120,
+            chairs=[
+                ChairState("WC-C01", "WC", ChairStatus.IDLE),
+                ChairState("WC-C02", "WC", ChairStatus.IDLE),
+                ChairState("WC-C03", "WC", ChairStatus.IDLE),
+            ],
+            queue=[],
+        )
+        d = controller.decide(state)
+        assignments = d.action["assignments"]
+        assert set(assignments.keys()) == {"WC-C01", "WC-C02", "WC-C03"}
+        assert all(v is None for v in assignments.values())
+
+    def test_all_chairs_occupied_with_new_arrivals_waits(self, controller):
+        """Every chair is mid-treatment while a P1 waits; no chair is
+        idle so no one can be assigned — decision must leave every slot None."""
+        state = MDPState(
+            time_min=60,
+            chairs=[
+                ChairState("WC-C01", "WC", ChairStatus.OCCUPIED,
+                           patient_id="A", remaining_minutes=25),
+                ChairState("WC-C02", "WC", ChairStatus.OCCUPIED,
+                           patient_id="B", remaining_minutes=40),
+            ],
+            queue=[
+                QueuedPatient("NEW_URG", priority=1, expected_duration=45,
+                              is_urgent=True, arrival_time_min=60),
+            ],
+        )
+        d = controller.decide(state)
+        assignments = d.action["assignments"]
+        # No chair was idle — nothing assigned, but the decision itself is valid
+        assert all(v is None for v in assignments.values())
+        assert isinstance(d, MPCDecision)
+
+    def test_n_scenarios_1_vs_100_invariant(
+        self, arrival_model, state_two_chairs_three_queue, tmp_mpc_dir,
+    ):
+        """The highest-priority patient (P001) should land on an idle
+        chair regardless of whether we sample 1 or 100 scenarios —
+        scenario count should not change the top pick when rewards are
+        deterministic in priority."""
+        c1 = MPCController(
+            arrival_model=arrival_model, n_scenarios=1,
+            lookahead_minutes=60, storage_dir=tmp_mpc_dir / "n1",
+        )
+        c100 = MPCController(
+            arrival_model=arrival_model, n_scenarios=100,
+            lookahead_minutes=60,
+            total_timeout_s=30.0,      # allow 100 scenarios to finish
+            storage_dir=tmp_mpc_dir / "n100",
+        )
+        d1 = c1.decide(state_two_chairs_three_queue)
+        d100 = c100.decide(state_two_chairs_three_queue)
+        # The highest-priority queued patient must get a chair in BOTH
+        # decisions (invariant across scenario count).
+        assert "P001" in [v for v in d1.action["assignments"].values() if v]
+        assert "P001" in [v for v in d100.action["assignments"].values() if v]
+
+    def test_terminal_value_with_empty_state(self):
+        """Empty chairs + empty queue ⇒ no unfinished work ⇒ penalty == 0
+        and the learned value-function produces a finite scalar (even if
+        it's non-zero, because the default weights include a bias term)."""
+        state = MDPState(time_min=600, chairs=[], queue=[])
+        assert compute_terminal_penalty(state) == 0.0
+        v = TerminalValueFunction()
+        pred = v.predict(state)
+        # Must be a finite float, not NaN / inf.
+        assert isinstance(pred, float)
+        assert pred == pred                        # not NaN
+        assert pred not in (float("inf"), float("-inf"))
+
+    def test_fallback_n_chairs_zero_returns_valid_decision(
+        self, controller,
+    ):
+        """Second fallback case: n_chairs=0 should not crash.  With no
+        chairs to assign to, the planner returns a decision with an
+        empty assignments dict rather than raising."""
+        state = MDPState(
+            time_min=60,
+            chairs=[],
+            queue=[QueuedPatient("P_LONELY", priority=1, expected_duration=60)],
+        )
+        d = controller.decide(state)
+        assert isinstance(d, MPCDecision)
+        # Empty chairs ⇒ empty assignments dict
+        assert d.action["assignments"] == {}
