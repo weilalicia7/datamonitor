@@ -84,6 +84,7 @@ This document describes all mathematical formulas, algorithms, and optimization 
 ### Performance & Complexity (v5.0)
 27. [Algorithmic Complexity Guarantees](#27-algorithmic-complexity-guarantees) — Time / space / convergence bounds for CP-SAT (27.1), GNN (27.2), Column Generation (27.3), Conformal (27.4), MPC rollout (27.5), DRO (27.6)
 28. [Numerical Stability Notes](#28-numerical-stability-notes) — log/exp/sqrt/division safeguards across modules
+29. [Hyperparameter Selection Methodology](#29-hyperparameter-selection-methodology) — How every ε, α, λ, τ, etc. in the codebase is chosen
 
 ---
 
@@ -4900,6 +4901,103 @@ When debugging a NaN regression, the test in `tests/test_safe_loader.py`
 plus the per-module property tests (e.g. `test_quantile_forest.py` checks
 that all clipped probabilities land in $[0,1]$) are the first place to
 look — they catch the symptom; this table indexes where to fix it.
+
+---
+
+## 29. Hyperparameter Selection Methodology
+
+The system carries dozens of tunable parameters — $\varepsilon$, $\alpha$,
+$\beta$, $\lambda$, $\tau$, $L$, $\delta$, plus every model
+hyperparameter (max depth, learning rate, hidden size, …).  This section
+records *how each one was chosen* so a future maintainer can reproduce
+the choice or re-tune it against new data.  Methods are listed in order
+of how often they apply in the live codebase.
+
+### 29.1 Domain-driven defaults *(the default for the majority of constants)*
+
+Used for: clinical thresholds (double-booking tiers, slack floors,
+priority buckets), DRO defaults, fairness budgets, retention windows.
+
+Source: NHS guidelines + Velindre operational rules.  Each constant is
+declared once in `config.py` (or the per-module `DEFAULT_*` constant)
+and pinned by the corresponding test.
+
+| Parameter                              | Value                | Where pinned                               | Provenance                                                         |
+|---------------------------------------|----------------------|--------------------------------------------|---------------------------------------------------------------------|
+| `NOSHOW_THRESHOLDS = {very_high:0.5, high:0.3, medium:0.15, low:0.0}` | 4-tier risk band | `config.py:141`                            | Velindre operational double-booking rule (recalibrated v4.4)        |
+| `DEFAULT_EPSILON` (DRO Wasserstein)   | $0.02$               | `ml/dro_fairness.py:93`                    | Operator-tunable; 2 % mass shift covers the historical drift band  |
+| `DEFAULT_DELTA` (parity gap budget)   | $0.15$               | `ml/dro_fairness.py:94`                    | Equality Act 4/5ths-rule equivalent for demographic parity         |
+| `DEFAULT_SUGGEST_THRESHOLD` (override) | $0.80$               | `ml/override_learning.py:80`               | §5.2 brief — "≥ 80 % override probability before we speak up"     |
+| `L2_LAMBDA_DEFAULT` (IRL ridge)       | $0.05$               | `ml/inverse_rl_preferences.py:80`          | Standard L-BFGS-B ridge to keep MLE strictly convex                |
+| `DEFAULT_PRIORITY_COMPLETE_BASE` (MPC) | reward base unit     | `ml/stochastic_mpc_scheduler.py:DEFAULT_*` | §S-1.4 — base credit per completion, multiplied by $(6 - \text{prio})$ |
+| `critical_slack_floor`                 | $\geq 5$ min         | `ml/safety_guardrails.py:396`              | Mean chemo chair setup time — clinically derived                  |
+| `SOLVER_TIME_LIMIT_SECONDS`            | $300$                | `config.py:60`                             | Operational budget — ChemoCare schedule deadline                   |
+| `COLUMN_GEN_THRESHOLD`                 | $50$                 | `config.py:64`                             | Empirical knee where monolithic CP-SAT starts timing out            |
+| `CG_MAX_ITERATIONS`                    | $100$                | `config.py:65`                             | Hard cap matching the §27.3 "10-30 typical iterations" bound       |
+| `CG_REDUCED_COST_TOLERANCE`            | $10^{-4}$            | `config.py:66`                             | LP-solver standard convergence floor                                |
+| `CG_SUBPROBLEM_TIME_LIMIT`             | $5.0$ s              | `config.py:67`                             | Per-chair budget; cascade total $\leq 100 \cdot 5 = 500$ s         |
+| `EVENT_RETENTION_DAYS`                 | $30$                 | `.env.example` (T4.8)                      | NHS Digital minimum for derived operational cache data             |
+| `AUDIT_RETENTION_DAYS`                 | $2557$ (7 years)     | `.env.example` (T4.8)                      | NHS Wales records-management guidance for clinical access logs      |
+
+### 29.2 Cross-validated training (active for ML model training)
+
+Used for: every base learner inside the no-show + duration ensembles.
+
+Method:
+
+- $k = 5$ stratified $K$-fold by default, switching to
+  `TimeSeriesSplit(n_splits=5)` when `use_temporal_cv=True` (data
+  evolves over time → train-on-past, validate-on-future).
+- Scoring: `roc_auc` for no-show, `neg_mean_absolute_error` for
+  duration.  Live in `ml/noshow_model.py:499, 588–596` and
+  `ml/duration_model.py:252–256`.
+
+Hyperparameters themselves (tree depth, learning rate, n_estimators)
+are held at framework-recommended defaults — this is a v6.0 follow-up
+to add a `RandomizedSearchCV` sweep + record the winners as new
+`DEFAULT_*` constants.
+
+### 29.3 Data-driven calibration (active for one parameter today)
+
+Used for: the Wasserstein DRO radius $\varepsilon$.
+
+Method: `dro.calibrate_epsilon(historical_appointments_df)` (live at
+`flask_app.py:11432, 11453` via `/api/ml/uncertainty-optimization/*`)
+estimates $\hat{\varepsilon}$ as the empirical Wasserstein distance
+between the calibration window and the most recent rolling window of
+the same length.  Returned as `epsilon_recommended` in the JSON
+response and persisted on the `UncertaintyAwareOptimizer` instance.
+Operator can accept the recommended value or stay with the default.
+
+### 29.4 Recommended for future tuning passes (NOT yet wired)
+
+Three further methods are **documented as recommended** for the next
+data-quality pass but are **not implemented** in the current codebase.
+Documenting them here so the choice of method matches the tuning
+exercise rather than being discovered during it:
+
+- **Grid search** for small discrete spaces — e.g. CP-SAT weight
+  profiles in `PARETO_WEIGHT_SETS` (`config.py:48–54`), the four
+  weight configurations raced by `AutoScalingOptimizer`
+  (`ml/auto_scaling_optimizer.py`).  Implementation sketch:
+  evaluate composite score $0.30 \cdot \text{util} + 0.25 \cdot \text{robust}$
+  on a held-out month; keep the Pareto-non-dominated subset.
+- **Random search** ($n = 50$ iterations under `TimeSeriesSplit(5)`)
+  for tree-ensemble hyperparameters (RF / GB / XGB max depth, LR,
+  n_estimators).  Tool: `sklearn.model_selection.RandomizedSearchCV`.
+- **Bayesian optimisation** for expensive objectives (DRO $\varepsilon$,
+  CVaR $\alpha$, Lipschitz $L$).  Tool: `scikit-optimize.gp_minimize`
+  with 30 random initial points + 20 Expected-Improvement acquisitions.
+  Composite objective:
+  $0.5 \cdot \text{util} - 0.3 \cdot \text{wait} + 0.2 \cdot \text{fairness\_ratio}$.
+
+When any of these is wired, replace the corresponding §29.4 bullet with
+a §29.1/29.2 row that names the live tuner + the resulting constants.
+
+All final values are recorded in `config.py` (or per-module
+`DEFAULT_*`) and surfaced in the Model Cards (§15c).  The Model Cards
+are themselves auto-generated; any constant change re-flows into the
+card on the next `model_cards.generate_all_cards()` call.
 
 ---
 
