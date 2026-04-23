@@ -64,6 +64,8 @@ names, postcode sectors).
 | 8 | Pickle-deserialisation RCE from untrusted model | Low | Very high | `SECURITY.md` known-limitation; T2.3 planned switch to joblib + SHA verify | Medium |
 | 9 | DoS via huge JSON payload | Medium | Medium | T4.2 `MAX_CONTENT_LENGTH=16 MB` + Flask-Limiter 60/min | Very low |
 | 10 | Audit trail tampering by compromised app | Low | High | Append-only JSONL with `fsync`; WORM backup in § 3 playbook | Medium |
+| 11 | Tuned hyperparameters from synthetic data leak into real-data prediction pipeline | Low | High | §29.4 channel gate: manifest tagged `data_channel`; boot path applies overrides ONLY when `data_channel=="real"`; pinned by `tests/test_tuning.py::TestManifest::test_overrides_blocked_in_synthetic_mode` | Very low |
+| 12 | Tuning run on real Channel-2 data without governance approval | Low | High | `SECURITY.md` "Tuning note" + this DPIA require Caldicott Guardian + DSA + SMREC + DSPT before `SACT_CHANNEL=real` is set; `POST /api/tuning/run` is operator-triggered (not auto-scheduled) so the gate is procedural | Low |
 
 ## 5. Mitigation progress
 

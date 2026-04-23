@@ -152,6 +152,15 @@ The per-deployment Data Protection Impact Assessment lives in
 - A new external service receives any PII.
 - Retention windows are shortened or extended.
 - A new role / API client is granted read access.
+- A tuning run is executed against real Channel-2 data
+  (`SACT_CHANNEL=real`).  The tuning subsystem (`tuning/` package)
+  reads `historical_appointments.xlsx` end-to-end and writes a manifest
+  that overrides ML hyperparameters on the next boot.  Until the
+  governance gate (Caldicott + DSA + SMREC + DSPT) clears, only
+  synthetic-channel runs are permitted; the channel discriminator
+  in `data_cache/tuning/manifest.json` and the boot-time
+  `load_overrides()` gate enforce this in code.  See
+  `docs/MATH_LOGIC.md §29.4` for the full Channel-2 cutover plan.
 
 Reviewed annually or on change; countersigned by the Cardiff DPO
 and Velindre IG lead.

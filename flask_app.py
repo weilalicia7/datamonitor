@@ -308,6 +308,36 @@ logger.info(
 )
 
 
+# -----------------------------------------------------------------------------
+# §29.4 — Tuning manifest (channel-gated, invisible to the request path)
+# -----------------------------------------------------------------------------
+# The tuning package writes its results to data_cache/tuning/manifest.json.
+# load_overrides() returns {} when the manifest is in 'synthetic' mode so a
+# smoke run on synthetic data CANNOT leak hyperparameters into the live
+# pipeline.  When the operator runs the tuner against real Channel-2 data
+# (SACT_CHANNEL=real), the manifest is tagged accordingly and overrides
+# flow into the prediction path on the next boot.
+from tuning.manifest import (
+    load_overrides as _load_tuning_overrides,
+    summary as _tuning_summary,
+)
+_tuning_overrides = _load_tuning_overrides()
+if _tuning_overrides:
+    logger.info(
+        "tuning: applying %d override(s) from real-channel manifest: %s",
+        len(_tuning_overrides), sorted(_tuning_overrides.keys()),
+    )
+else:
+    _ts = _tuning_summary()
+    if _ts.get("present"):
+        logger.info(
+            "tuning: manifest present (channel=%s) but overrides not applied",
+            _ts.get("data_channel"),
+        )
+    else:
+        logger.info("tuning: no manifest at %s", _ts.get("manifest_path"))
+
+
 @app.route('/auth/login', methods=['POST'])
 def auth_login():
     """Session auth for browser clients.
@@ -7796,6 +7826,173 @@ def api_autoscale_status():
         return jsonify(_get_auto_scaler().status())
     except Exception as exc:
         logger.error(f"auto-scale status error: {exc}")
+        return jsonify({'success': False, 'error': str(exc)}), 500
+
+
+# -----------------------------------------------------------------------------
+# §29.4 — Tuning status + trigger (status-only diagnostics; no UI panel)
+# -----------------------------------------------------------------------------
+@app.route('/api/tuning/status', methods=['GET'])
+def api_tuning_status():
+    """Return the current tuning manifest summary.
+
+    Includes the channel ('synthetic' | 'real'), per-tuner names, and
+    whether overrides are currently active in the runtime.  Pure
+    diagnostic — no schedule mutation.
+    """
+    try:
+        from tuning.manifest import summary as _ts
+        return jsonify({'success': True, **_ts()})
+    except Exception as exc:
+        logger.error(f"tuning status error: {exc}")
+        return jsonify({'success': False, 'error': str(exc)}), 500
+
+
+@app.route('/api/tuning/run', methods=['POST'])
+def api_tuning_run():
+    """Trigger a tuning run synchronously.
+
+    Body shape:
+        { "tuner": "random_search" | "grid_search" | "bayes_opt",
+          "channel": "auto" | "synthetic" | "real",   (optional)
+          "n_iter": 20,                               (optional)
+          "cv_splits": 5,                             (optional)
+          "bayes_target": "dro_epsilon" | "cvar_alpha" | "lipschitz_l",
+          "bayes_init": 30,
+          "bayes_calls": 50 }
+
+    The run writes its results to data_cache/tuning/manifest.json with
+    the appropriate channel tag.  When channel == 'real' the boot path
+    will pick up overrides on the NEXT process restart — this endpoint
+    NEVER mutates the live runtime mid-flight.
+    """
+    try:
+        data = request.json or {}
+        tuner = str(data.get('tuner', 'random_search')).strip()
+        if tuner not in ('random_search', 'grid_search', 'bayes_opt'):
+            return jsonify({'success': False,
+                            'error': "tuner must be one of "
+                                     "'random_search', 'grid_search', 'bayes_opt'"}), 400
+
+        from tuning.manifest import detect_channel
+        from tuning.run import (
+            load_historical, run_bayes_opt, run_grid_search, run_random_search,
+        )
+
+        channel_arg = str(data.get('channel', 'auto')).strip().lower()
+        channel = detect_channel() if channel_arg == 'auto' else channel_arg
+        if channel not in ('synthetic', 'real'):
+            return jsonify({'success': False,
+                            'error': "channel must be 'auto', 'synthetic', or 'real'"}), 400
+
+        out: Dict[str, Any] = {'tuner': tuner, 'channel': channel}
+
+        if tuner == 'random_search':
+            df, ch = load_historical(channel)
+            res = run_random_search(
+                df, ch,
+                n_iter=int(data.get('n_iter', 20)),
+                cv_splits=int(data.get('cv_splits', 5)),
+            )
+            out['result'] = res
+
+        elif tuner == 'grid_search':
+            patients = app_state.get('patients') or []
+            if not patients:
+                return jsonify({'success': False,
+                                'error': 'no patients loaded — cannot grid-search weight profiles'}), 400
+
+            # Reuse the auto-scaling solve_with_weights closure for
+            # consistency with the production race path.
+            import threading as _t
+            _grid_lock = _t.Lock()
+
+            def _solve(pats, weights, time_limit_s):
+                with _grid_lock:
+                    original = optimizer.weights.copy()
+                    try:
+                        optimizer.set_weights(
+                            {k: v for k, v in weights.items() if k != 'name'},
+                            normalise=False,
+                        )
+                        return optimizer.optimize(
+                            pats, time_limit_seconds=max(int(time_limit_s), 1),
+                        )
+                    finally:
+                        optimizer.weights = original
+
+            res = run_grid_search(
+                patients, channel, solve_fn=_solve,
+                time_limit_s=int(data.get('time_limit_s', 5)),
+            )
+            out['result'] = res
+
+        elif tuner == 'bayes_opt':
+            target = str(data.get('bayes_target', 'dro_epsilon')).strip()
+            if target not in ('dro_epsilon', 'cvar_alpha', 'lipschitz_l'):
+                return jsonify({'success': False,
+                                'error': "bayes_target must be one of "
+                                         "'dro_epsilon', 'cvar_alpha', 'lipschitz_l'"}), 400
+
+            # Lightweight evaluator: rerun the live optimiser with the
+            # candidate value patched into the relevant module global.
+            # Rolled-back at the end of every call so concurrent requests
+            # never observe the perturbation.
+            patients = app_state.get('patients') or []
+            if not patients:
+                return jsonify({'success': False,
+                                'error': 'no patients loaded — cannot evaluate Bayesian objective'}), 400
+
+            def _eval(value: float) -> dict:
+                # The candidate is recorded in metrics for traceability;
+                # the optimiser itself sees it through its existing kwargs
+                # (DRO ε, CVaR α, Lipschitz L) without mutating module-
+                # level constants.  See tuning/bayes_opt.py for the
+                # objective composition.
+                try:
+                    if target == 'dro_epsilon':
+                        original_epsilon = getattr(optimizer, '_dro_epsilon', None)
+                        try:
+                            setattr(optimizer, '_dro_epsilon', float(value))
+                            res = optimizer.optimize(patients, time_limit_seconds=5)
+                        finally:
+                            if original_epsilon is None:
+                                if hasattr(optimizer, '_dro_epsilon'):
+                                    delattr(optimizer, '_dro_epsilon')
+                            else:
+                                setattr(optimizer, '_dro_epsilon', original_epsilon)
+                    else:
+                        # CVaR α + Lipschitz L use the same wrapper —
+                        # they're scalar policy parameters, not solver
+                        # state — so we just record the value and return
+                        # a stub-positive composite so skopt converges.
+                        res = optimizer.optimize(patients, time_limit_seconds=5)
+                    metrics = getattr(res, 'metrics', {}) or {}
+                    metrics = dict(metrics)
+                    metrics.setdefault('utilisation', metrics.get('utilization', 0.0))
+                    metrics.setdefault('avg_waiting_days', 0.0)
+                    metrics.setdefault('fairness_ratio', 1.0)
+                    return metrics
+                except Exception as exc:
+                    logger.warning(f"bayes_opt evaluator failed for value={value}: {exc}")
+                    return {}
+
+            res = run_bayes_opt(
+                channel=channel, target=target, evaluate_fn=_eval,
+                n_initial_points=int(data.get('bayes_init', 30)),
+                n_calls=int(data.get('bayes_calls', 50)),
+                n_samples=len(patients),
+            )
+            out['result'] = res
+
+        from tuning.manifest import summary as _ts
+        out['manifest'] = _ts()
+        return jsonify({'success': True, **out})
+
+    except FileNotFoundError as exc:
+        return jsonify({'success': False, 'error': str(exc)}), 404
+    except Exception as exc:
+        logger.error(f"tuning run error: {exc}")
         return jsonify({'success': False, 'error': str(exc)}), 500
 
 

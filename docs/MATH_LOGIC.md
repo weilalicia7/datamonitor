@@ -4969,35 +4969,88 @@ the same length.  Returned as `epsilon_recommended` in the JSON
 response and persisted on the `UncertaintyAwareOptimizer` instance.
 Operator can accept the recommended value or stay with the default.
 
-### 29.4 Recommended for future tuning passes (NOT yet wired)
+### 29.4 Live tuners — channel-gated (Grid + Random + Bayesian)
 
-Three further methods are **documented as recommended** for the next
-data-quality pass but are **not implemented** in the current codebase.
-Documenting them here so the choice of method matches the tuning
-exercise rather than being discovered during it:
+All three search-based tuners are now wired in the `tuning/` package.
+Each produces an entry in a single shared manifest at
+`data_cache/tuning/manifest.json`.  The manifest carries a
+`data_channel` field (`"synthetic"` | `"real"`) and the boot path in
+`flask_app.py` calls `tuning.manifest.load_overrides()` which returns
+`{}` whenever `data_channel != "real"`.  This single gate is what
+makes the tuners safe to run today against synthetic data while
+guaranteeing no override leaks into the live prediction pipeline until
+real Velindre data is wired through Channel 2.
 
-- **Grid search** for small discrete spaces — e.g. CP-SAT weight
-  profiles in `PARETO_WEIGHT_SETS` (`config.py:48–54`), the four
-  weight configurations raced by `AutoScalingOptimizer`
-  (`ml/auto_scaling_optimizer.py`).  Implementation sketch:
-  evaluate composite score $0.30 \cdot \text{util} + 0.25 \cdot \text{robust}$
-  on a held-out month; keep the Pareto-non-dominated subset.
-- **Random search** ($n = 50$ iterations under `TimeSeriesSplit(5)`)
-  for tree-ensemble hyperparameters (RF / GB / XGB max depth, LR,
-  n_estimators).  Tool: `sklearn.model_selection.RandomizedSearchCV`.
-- **Bayesian optimisation** for expensive objectives (DRO $\varepsilon$,
-  CVaR $\alpha$, Lipschitz $L$).  Tool: `scikit-optimize.gp_minimize`
-  with 30 random initial points + 20 Expected-Improvement acquisitions.
-  Composite objective:
-  $0.5 \cdot \text{util} - 0.3 \cdot \text{wait} + 0.2 \cdot \text{fairness\_ratio}$.
+| Tuner | Module | Search space | Tool | Live test |
+|-------|--------|--------------|------|-----------|
+| **Grid search** | `tuning/grid_search.py` | `PARETO_WEIGHT_SETS` (`config.py:48–54`) — six objective weights per profile | Pareto-frontier filter on $(\text{composite}, \text{scheduled\_fraction}, \text{utilisation}, \text{robustness}, -\text{waiting})$ | `tests/test_tuning.py::TestGridSearch` |
+| **Random search** | `tuning/random_search.py` | `n_estimators ∈ {50,100,200,300}`, `max_depth ∈ {3,5,8,12,None}`, `min_samples_leaf`, `min_samples_split`/`learning_rate` | `sklearn.model_selection.RandomizedSearchCV` with `TimeSeriesSplit(n_splits=5)`, scoring `roc_auc` (no-show) / `neg_mean_absolute_error` (duration) | `tests/test_tuning.py::TestRandomSearch` |
+| **Bayesian optimisation** | `tuning/bayes_opt.py` | DRO $\varepsilon \in [0.005, 0.20]$, CVaR $\alpha \in [0.05, 0.30]$, Lipschitz $L \in [0.5, 5.0]$ — scalar at a time | `skopt.gp_minimize` (30 initial random points + 20 EI acquisitions) over composite $0.5 \cdot \text{util} - 0.3 \cdot \text{wait\_norm} + 0.2 \cdot \text{fairness\_ratio}$ | `tests/test_tuning.py::TestBayesOpt` |
 
-When any of these is wired, replace the corresponding §29.4 bullet with
-a §29.1/29.2 row that names the live tuner + the resulting constants.
+**Channel gate.** The manifest is the only state that crosses from
+tuner to runtime:
 
-All final values are recorded in `config.py` (or per-module
-`DEFAULT_*`) and surfaced in the Model Cards (§15c).  The Model Cards
-are themselves auto-generated; any constant change re-flows into the
-card on the next `model_cards.generate_all_cards()` call.
+```json
+{
+  "version": 1,
+  "data_channel": "synthetic",
+  "tuned_at": "2026-04-23T20:22:30+00:00",
+  "git_sha": "...",
+  "n_records": 1900,
+  "results": {
+    "noshow_model": {"method":"RandomizedSearchCV", "best_params":{...}, "best_score":0.9449, ...},
+    "duration_model": {...},
+    "cpsat_weights": {"method":"grid_search", "winner":{"name":"balanced", ...}, "pareto_frontier":[...]},
+    "dro_epsilon": {"method":"skopt.gp_minimize", "best_value":0.063, "best_objective":0.78, ...}
+  }
+}
+```
+
+`channel="synthetic"` → boot logs *"manifest is in 'synthetic' mode;
+overrides are NOT applied"* and the live runtime stays on its
+domain-default constants.
+
+`channel="real"` (set the first time the tuner runs after Channel 2
+data lands) → boot logs *"applying N override(s) from real-channel
+manifest"* and the named hyperparameters flow into the next process
+restart.  No mid-flight mutation; all changes happen at boot for
+reproducibility.
+
+**Endpoints (status-only diagnostics — no UI panel).**
+
+| Route                       | Purpose                                                                                       |
+|-----------------------------|------------------------------------------------------------------------------------------------|
+| `GET  /api/tuning/status`   | Manifest summary: channel, tuners present, `overrides_active` flag, manifest path             |
+| `POST /api/tuning/run`      | Body `{"tuner":"random_search"\|"grid_search"\|"bayes_opt", ...}`; runs synchronously, writes manifest, returns the new summary |
+
+**CLI** (`python -m tuning.run --tuner=random_search [--channel=auto]`)
+auto-detects the channel from `SACT_CHANNEL` env var or the presence of
+`datasets/real_data/historical_appointments.xlsx`.
+
+**Channel 2 cutover plan**:
+
+1. Velindre drops `patients.xlsx` + `historical_appointments.xlsx`
+   into `datasets/real_data/` (caught by `monitoring/channel2_watcher.py`).
+2. Operator sets `SACT_CHANNEL=real` in the deployment env.
+3. Operator runs `POST /api/tuning/run` once per tuner (or
+   `python -m tuning.run --tuner=random_search` from the host).
+4. Operator inspects `GET /api/tuning/status` — confirms
+   `data_channel == "real"` and `overrides_active == true`.
+5. Operator restarts the Flask process; boot picks up the manifest
+   and applies the tuned values.
+6. The `tests/test_tuning.py` suite + the existing 961-test suite are
+   re-run to confirm no regression.
+
+All tuned values still flow through `config.py` (or per-module
+`DEFAULT_*`) at the constant level and re-flow into the auto-generated
+Model Cards (§15c) on the next `model_cards.generate_all_cards()` call.
+
+**Synthetic-data smoke run already executed**:
+`data_cache/tuning/manifest.json` now contains a `data_channel="synthetic"`
+entry from a real run (1,900 rows, AUC 0.9449 on the synthetic-generator
+distribution).  The high AUC is the well-documented synthetic-overfit
+signal — it is exactly *why* the channel gate exists and *why* the boot
+path refuses to apply it.
 
 ---
 

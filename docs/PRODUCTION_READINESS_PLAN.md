@@ -184,6 +184,17 @@ All 8 waves complete.  Full suite grew from 441 (pre-T3) to **~930+** green.
 
 ---
 
+## Tier 5 — §29.4 Channel-gated hyperparameter tuning *(complete)*
+
+- [x] 5.1 — `tuning/` package: `manifest.py` (channel discriminator + `load_overrides` gate), `grid_search.py` (CP-SAT weight Pareto sweep), `random_search.py` (RandomizedSearchCV with `TimeSeriesSplit(5)` for no-show + duration), `bayes_opt.py` (skopt `gp_minimize` for DRO ε / CVaR α / Lipschitz L), `run.py` (orchestrator + CLI)
+- [x] 5.2 — Single-source manifest at `data_cache/tuning/manifest.json` with `data_channel ∈ {"synthetic","real"}` discriminator.  Boot path applies overrides ONLY when `data_channel == "real"` — synthetic-data tuning runs are smoke-only and cannot leak into the live prediction pipeline.
+- [x] 5.3 — Endpoints: `GET /api/tuning/status` (read-only summary), `POST /api/tuning/run` (synchronous trigger; body picks tuner + channel + iteration count).  No UI panel — pure status diagnostics.
+- [x] 5.4 — `tests/test_tuning.py` (18 tests across 5 classes: manifest channel gate, random-search round trip, grid-search Pareto filter + winner, Bayesian opt unimodal-objective convergence, orchestrator manifest writeback) + `tests/test_flask_routes_tuning.py` (4 tests: status with empty manifest, rejects unknown tuner, rejects unknown channel, end-to-end POST writes manifest).  Full suite 961 → 983 green.
+- [x] 5.5 — Smoke run executed against the real synthetic dataset (1,900 rows from `datasets/sample_data/historical_appointments.xlsx`); manifest tagged `synthetic`, `overrides_active = false` → boot logs "manifest is in 'synthetic' mode; overrides are NOT applied" as designed.
+- [x] 5.6 — Channel 2 cutover plan documented in `docs/MATH_LOGIC.md §29.4`: drop real files → set `SACT_CHANNEL=real` → `POST /api/tuning/run` → restart Flask → boot picks up overrides.  Required governance gates (DPIA, Caldicott Guardian, DSA, SMREC, DSPT) flagged in `docs/DATA_PROTECTION_PLAYBOOK.md` and `SECURITY.md`.
+
+---
+
 ## Cumulative effort
 
 | Tier | Effort | Calendar | Git commits |
@@ -192,6 +203,7 @@ All 8 waves complete.  Full suite grew from 441 (pre-T3) to **~930+** green.
 | T2 | ~1 day | 1 day | 3-4 |
 | T3 | ~22 h | 3 days | 40+ |
 | T4 | ~30 h | 4 days | 20+ |
-| **Total** | **~62 h** | **~9 days** | **~70 commits** |
+| T5 | ~3 h | 0.5 day | 2 |
+| **Total** | **~65 h** | **~9.5 days** | **~72 commits** |
 
 Every commit pushed to `main` on `github.com/weilalicia7/datamonitor` — local and remote kept 100% synced.

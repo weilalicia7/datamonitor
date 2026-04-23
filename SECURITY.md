@@ -80,6 +80,28 @@ blocks all of these from accidental commit; the `scripts/pre-commit.sh`
 hook enforces the same block at commit time.  Do **not** disable either
 safeguard on a checkout connected to real data.
 
+**Tuning note** (§29.4 of `docs/MATH_LOGIC.md`)
+
+The `tuning/` package (grid + random + Bayesian search) writes its
+results to `data_cache/tuning/manifest.json`.  When the manifest is
+tagged `data_channel="real"`, the boot path applies the tuned
+hyperparameters into the live prediction pipeline at the next process
+restart.  Running the tuner against real Channel-2 data is a
+processing-of-personal-data activity and **requires the same
+governance gates as Channel 2 itself before execution**:
+
+- Caldicott Guardian approval at Velindre Cancer Centre
+- Cardiff University Data Controller registration
+- Data Sharing Agreement Cardiff ↔ Velindre NHS Trust
+- SMREC ethics approval (Cardiff University School of Medicine)
+- DSPT compliance attestation
+
+Until those gates clear, only the synthetic-channel manifest is
+permitted (`SACT_CHANNEL=synthetic`, the default), and the boot path
+will refuse to apply any override even if a synthetic-tagged manifest
+is present — this is the gate the runtime relies on, documented in
+`docs/MATH_LOGIC.md §29.4` and pinned by `tests/test_tuning.py`.
+
 ## Scope
 
 In scope:
