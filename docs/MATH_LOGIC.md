@@ -86,6 +86,9 @@ This document describes all mathematical formulas, algorithms, and optimization 
 27. [Algorithmic Complexity Guarantees](#27-algorithmic-complexity-guarantees) — Time / space / convergence bounds for CP-SAT (27.1), GNN (27.2), Column Generation (27.3), Conformal (27.4), MPC rollout (27.5), DRO (27.6)
 28. [Numerical Stability Notes](#28-numerical-stability-notes) — log/exp/sqrt/division safeguards across modules
 29. [Hyperparameter Selection Methodology](#29-hyperparameter-selection-methodology) — How every ε, α, λ, τ, etc. in the codebase is chosen
+30. [Validation Invariants (Mathematical Tests)](#30-validation-invariants-mathematical-tests) — what the test suite proves about each formula
+31. [Pseudocode Style Guide](#31-pseudocode-style-guide) — single convention for every algorithm box
+32. [Known Limitations per Model](#32-known-limitations-per-model) — explicit failure modes for CP-SAT / no-show / conformal / DRO / IRL / MPC
 
 ---
 
@@ -5211,6 +5214,155 @@ path refuses to apply it.
 
 ---
 
+## 30. Validation Invariants (Mathematical Tests)
+
+The test suite enforces every formula in this document via property-style
+invariants — not just point-value regression checks.  When a formula
+changes, the corresponding invariant either still holds (safe edit) or
+fails loudly (the change broke a guarantee the rest of the system
+depends on).
+
+| Invariant                                          | Mathematical statement                                                                                                                            | Test location                                                                          |
+|----------------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------|----------------------------------------------------------------------------------------|
+| PSI attribution sum                                | $\sum_j \text{share}_j = 1$                                                                                                                       | `tests/test_drift_attribution.py::TestAttribution::test_shares_sum_to_one`             |
+| Per-feature PSI consistency                        | $\text{PSI}_j = \sum_i \delta_{j,i}$                                                                                                              | `tests/test_drift_attribution.py::TestAttribution::test_per_bin_decomposition`         |
+| DRO bound monotonicity                             | $\text{worst\_case} \geq \text{empirical\_gap}$, with equality at $\varepsilon = 0$                                                               | `tests/test_dro_fairness.py::TestPairCertify::test_zero_epsilon_collapses_to_empirical`|
+| Lipschitz violation monotonicity                   | $L_1 \leq L_2 \Rightarrow \text{violations}(L_1) \geq \text{violations}(L_2)$                                                                     | `tests/test_individual_fairness.py::TestCertify::test_violations_monotone_in_L`        |
+| CVaR ≤ mean                                        | $\text{CVaR}_\alpha(U) \leq \mathbb{E}[U]$ for all $\alpha \in (0, 1)$                                                                            | `tests/test_uncertainty_optimization.py::TestCVaR::test_cvar_le_mean`                  |
+| Conformal coverage (empirical)                     | $\frac{1}{n_\text{test}}\sum_i \mathbb{1}\bigl[y_i \in \widehat{C}(x_i)\bigr] \geq 1 - \alpha \pm \delta$                                         | `tests/test_adaptive_alpha.py` (clamping invariants); `ml/conformal_prediction.py` is import-tested by every consumer |
+| Inverse-RL convexity                               | Hessian of negative log-likelihood is positive semi-definite                                                                                      | `tests/test_irl_preferences.py::TestFit::test_objective_strictly_convex_with_ridge`    |
+| Warm-start fingerprint determinism                 | Same fingerprint $\Rightarrow$ same hint set                                                                                                      | `tests/test_optimization.py::TestColumnGeneration` + `optimization/optimizer.py` cache key    |
+| Priority-weighted MPC reward monotonicity (T2.1)   | $\text{prio}_1 < \text{prio}_2 \Rightarrow R_t(\text{prio}_1) > R_t(\text{prio}_2)$                                                               | `tests/test_stochastic_mpc_scheduler.py::TestPriorityWeightedReward::test_priority_multiplier_is_monotone` |
+| Auto-scaling weight isolation (T2.2)               | Concurrent solves never observe weights other than their own                                                                                       | `tests/test_auto_scaling_optimizer.py::TestParallelRaceWeightIsolation`                |
+| SHA-256 sidecar integrity (T2.3)                   | `safe_load(p)` raises `UnsafeLoadError` if `sha256(p) ≠ sidecar`                                                                                  | `tests/test_safe_loader.py::TestSafeLoad::test_sidecar_mismatch_raises`                |
+| Tuning channel gate (T5)                           | `data_channel == "synthetic"` $\Rightarrow$ `load_overrides() == {}`                                                                              | `tests/test_tuning.py::TestManifest::test_overrides_blocked_in_synthetic_mode`         |
+
+When debugging a regression, find the broken invariant first; the
+relevant section's narrative will tell you which formula it pins.
+
+---
+
+## 31. Pseudocode Style Guide
+
+Every algorithm box in this document follows the same convention so a
+reader can skim them all without re-learning the syntax.
+
+```
+Algorithm: <Name>
+Input:  <typed list>
+Output: <description>
+
+1.  Initialise <data structures>
+2.  for <condition>:
+3.      if <guard>:
+4.          <operation>
+5.      else:
+6.          <alternative>
+7.  return <result>
+```
+
+Conventions:
+
+- `←` is assignment (not `=`); equality stays as `=` or `==`.
+- `# ...` is a comment.  No multi-line comments; split across lines.
+- Indentation is two spaces inside loops / branches.
+- Loop / branch headers always end with `:` then newline + indent.
+- Set comprehensions: `{ x | x ∈ S, P(x) }`.  Sums / products: `Σ_i`, `∏_i`.
+- Function calls: `f(x)`; method calls: `obj.method(x)`.
+- Variables in `code_font`; mathematical objects in $\mathit{italic}$.
+
+Worked example (CP-SAT warm-start hint injection, §2.10):
+
+```
+Algorithm: WarmStartHintInjection
+Input:  patients P, chairs C, cache (fingerprint → past assignment)
+Output: cp_model with assignment hints attached
+
+1.  model ← CpModel()
+2.  fp    ← fingerprint(P, C)        # day-of-week, |P|, priority distribution, ...
+3.  if fp ∈ cache:
+4.      prior ← cache[fp]
+5.      for each p ∈ P:
+6.          model.AddHint(assigned_var[p], 1)
+7.          model.AddHint(start_var[p], prior[p].start)
+8.          for each c ∈ C:
+9.              model.AddHint(chair_var[p, c], 1 if c == prior[p].chair else 0)
+10. return model
+```
+
+Worked example (Bayesian-opt loss for §29.4 / `tuning/bayes_opt.py`):
+
+```
+Algorithm: ScalarObjective
+Input:  candidate value v ∈ [v_lo, v_hi], composite weights w
+Output: skopt loss (the more negative, the better)
+
+1.  metrics ← evaluate(v)
+2.  util    ← metrics.utilisation
+3.  wait    ← min(metrics.avg_waiting_days / 14, 1)   # normalise to [0, 1]
+4.  fair    ← metrics.fairness_ratio
+5.  score   ← w_util · util  −  w_wait · wait  +  w_fair · fair
+6.  return -score                                      # skopt minimises
+```
+
+---
+
+## 32. Known Limitations per Model
+
+A world-class document acknowledges where each formulation can break.
+Each subsection here lists the limit, the symptom, and the live
+mitigation in the codebase.
+
+### 32.1 CP-SAT (monolithic, §2)
+
+- **Limit.** $n \cdot m > 5{,}000$ binary $x_{p,c}$ exhausts the branch-and-cut search budget; OR-Tools either times out or returns a poor incumbent.
+- **Symptom.** `STATUS_FEASIBLE` rather than `STATUS_OPTIMAL`, with `solve_time` near `SOLVER_TIME_LIMIT_SECONDS`.
+- **Live mitigation.** `COLUMN_GEN_THRESHOLD = 50` (`config.py:64`) auto-routes any instance with $n > 50$ to the column-generation solver (§2.12, $\approx 5$ s for $n = 100$); `AutoScalingOptimizer` (§A.9) further wraps the call with a cascading 5 / 2 / 1 / 0.5-second budget + greedy fallback so a decision is always returned.
+
+### 32.2 No-show ensemble (§3)
+
+- **Limit.** The sequence-model (RNN) component (§3.6) needs $\geq 5$ prior appointments per patient to materially lift AUC.
+- **Symptom.** AUC drops by $\approx 0.04$–$0.06$ on patients with $\leq 2$ prior appointments compared to those with full sequence history.
+- **Live mitigation.** `min_sequence_length = 5` gate inside the ensemble routes short-history patients through the static features only; the RNN is invoked only when history is long enough to be informative (`ml/sequence_model.py`).  `cold_start_prior` returns the population baseline (default $0.10$) until $\geq$ `min_events_for_fit` real outcomes have been observed.
+
+### 32.3 Decision-Focused Learning calibration (§3.7)
+
+- **Limit.** The two-parameter calibration head $g(p) = \sigma(a \cdot \text{logit}(p) + b)$ assumes the underlying ensemble is at least roughly monotone in true risk.
+- **Symptom.** $a$ goes negative or near-zero, flipping or flattening the ranking.
+- **Live mitigation.** Non-negativity constraint `a ≥ 0` plus L2 prior pulling $(a, b)$ toward $(1, 0)$ keeps the head close to identity in the small-data regime (`ml/decision_focused_learning.py`).
+
+### 32.4 Conformal prediction — split (§19)
+
+- **Limit.** Coverage $\Pr(Y \in \widehat{C}(X)) \geq 1 - \alpha$ is **marginal** over the joint $(X, Y)$ distribution; it does NOT guarantee conditional coverage $\Pr(Y \in \widehat{C}(X) \mid X = x)$ at every $x$.
+- **Symptom.** Intervals can be too narrow on hard subgroups (e.g., elderly patients with multiple cycles) and too wide on easy ones.
+- **Live mitigation.** Risk-adaptive $\alpha$ policy (§19.10) tightens or loosens $\alpha(p) \in [\alpha_{\text{floor}}, \alpha_{\text{ceil}}] = [0.01, 0.20]$ per patient, lifting conditional coverage in exchange for slightly wider average intervals.
+
+### 32.5 DRO Wasserstein certificate (§A.5)
+
+- **Limit.** The closed-form upper bound assumes $Y \in \{0, 1\}$ and a 0-1 cost; it is not valid for continuous outcomes.
+- **Symptom.** A user mistakenly applying the certificate to a duration-regression target would get a meaningless inflation term.
+- **Live mitigation.** The certificate is wired only to fairness-gap callers (`ml/dro_fairness.py:certify_pair`) — never to the duration model or the no-show *probability* itself.  The 1/π_g term is also clipped (`max(π_g, 1e-6)`) to stop the bound from blowing up on empty groups (see §28).
+
+### 32.6 Inverse-RL preference learner (§2.13)
+
+- **Limit.** Reliable estimation needs $\geq 20$ real overrides; with fewer, the bootstrap prior dominates and the learned weights barely move from $\boldsymbol{\theta}^{*}_{\text{boot}}$.
+- **Symptom.** Cross-validated agreement above 90 % on the bootstrap distribution but no ability to recover a held-out clinician's preferences.
+- **Live mitigation.** `min_events_for_fit = 20` gate (`ml/inverse_rl_preferences.py`) keeps the learner on the bootstrap prior until enough real overrides land.  Ridge $\lambda = 0.05$ (`L2_LAMBDA_DEFAULT`, §29.1) keeps the L-BFGS-B objective strictly convex even with sparse data.
+
+### 32.7 MPC + Gamma-Poisson arrivals (§A.13)
+
+- **Limit.** The Gamma-Poisson model assumes stationary Poisson arrivals over the short horizon $\tau$; it does not capture self-exciting (bursty) patterns.
+- **Symptom.** Under a real-world burst (e.g., emergency-department referral spike on Monday morning), the posterior mean rate underestimates the next-step intensity for a few minutes.
+- **Live mitigation.** Conjugate update on every observed window keeps the posterior responsive ($\alpha \mapsto \alpha + n$, $\beta \mapsto \beta + \Delta$); for production-grade burst modelling the natural upgrade is a Hawkes-process arrival model — flagged as future work in the dissertation §5.5 limitations subsection.
+
+### 32.8 Tuning manifest (§29.4)
+
+- **Limit.** Tuning runs against synthetic data overfit the generator's quirks; the resulting hyperparameters are statistically noisy with respect to real distributions.
+- **Symptom.** Synthetic-channel manifests routinely show no-show AUC above 0.90 — substantially higher than the AUC any real-data deployment will see.
+- **Live mitigation.** The boot path applies overrides ONLY when `data_channel == "real"`; synthetic-channel manifests are loud reminders ("manifest is in 'synthetic' mode; overrides NOT applied") rather than silent leaks.  Pinned by `tests/test_tuning.py::TestManifest::test_overrides_blocked_in_synthetic_mode`.
+
+---
+
 ## References
 
 ### Core Scheduling & Optimization
@@ -5272,6 +5424,14 @@ path refuses to apply it.
 ### Causal Validation
 35. Imbens, G. W. & Rubin, D. B. (2015). Causal Inference for Statistics
 36. Rosenbaum, P. R. (2002). Observational Studies. *Springer*
+
+### Distributionally Robust Optimisation, CVaR, MPC, BMA, SPO+
+37. Rockafellar, R. T. & Uryasev, S. (2000). Optimization of Conditional Value-at-Risk. *Journal of Risk*, 2(3), pp.21–41.  *— CVaR derivation cited in §24b.7.*
+38. Mohajerin Esfahani, P. & Kuhn, D. (2018). Data-driven distributionally robust optimization using the Wasserstein metric: performance guarantees and tractable reformulations. *Mathematical Programming*, 171(1–2), pp.115–166. doi:10.1007/s10107-017-1172-1  *— Wasserstein-DRO closed-form bound cited in §A.5 + §24b.*
+39. Mayne, D. Q., Rawlings, J. B., Rao, C. V. & Scokaert, P. O. M. (2000). Constrained model predictive control: stability and optimality. *Automatica*, 36(6), pp.789–814. doi:10.1016/S0005-1098(99)00214-9  *— Receding-horizon control foundations cited in §A.13.*
+40. Hoeting, J. A., Madigan, D., Raftery, A. E. & Volinsky, C. T. (1999). Bayesian Model Averaging: A Tutorial. *Statistical Science*, 14(4), pp.382–417.  *— BMA weighting in the no-show ensemble (§3.1).*
+41. Elmachtoub, A. N. & Grigas, P. (2022). Smart "Predict, then Optimize". *Management Science*, 68(1), pp.9–26. doi:10.1287/mnsc.2020.3922  *— SPO+ loss formulation cited in §3.7.*
+42. Wilder, B., Dilkina, B. & Tambe, M. (2019). Melding the Data-Decisions Pipeline: Decision-Focused Learning for Combinatorial Optimization. *AAAI*, 33(1), pp.1658–1665. doi:10.1609/aaai.v33i01.33011658  *— Blackbox-solver-gradient route cited in §3.7.*
 
 ---
 
