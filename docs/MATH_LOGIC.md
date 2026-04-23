@@ -5365,6 +5365,36 @@ mitigation in the codebase.
 
 ## References
 
+### Peer-Reviewed Literature for Advanced Methods (cross-reference)
+
+Quick-lookup table — each row maps a method used somewhere in this
+document to its canonical academic source.  The right column is the
+entry number in the bibliography that follows.  All other equations
+(CP-SAT objective construction, fairness constraints, simple aggregates,
+etc.) are original to this work or derived from standard operations-
+research / machine-learning textbooks already cited below.
+
+| Method                                                       | Canonical citation                                                  | Bibliography entry |
+|--------------------------------------------------------------|---------------------------------------------------------------------|--------------------|
+| Wasserstein DRO                                              | Mohajerin Esfahani & Kuhn (2018) *Math. Program.*                   | #38                |
+| CVaR in LP                                                   | Rockafellar & Uryasev (2000) *J. Risk*                              | #37                |
+| Conformal prediction (foundational)                          | Vovk, Gammerman & Shafer (2005)                                     | #13                |
+| Conformal prediction (modern self-contained treatment)       | Angelopoulos & Bates (2022) *FnT ML*                                | #43                |
+| Conformalised Quantile Regression (CQR)                      | Romano, Patterson & Candès (2019) *NeurIPS*                         | #15                |
+| Monte-Carlo Dropout (Bayesian approximation)                 | Gal & Ghahramani (2016) *ICML*                                      | #14                |
+| Double / Debiased Machine Learning                           | Chernozhukov et al. (2018) *Econom. J.*                             | #11                |
+| Instrumental variables (textbook)                            | Angrist & Pischke (2008)                                            | #10                |
+| Uplift meta-learners                                         | Künzel et al. (2019) *PNAS*                                         | #16                |
+| Model Cards for ML transparency                              | Mitchell et al. (2019) *FAT\* Conf.*                                | #28                |
+| Lipschitz / individual fairness                              | Dwork et al. (2012) *ITCS*                                          | #44                |
+| Column generation (master + pricing)                         | Desaulniers, Desrosiers & Solomon (2005)                            | #45                |
+| Branch-and-Price (integer-rounded CG)                        | Barnhart et al. (1998) *Operations Research*                        | #46                |
+| Temporal Fusion Transformer                                  | Lim et al. (2021) *Int. J. Forecast.*                               | #47                |
+| SPO+ — Smart Predict-then-Optimise                           | Elmachtoub & Grigas (2022) *Management Science*                     | #41                |
+| Decision-Focused Learning (blackbox solver gradient)         | Wilder, Dilkina & Tambe (2019) *AAAI*                               | #42                |
+| Constrained Model Predictive Control (stability)             | Mayne, Rawlings, Rao & Scokaert (2000) *Automatica*                 | #39                |
+| Bayesian Model Averaging (BMA)                               | Hoeting, Madigan, Raftery & Volinsky (1999) *Statist. Sci.*         | #40                |
+
 ### Core Scheduling & Optimization
 1. Google OR-Tools CP-SAT Solver Documentation
 2. Baptiste, P., Le Pape, C. & Nuijten, W. (2001). Constraint-Based Scheduling
@@ -5432,6 +5462,13 @@ mitigation in the codebase.
 40. Hoeting, J. A., Madigan, D., Raftery, A. E. & Volinsky, C. T. (1999). Bayesian Model Averaging: A Tutorial. *Statistical Science*, 14(4), pp.382–417.  *— BMA weighting in the no-show ensemble (§3.1).*
 41. Elmachtoub, A. N. & Grigas, P. (2022). Smart "Predict, then Optimize". *Management Science*, 68(1), pp.9–26. doi:10.1287/mnsc.2020.3922  *— SPO+ loss formulation cited in §3.7.*
 42. Wilder, B., Dilkina, B. & Tambe, M. (2019). Melding the Data-Decisions Pipeline: Decision-Focused Learning for Combinatorial Optimization. *AAAI*, 33(1), pp.1658–1665. doi:10.1609/aaai.v33i01.33011658  *— Blackbox-solver-gradient route cited in §3.7.*
+
+### Conformal Prediction, Lipschitz Fairness, Column Generation, TFT
+43. Angelopoulos, A. N. & Bates, S. (2022). A Gentle Introduction to Conformal Prediction and Distribution-Free Uncertainty Quantification. *Foundations and Trends in Machine Learning*, 16(4), pp.494–591. doi:10.1561/2200000101  *— Modern self-contained treatment cited in §19 / §27.4.*
+44. Dwork, C., Hardt, M., Pitassi, T., Reingold, O. & Zemel, R. (2012). Fairness through Awareness. In: *3rd Innovations in Theoretical Computer Science Conference (ITCS)*, pp.214–226. doi:10.1145/2090236.2090255  *— Lipschitz / individual-fairness condition cited in §A.6.*
+45. Desaulniers, G., Desrosiers, J. & Solomon, M. M. (eds.) (2005). *Column Generation*. New York: Springer. doi:10.1007/b135457  *— Master-pricing decomposition cited in §2.12.*
+46. Barnhart, C., Johnson, E. L., Nemhauser, G. L., Savelsbergh, M. W. P. & Vance, P. H. (1998). Branch-and-Price: Column Generation for Solving Huge Integer Programs. *Operations Research*, 46(3), pp.316–329. doi:10.1287/opre.46.3.316  *— Branch-and-price-lite integer rounding cited in §2.12.7.*
+47. Lim, B., Arık, S. Ö., Loeff, N. & Pfister, T. (2021). Temporal Fusion Transformers for interpretable multi-horizon time series forecasting. *International Journal of Forecasting*, 37(4), pp.1748–1764. doi:10.1016/j.ijforecast.2021.03.012  *— TFT architecture cited in §3.8.*
 
 ---
 
