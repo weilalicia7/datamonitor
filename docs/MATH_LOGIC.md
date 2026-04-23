@@ -5,7 +5,7 @@
 This document describes all mathematical formulas, algorithms, and optimization logic used in the SACT (Systemic Anti-Cancer Therapy) Scheduling System for Velindre Cancer Centre.
 
 **Version:** 5.0 (Updated April 2026)
-**New in v5.0:** Production-readiness sweep across the prediction pipeline.  (i) MPC reward §9b.13.2 corrected from $(5 - \text{prio})$ to $(6 - \text{prio})$ + matching $\max(5 - \text{prio}, 1)$ floor in the terminal penalty so priority-5 patients still reward completion / penalise abandonment; `ChairState.priority_at_assignment` field carries priority through the `OCCUPIED→IDLE` transition.  (ii) Auto-scaling §9b.9 parallel race exposes a new `solve_with_weights(patients, weights, time_limit)` injection point so each worker observes its own weights — no shared mutable optimiser state, no cross-contamination.  (iii) SHA-256-verified pickle loader (`safe_loader.py`) gates every model `save`/`load` in 7 modules; sidecar `<file>.sha256` lets boot-time integrity probes refuse tampered weights before deserialisation.  (iv) Production hardening: role-based auth (admin ⊇ operator ⊇ viewer), input caps + DML whitelist + `MAX_CONTENT_LENGTH=16MB`, CSRF + session-cookie hardening, structured JSON logging with patient-ID redaction, audit trail (after_request hook auto-emits one row per mutating request, route-template keyed for bounded cardinality), Prometheus `/metrics` (HTTP + `sact_optimizer_solve_seconds{cpsat,mpc}` + `sact_ml_prediction_seconds{noshow,duration}` histograms), `/health/{live,ready}`, optional OpenTelemetry, CVE-pinned deps, multi-stage Dockerfile + nginx TLS + GitHub Actions CI, `secrets_manager.py` (env > .env > AWS/Vault) with rotation runbook, NHS data-protection playbook + DPIA, `retention_enforcer.py` for TTL pruning + GDPR right-to-erasure.  Test suite grew from 441 to 961 (every untested module covered).  No new UI panels — every integration is invisible to the prediction pipeline; observability lives at `/api/*/status`, `/health/*`, `/metrics`.
+**New in v5.0:** Production-readiness sweep across the prediction pipeline.  (i) MPC reward §A.13.2 corrected from $(5 - \text{prio})$ to $(6 - \text{prio})$ + matching $\max(5 - \text{prio}, 1)$ floor in the terminal penalty so priority-5 patients still reward completion / penalise abandonment; `ChairState.priority_at_assignment` field carries priority through the `OCCUPIED→IDLE` transition.  (ii) Auto-scaling §A.9 parallel race exposes a new `solve_with_weights(patients, weights, time_limit)` injection point so each worker observes its own weights — no shared mutable optimiser state, no cross-contamination.  (iii) SHA-256-verified pickle loader (`safe_loader.py`) gates every model `save`/`load` in 7 modules; sidecar `<file>.sha256` lets boot-time integrity probes refuse tampered weights before deserialisation.  (iv) Production hardening: role-based auth (admin ⊇ operator ⊇ viewer), input caps + DML whitelist + `MAX_CONTENT_LENGTH=16MB`, CSRF + session-cookie hardening, structured JSON logging with patient-ID redaction, audit trail (after_request hook auto-emits one row per mutating request, route-template keyed for bounded cardinality), Prometheus `/metrics` (HTTP + `sact_optimizer_solve_seconds{cpsat,mpc}` + `sact_ml_prediction_seconds{noshow,duration}` histograms), `/health/{live,ready}`, optional OpenTelemetry, CVE-pinned deps, multi-stage Dockerfile + nginx TLS + GitHub Actions CI, `secrets_manager.py` (env > .env > AWS/Vault) with rotation runbook, NHS data-protection playbook + DPIA, `retention_enforcer.py` for TTL pruning + GDPR right-to-erasure.  Test suite grew from 441 to 961 (every untested module covered).  No new UI panels — every integration is invisible to the prediction pipeline; observability lives at `/api/*/status`, `/health/*`, `/metrics`.
 **New in v4.9:** Column generation for large instances (Section 2.12). Dantzig-Wolfe decomposition splits the monolithic CP-SAT into a master set-partitioning LP (GLOP) + per-chair pricing subproblems (CP-SAT). Handles 100+ patients/day where the monolithic formulation becomes impractical. Integrates with warm-start cache and GNN pruning. `/api/optimizer/colgen` endpoint for CG diagnostics.
 **New in v4.8:** GNN feasibility pre-filter (Section 2.11). Bipartite message-passing GNN (numpy + sklearn, no deep-learning framework required) prunes infeasible (patient, chair) pairs before CP-SAT runs. 2–5× solve-time reduction after warm-up. `/api/optimizer/gnn` endpoint for live training stats and prune rates.
 **New in v4.7:** Warm-start with CP-SAT solution hints (Section 2.10). `model.AddHint()` seeds solver with prior feasible assignment keyed by instance fingerprint (day-of-week, patient count, priority distribution, no-show bucket, duration band, chair count). 50-80% solve time reduction for recurring schedule patterns. `/api/optimizer/cache` endpoint exposes hit rates and eviction stats for operational monitoring.
@@ -42,20 +42,20 @@ This document describes all mathematical formulas, algorithms, and optimization 
 8. [Performance Metrics](#8-performance-metrics)
 9. [Urgent Patient Insertion](#9-urgent-patient-insertion) — Squeeze-in with robustness-aware scoring (9.8)
 
-### Production-Grade Subsystems (v5.0 §9b.x)
-- 9b.1 [Online Feature Store](#9b1-online-feature-store-31--streaming-ml)
-- 9b.2 [Micro-Batch Optimizer](#9b2-micro-batch-optimizer-32--three-tier-orchestration)
-- 9b.3 [Digital Twin (What-If Simulation)](#9b3-digital-twin-33--what-if-simulation)
-- 9b.4 [Drift Root-Cause Attribution](#9b4-drift-root-cause-attribution-34)
-- 9b.5 [Distributionally Robust Fairness (DRO)](#9b5-distributionally-robust-fairness-41)
-- 9b.6 [Individual (Lipschitz) Fairness](#9b6-individual-lipschitz-fairness-42)
-- 9b.7 [Safety Guardrails with Runtime Monitoring](#9b7-safety-guardrails-with-runtime-monitoring-43)
-- 9b.8 [Counterfactual Fairness Audit](#9b8-counterfactual-fairness-audit-44)
-- 9b.9 [Auto-scaling Optimizer with Timeout Guarantees](#9b9-auto-scaling-optimizer-with-timeout-guarantees-51)
-- 9b.10 [Human-in-the-Loop Override Learning](#9b10-human-in-the-loop-override-learning-52)
-- 9b.11 [Explainable Rejection Reports](#9b11-explainable-rejection-reports-53)
-- 9b.12 [SACT Version Adapter](#9b12-sact-version-adapter-54)
-- 9b.13 [Stochastic MPC Scheduler](#9b13-stochastic-mpc-scheduler-55)
+### Production-Grade Subsystems (v5.0 — Appendix A)
+- A.1 [Online Feature Store](#a1-online-feature-store-31--streaming-ml)
+- A.2 [Micro-Batch Optimizer](#a2-micro-batch-optimizer-32--three-tier-orchestration)
+- A.3 [Digital Twin (What-If Simulation)](#a3-digital-twin-33--what-if-simulation)
+- A.4 [Drift Root-Cause Attribution](#a4-drift-root-cause-attribution-34)
+- A.5 [Distributionally Robust Fairness (DRO)](#a5-distributionally-robust-fairness-41)
+- A.6 [Individual (Lipschitz) Fairness](#a6-individual-lipschitz-fairness-42)
+- A.7 [Safety Guardrails with Runtime Monitoring](#a7-safety-guardrails-with-runtime-monitoring-43)
+- A.8 [Counterfactual Fairness Audit](#a8-counterfactual-fairness-audit-44)
+- A.9 [Auto-scaling Optimizer with Timeout Guarantees](#a9-auto-scaling-optimizer-with-timeout-guarantees-51)
+- A.10 [Human-in-the-Loop Override Learning](#a10-human-in-the-loop-override-learning-52)
+- A.11 [Explainable Rejection Reports](#a11-explainable-rejection-reports-53)
+- A.12 [SACT Version Adapter](#a12-sact-version-adapter-54)
+- A.13 [Stochastic MPC Scheduler](#a13-stochastic-mpc-scheduler-55)
 
 ### Advanced ML Models (v2.0)
 10. [Survival Analysis (Cox Proportional Hazards)](#10-survival-analysis)
@@ -80,6 +80,31 @@ This document describes all mathematical formulas, algorithms, and optimization 
 ### Uncertainty-Aware Optimization (v4.0)
 24b. [DRO & CVaR Optimization](#24b-uncertainty-aware-optimization-dro) — Wasserstein DRO (24b.1-24b.3) + CVaR in CP-SAT (24b.7, Rockafellar & Uryasev 2000)
 25. [Complete Model Summary](#25-model-summary-table)
+
+---
+
+## Notation Conventions
+
+This document follows a single typographic convention across every formula
+so symbols can be read at a glance.  Where you see a deviation in older
+sections, treat it as legacy markup pending a stylistic copy-edit, not a
+semantic difference.
+
+| Object               | Style                          | Example                                       |
+|----------------------|--------------------------------|-----------------------------------------------|
+| Vector               | Bold lowercase                 | $\mathbf{x},\ \mathbf{w},\ \boldsymbol{\theta}$ |
+| Matrix               | Bold uppercase                 | $\mathbf{X},\ \mathbf{W},\ \boldsymbol{\Sigma}$ |
+| Scalar               | Italic                         | $x,\ y,\ \alpha,\ \tau$                        |
+| Set / family         | Calligraphic                   | $\mathcal{A},\ \mathcal{D},\ \mathcal{S}$      |
+| Random variable      | Italic uppercase               | $X,\ Y,\ T$                                   |
+| Estimator / fitted   | Hat                            | $\hat{\theta},\ \hat{\mathbf{w}},\ \hat{V}$    |
+| Indicator            | $\mathbb{1}_{\{\cdot\}}$       | $\mathbb{1}_{\text{complete}}$                |
+| Expectation, prob.   | $\mathbb{E}[\cdot],\ \Pr(\cdot)$ | $\mathbb{E}[R_t],\ \Pr(\text{override})$    |
+
+Subscripts denote indices ($x_i$ for sample $i$, $w_p$ for patient $p$);
+superscripts in math mode are powers unless explicitly tagged a label
+(e.g., $h_0(t)$ for "baseline hazard at $t$").  Bracketed superscripts —
+$\mathbf{x}^{(t)}$ — denote a value at decision epoch $t$.
 
 ---
 
@@ -1910,13 +1935,24 @@ authoritative) means a tampered client cannot bypass the rule.
 
 ---
 
-### 9b.1 Online Feature Store (§3.1 — Streaming ML)
+## Appendix A. Advanced Operational Modules
 
-#### 9b.1.1 Motivation
+This appendix expands on §9 with the production-grade subsystems shipped
+with v5.0.  Each module is a self-contained add-on to the prediction
+pipeline (no UI panel; status visible only via `/api/*/status`,
+`/health/*`, and Prometheus `/metrics`).  Sections are kept here rather
+than interleaved with the core §9 material so a reader following the
+main numerical hierarchy is not interrupted by operational concerns.
+
+---
+
+### A.1 Online Feature Store (§3.1 — Streaming ML)
+
+#### A.1.1 Motivation
 
 The legacy pipeline reloads `historical_appointments.xlsx` and recomputes 80+ features on every restart. §3.1 demands streaming ML — real-time feature updates, low-latency serving, versioned features, and point-in-time correctness.
 
-#### 9b.1.2 Architecture
+#### A.1.2 Architecture
 
 ```
 ┌──────────────────────────────┐   append
@@ -1946,7 +1982,7 @@ The legacy pipeline reloads `historical_appointments.xlsx` and recomputes 80+ fe
           └────────────────────────────────────────┘
 ```
 
-#### 9b.1.3 Point-in-time (PIT) correctness
+#### A.1.3 Point-in-time (PIT) correctness
 
 For training labels generated at time `T`:
 
@@ -1958,7 +1994,7 @@ as_of(patient, T) = FeatureView.compute(
 
 `occurrence_time(e)` is the actual appointment `Date` field, **not** the ingestion `event_ts` — this guarantees that a model fitted on labels from day `T` cannot see any feature derived from a post-`T` event.
 
-#### 9b.1.4 Feature views shipped
+#### A.1.4 Feature views shipped
 
 | View | Version | Features |
 |------|---------|----------|
@@ -1967,7 +2003,7 @@ as_of(patient, T) = FeatureView.compute(
 | `patient_cycle_ctx` | v1.0.0 | current cycle, total cycles, cycles since regimen modification, days since last visit |
 | `patient_trend`     | v1.0.0 | attended streak, cancelled streak, duration trend (stable/growing/declining via rolling linear slope) |
 
-#### 9b.1.5 Storage
+#### A.1.5 Storage
 
 | File | Purpose |
 |------|---------|
@@ -1977,7 +2013,7 @@ as_of(patient, T) = FeatureView.compute(
 | `data_cache/feature_store/serving_latency.jsonl`  | Per-call latency log (fed into dissertation_analysis.R §22) |
 | `data_cache/feature_store/schema.json`            | Schema version + feature view definitions |
 
-#### 9b.1.6 Integration
+#### A.1.6 Integration
 
 | Surface | Role |
 |---------|------|
@@ -1989,13 +2025,13 @@ as_of(patient, T) = FeatureView.compute(
 
 No UI panel — feature runs invisibly; when the store is empty (fresh install) the enrichment hook is a no-op and the legacy feature-engineering code runs unchanged.
 
-### 9b.2 Micro-Batch Optimizer (§3.2 — Three-Tier Orchestration)
+### A.2 Micro-Batch Optimizer (§3.2 — Three-Tier Orchestration)
 
-#### 9b.2.1 Motivation
+#### A.2.1 Motivation
 
 Re-running CP-SAT on every scheduling change is a waste when that change is "insert one urgent patient". The §3.2 brief wants three tiers: fast heuristic insertion (<50 ms), slow full re-optimisation (every 15 min or 3+ changes), background RL (continuous incremental improvement).
 
-#### 9b.2.2 Routing rule
+#### A.2.2 Routing rule
 
 ```
 path(c) = FAST    if c.type == 'insert' AND c.urgent
@@ -2005,7 +2041,7 @@ path(c) = FAST    if c.type == 'insert' AND c.urgent
 
 Fast-path exception → demote to QUEUED. Slow-path exception → re-queue every drained change (no data loss).
 
-#### 9b.2.3 Wiring
+#### A.2.3 Wiring
 
 | Primitive | Tier | File |
 |-----------|------|------|
@@ -2015,11 +2051,11 @@ Fast-path exception → demote to QUEUED. Slow-path exception → re-queue every
 
 The coordinator `ml/micro_batch_optimizer.py` is constructed with 3 callables (no hard imports), so the Flask app injects its already-instantiated singletons via adapter functions (`_mb_fast_path`, `_mb_slow_path`, `_mb_rl_tick`).
 
-#### 9b.2.4 Eventual consistency
+#### A.2.4 Eventual consistency
 
 Queued non-urgent changes are applied to `app_state['appointments']` only when the slow path fires. Between firings the schedule reflects fast-path insertions only. Lag is surfaced on `/api/microbatch/status` as `eventual_consistency_lag_s` so operators can audit freshness.
 
-#### 9b.2.5 Endpoints
+#### A.2.5 Endpoints
 
 | Route | Method | Purpose |
 |---|---|---|
@@ -2032,13 +2068,13 @@ Every decision logs one row to `data_cache/micro_batch/latency.jsonl` with `{ts,
 
 ---
 
-### 9b.3 Digital Twin (§3.3 — What-If Simulation)
+### A.3 Digital Twin (§3.3 — What-If Simulation)
 
-#### 9b.3.1 Motivation
+#### A.3.1 Motivation
 
 An operator proposing to lower the double-book threshold from 0.30 to 0.05 has no safe way to preview the effect before it hits live patients. The §3.3 brief asks for a parallel simulated environment mirroring live state, advancing virtual time by historical arrival patterns, and letting policies be evaluated offline over a multi-day horizon.
 
-#### 9b.3.2 Arrival model
+#### A.3.2 Arrival model
 
 Given a historical appointment log $\{(t_i)\}_{i=1}^{N}$ spanning $D$ distinct days, the twin fits per-(dow, hod) Poisson rates
 
@@ -2048,7 +2084,7 @@ $$
 
 and an urgent fraction $p_U = \Pr[\text{is\_urgent} \mid \text{arrival}]$. Arrivals in $[t_0, t_1)$ are sampled as $N_{\text{arr}} \sim \text{Poisson}(\lambda(\mathrm{dow}(t_0), \mathrm{hod}(t_0)) \cdot (t_1 - t_0))$ with urgency drawn independently per arrival.
 
-#### 9b.3.3 Rollout loop
+#### A.3.3 Rollout loop
 
 ```
 state := deepcopy(snapshot)
@@ -2065,7 +2101,7 @@ for i in 1..(horizon_days * 24 / step_hours):
 
 `squeeze_fn` and `noshow_fn` default to the production `SqueezeInHandler.squeeze_in_with_noshow()` and `NoShowModel.predict()`, so twin metrics match what live ops would realise given identical arrivals.
 
-#### 9b.3.4 Policy score and guardrails
+#### A.3.4 Policy score and guardrails
 
 $$
 S(\pi) = 0.45 \cdot r_{\text{accept}} + 0.30 \cdot \frac{u}{100} - 0.15 \cdot r_{\text{double-book}} - 0.10 \cdot r_{\text{no-show}}
@@ -2073,7 +2109,7 @@ $$
 
 Guardrails: `double_book_rate > 0.25`, `accept_rate < 0.50`, `noshow_rate > 0.35` are appended as string violations so the operator cannot commit a policy that trips any.
 
-#### 9b.3.5 Endpoints
+#### A.3.5 Endpoints
 
 | Route | Method | Purpose |
 |---|---|---|
@@ -2086,19 +2122,19 @@ Guardrails: `double_book_rate > 0.25`, `accept_rate < 0.50`, `noshow_rate > 0.35
 
 Every evaluation writes one JSON to `data_cache/digital_twin/evaluations/<ts>_<policy>.json` and one event row to `data_cache/digital_twin/twin_events.jsonl` — consumed by `dissertation_analysis.R` §24. No UI panel.
 
-#### 9b.3.6 Determinism contract
+#### A.3.6 Determinism contract
 
 $(state_0, \pi, \text{seed})$ ⇒ byte-identical `(total_arrivals, total_accepted, total_double_bookings, total_noshows_realised, policy_score)`. The test harness `tests/test_digital_twin.py::TestDeterminism::test_same_seed_reproduces` enforces this.
 
 ---
 
-### 9b.4 Drift Root-Cause Attribution (§3.4)
+### A.4 Drift Root-Cause Attribution (§3.4)
 
-#### 9b.4.1 Motivation
+#### A.4.1 Motivation
 
 `ml/drift_detection.py` fires on PSI/KS/CUSUM but only tells operators *that* a distribution moved. The §3.4 brief asks for *why*: which feature contributes the most to the PSI increase and, within that feature, which histogram bin.
 
-#### 9b.4.2 Per-bin contribution
+#### A.4.2 Per-bin contribution
 
 For feature $j$ with reference $\mathbf{r}_j$ and current $\mathbf{c}_j$, histogram both on the same percentile breakpoints. With Laplace-smoothed bin proportions $P_{j,i}^{\text{ref}}, P_{j,i}^{\text{cur}}$:
 
@@ -2108,7 +2144,7 @@ $$
 
 Summing over bins recovers the per-feature PSI, $\text{PSI}_j = \sum_i \delta_{j,i}$, matching `DriftDetector.compute_psi()` exactly (enforced by `tests/test_drift_attribution.py::TestConsistencyWithDriftDetector`).
 
-#### 9b.4.3 Shares
+#### A.4.3 Shares
 
 $$
 \text{share}_j = \frac{\text{PSI}_j}{\sum_k \text{PSI}_k}, \qquad \sum_j \text{share}_j = 1
@@ -2116,7 +2152,7 @@ $$
 
 The attributor emits a top-K feature breakdown (default K=5). Overall severity uses the same thresholds as `DriftDetector`: `PSI_j ≤ 0.1 → none`, `0.1-0.25 → moderate`, `> 0.25 → significant`.
 
-#### 9b.4.4 Narrative
+#### A.4.4 Narrative
 
 The top feature's top bin (by $|\delta_{j,i}|$) is rendered:
 
@@ -2128,7 +2164,7 @@ overall severity = {severity}.
 
 `{hint}` is a small operator-maintained dictionary (`Travel_Time_Min → "more remote patients"`, `Age → "age mix shifted"`, …). Features without a hint fall back to the raw column name.
 
-#### 9b.4.5 Integration
+#### A.4.5 Integration
 
 | Event                             | What happens                                                            |
 |-----------------------------------|-------------------------------------------------------------------------|
@@ -2139,7 +2175,7 @@ overall severity = {severity}.
 
 Every run writes one JSONL row to `data_cache/drift_attribution/attributions.jsonl`. §25 of `dissertation_analysis.R` reads this log. No UI panel.
 
-#### 9b.4.6 Consistency invariants
+#### A.4.6 Consistency invariants
 
 - `sum(fa.share_of_total for fa in breakdown) == 1.0` (within 1e-6)
 - `sum(b.psi_contribution for b in fa.bins) == fa.psi` (within 1e-6)
@@ -2147,13 +2183,13 @@ Every run writes one JSONL row to `data_cache/drift_attribution/attributions.jso
 
 ---
 
-### 9b.5 Distributionally Robust Fairness (§4.1)
+### A.5 Distributionally Robust Fairness (§4.1)
 
-#### 9b.5.1 Motivation
+#### A.5.1 Motivation
 
 The legacy `FairnessAuditor` (Section 13) reports demographic parity as a SOFT penalty on the CP-SAT objective — any fairness weight can be traded off against throughput. §4.1 makes fairness a HARD constraint by producing a *certificate* of the worst-case parity gap over a 1-Wasserstein ball of radius ε centred on the empirical joint distribution. The certificate survives distributional shift within the ball, which is the key guarantee sought.
 
-#### 9b.5.2 Upper bound
+#### A.5.2 Upper bound
 
 For binary outcome $Y = \mathbf{1}[\text{scheduled}]$ and the 1-Wasserstein metric with 0-1 label cost, the supremum-parity-gap over $B_\varepsilon(\hat P)$ admits the plug-in dual bound (Taskesen et al. FAccT 2021):
 
@@ -2165,7 +2201,7 @@ where $\hat \Delta = \hat P(Y=1|G=g_1) - \hat P(Y=1|G=g_2)$ and $\pi_g$ is the e
 
 Certified iff worst-case ≤ δ budget.
 
-#### 9b.5.3 Finite-sample adjustment
+#### A.5.3 Finite-sample adjustment
 
 Two-sided Wald $z_{\alpha/2}$ inflation on the plug-in:
 
@@ -2175,7 +2211,7 @@ $$
 
 Reported as `se_adjusted_upper`. Operators enforcing hard constraints should require both `certified` AND `certified_conservative`.
 
-#### 9b.5.4 Integration
+#### A.5.4 Integration
 
 | Event                                | What happens                                                 |
 |--------------------------------------|--------------------------------------------------------------|
@@ -2190,7 +2226,7 @@ When `enforce_as_hard_constraint=True` is set via `/api/fairness/dro/config`, a 
 
 JSONL log at `data_cache/dro_fairness/certificates.jsonl`; §26 of `dissertation_analysis.R` reads it. No UI panel.
 
-#### 9b.5.5 Invariants (enforced by `tests/test_dro_fairness.py`)
+#### A.5.5 Invariants (enforced by `tests/test_dro_fairness.py`)
 
 - `worst_case_gap ≥ empirical_gap` for all pairs
 - `ε = 0 ⇒ worst_case_gap = empirical_gap` (DRO collapses to plug-in)
@@ -2200,13 +2236,13 @@ JSONL log at `data_cache/dro_fairness/certificates.jsonl`; §26 of `dissertation
 
 ---
 
-### 9b.6 Individual (Lipschitz) Fairness (§4.2)
+### A.6 Individual (Lipschitz) Fairness (§4.2)
 
-#### 9b.6.1 Motivation
+#### A.6.1 Motivation
 
 §4.1 guarantees group-level parity under distributional perturbation. §4.2 adds the orthogonal Dwork et al. (2012) individual-level guarantee: patients whose features are close should receive close outcomes.
 
-#### 9b.6.2 Lipschitz condition
+#### A.6.2 Lipschitz condition
 
 For a distance metric $d(\cdot,\cdot)$ on patient features and outcome score $f(x) \in [0,1]$:
 
@@ -2220,15 +2256,15 @@ $$
 e_{ij} = \max\left(0,\; |f(x_i) - f(x_j)| - L \cdot d(x_i, x_j)\right)
 $$
 
-#### 9b.6.3 Distance metric
+#### A.6.3 Distance metric
 
 Features are min-max normalised to $[0, 1]$ over the training cohort. Euclidean distance is then divided by $\sqrt{d}$ (the number of features) so $\tau$ stays on an interpretable [0, 1] scale regardless of how many features the certifier tracks. Default features: `age, priority, expected_duration, distance_km, no_show_rate`.
 
-#### 9b.6.4 Similar-pair search
+#### A.6.4 Similar-pair search
 
 `sklearn.neighbors.NearestNeighbors(radius=tau * sqrt(d))` runs in near-linear time for typical cohorts. Fallback path is an $O(n^2)$ pairwise scan so the module has no hard sklearn dependency.
 
-#### 9b.6.5 Certificate verdict
+#### A.6.5 Certificate verdict
 
 | Quantity         | Rule                                         |
 |------------------|----------------------------------------------|
@@ -2236,11 +2272,11 @@ Features are min-max normalised to $[0, 1]$ over the training cohort. Euclidean 
 | `certified`      | `violation_rate ≤ violation_budget` (default 0.05) |
 | `strictly_lipschitz` | `n_violations == 0`                       |
 
-#### 9b.6.6 Lazy-constraint emitter for CP-SAT
+#### A.6.6 Lazy-constraint emitter for CP-SAT
 
 `LipschitzFairnessCertifier.iter_violating_pairs(...)` returns `[(patient_a, patient_b, excess), …]`. Callers translate each tuple into a CP-SAT clause forbidding the current $(\text{outcome}_a, \text{outcome}_b)$ assignment, enabling constraint-generation enforcement. The optimiser does not need refactoring — the emitter is dependency-injected.
 
-#### 9b.6.7 Integration
+#### A.6.7 Integration
 
 | Event                                 | What happens                                      |
 |---------------------------------------|---------------------------------------------------|
@@ -2253,7 +2289,7 @@ Features are min-max normalised to $[0, 1]$ over the training cohort. Euclidean 
 
 JSONL log at `data_cache/individual_fairness/certificates.jsonl`. §27 of `dissertation_analysis.R` reads it. No UI panel.
 
-#### 9b.6.8 Invariants (enforced by `tests/test_individual_fairness.py`)
+#### A.6.8 Invariants (enforced by `tests/test_individual_fairness.py`)
 
 - Constant outcomes on similar pairs ⇒ `strictly_lipschitz == True`
 - Larger L ⇒ `n_violations` monotonically non-increasing
@@ -2263,9 +2299,9 @@ JSONL log at `data_cache/individual_fairness/certificates.jsonl`. §27 of `disse
 
 ---
 
-### 9b.7 Safety Guardrails with Runtime Monitoring (§4.3)
+### A.7 Safety Guardrails with Runtime Monitoring (§4.3)
 
-#### 9b.7.1 Motivation
+#### A.7.1 Motivation
 
 The §4.1 / §4.2 certificates block schedules that violate *statistical* fairness guarantees. §4.3 adds a third pillar: a runtime monitor that blocks outputs the CP-SAT optimiser might return which are *technically optimal but clinically dangerous*. The brief's motivating example:
 
@@ -2274,7 +2310,7 @@ if any(remaining_slack < 5 for critical_patient):
     reject_schedule("Would create cascade risk for high-priority patient")
 ```
 
-#### 9b.7.2 Rule protocol
+#### A.7.2 Rule protocol
 
 Each rule is a pure function:
 
@@ -2284,7 +2320,7 @@ rule(schedule: List[appt], patients_by_id: dict, context: dict) -> List[SafetyVi
 
 Every rule carries a severity tag (`CRITICAL | HIGH | MODERATE | LOW`) and a human-readable `suggested_fix`. Rules are registered in `SafetyGuardrailsMonitor._rules`; new ones added at runtime via `register_rule`.
 
-#### 9b.7.3 Verdict rule
+#### A.7.3 Verdict rule
 
 $$
 \text{verdict}(R) = \begin{cases}
@@ -2296,7 +2332,7 @@ $$
 
 When `enforce_as_hard_gate` is set (default `True`), a `reject` verdict raises `safety_blocked = True` on the optimisation result. Downstream consumers see this flag and refuse to commit.
 
-#### 9b.7.4 Built-in rule set
+#### A.7.4 Built-in rule set
 
 | Rule                         | Severity | Trigger                                                    |
 |------------------------------|----------|------------------------------------------------------------|
@@ -2311,7 +2347,7 @@ When `enforce_as_hard_gate` is set (default `True`), a `reject` verdict raises `
 
 Every parameter is tunable live via `POST /api/safety/config`.
 
-#### 9b.7.5 Integration
+#### A.7.5 Integration
 
 | Event                           | What happens                                                          |
 |---------------------------------|-----------------------------------------------------------------------|
@@ -2323,7 +2359,7 @@ Every parameter is tunable live via `POST /api/safety/config`.
 
 JSONL log at `data_cache/safety_guardrails/reports.jsonl`. §28 of `dissertation_analysis.R` reads it. No UI panel.
 
-#### 9b.7.6 Invariants (enforced by `tests/test_safety_guardrails.py`)
+#### A.7.6 Invariants (enforced by `tests/test_safety_guardrails.py`)
 
 - Clean schedule ⇒ `verdict == "accept"` and `n_violations == 0`
 - Any CRITICAL ⇒ `verdict == "reject"`
@@ -2334,13 +2370,13 @@ JSONL log at `data_cache/safety_guardrails/reports.jsonl`. §28 of `dissertation
 
 ---
 
-### 9b.8 Counterfactual Fairness Audit (§4.4)
+### A.8 Counterfactual Fairness Audit (§4.4)
 
-#### 9b.8.1 Motivation
+#### A.8.1 Motivation
 
 §4.1/§4.2 catch explicit group / individual parity failures. §4.4 addresses the subtler **proxy-discrimination** failure mode: a model that never sees the protected attribute may still discriminate through correlates (e.g. Welsh postcode as a proxy for socioeconomic class).
 
-#### 9b.8.2 Scheduleability predictor
+#### A.8.2 Scheduleability predictor
 
 Thin logistic regression fitted on-the-fly from the historical `(features, was_scheduled)` pair. Features (numeric only):
 
@@ -2351,7 +2387,7 @@ Thin logistic regression fitted on-the-fly from the historical `(features, was_s
 
 Decision threshold = `median(predicted_prob | scheduled == 1)`. Falls back to a mean-ratio heuristic if sklearn is unavailable.
 
-#### 9b.8.3 Flip rule
+#### A.8.3 Flip rule
 
 For a rejected patient at postcode $p_0$ (deprivation $d_0 > 4$), flip to counterfactual $p_c$ (default CF10, $d_c \approx 2$) and recompute probability. Declare a flip:
 
@@ -2363,18 +2399,18 @@ $$
 
 with $\Delta_{\min} = 0.05$ by default. Certificate passes iff `flip_rate = n_flipped / n_rejected ≤ flip_budget` (default 0.10).
 
-#### 9b.8.4 Label-only vs circumstances-rich modes
+#### A.8.4 Label-only vs circumstances-rich modes
 
 | Mode | `flip_downstream` | What changes | Question answered |
 |------|-------------------|--------------|-------------------|
 | Label-only (default) | False | only `deprivation_score` | Does the model use postcode *as a label*? |
 | Circumstances-rich   | True  | deprivation + distance + travel + no_show | What if they *actually lived there*? |
 
-#### 9b.8.5 Deprivation lookup
+#### A.8.5 Deprivation lookup
 
 Hand-curated Welsh-postcode → WIMD-decile map in `DEFAULT_POSTCODE_DEPRIVATION`: CF10/CF23 (Cardiff affluent, 2–3), CF14/CF5 (mixed, 3–4), CF44/CF40/CF42 (Rhondda deprived, 8–9). Overridable in config.
 
-#### 9b.8.6 Integration
+#### A.8.6 Integration
 
 | Event                                         | What happens                                   |
 |-----------------------------------------------|------------------------------------------------|
@@ -2387,7 +2423,7 @@ Hand-curated Welsh-postcode → WIMD-decile map in `DEFAULT_POSTCODE_DEPRIVATION
 
 JSONL log at `data_cache/counterfactual_fairness/audits.jsonl`. §29 of `dissertation_analysis.R` reads it. No UI panel.
 
-#### 9b.8.7 Invariants (enforced by `tests/test_counterfactual_fairness.py`)
+#### A.8.7 Invariants (enforced by `tests/test_counterfactual_fairness.py`)
 
 - Patients with affluent-bucket postcodes are skipped (nothing to flip)
 - Unbiased cohort (single postcode) ⇒ `n_rejected == 0`
@@ -2398,19 +2434,21 @@ JSONL log at `data_cache/counterfactual_fairness/audits.jsonl`. §29 of `dissert
 
 ---
 
-### 9b.9 Auto-scaling Optimizer with Timeout Guarantees (§5.1)
+### A.9 Auto-scaling Optimizer with Timeout Guarantees (§5.1)
 
-#### 9b.9.1 Motivation
+#### A.9.1 Motivation
 
 CP-SAT solve time is structurally unpredictable — the same instance can take 0.1s or 30s depending on branching decisions. Hospital deployment requires hard timing guarantees, not a single optimistic budget.
 
-#### 9b.9.2 Three mechanisms (§5.1 brief)
+#### A.9.2 Three mechanisms (§5.1 brief)
 
 1. **Cascade**: try [5s, 2s, 1s, 0.5s] budgets sequentially; if all fail → greedy fallback.
 2. **Early stopping**: abort when `|objective - best_bound| / |objective| ≤ 0.01` (1% optimality gap).
-3. **Parallel search**: race 4 weight configurations in a ThreadPoolExecutor; take best by `(-n_scheduled, solve_time, config_name)` (deterministic tie-break).  Each worker calls the injected `solve_with_weights(patients, weights, time_limit)` callable so weights flow through as a per-call argument — workers never share mutable optimiser state, and no two workers can trample each other's weights mid-solve (T2.2 race fix).  When the host caller injects only the legacy `set_weights` callable (no `solve_with_weights`), the race serialises behind a single lock — correct but no parallelism, with a one-shot `auto-scaling parallel race degraded to serial` warning logged.
+3. **Parallel search**: race 4 weight configurations in a ThreadPoolExecutor; take best by `(-n_scheduled, solve_time, config_name)` (deterministic tie-break).  Each worker calls the injected `solve_with_weights(patients, weights, time_limit)` callable so weights flow through as a per-call argument — workers never share mutable optimiser state, and no two workers can trample each other's weights mid-solve.[^race-fix]  When the host caller injects only the legacy `set_weights` callable (no `solve_with_weights`), the race serialises behind a single lock — correct but no parallelism, with a one-shot `auto-scaling parallel race degraded to serial` warning logged.
 
-#### 9b.9.3 Weight configurations raced
+[^race-fix]: Earlier revisions used a `set_weights` callback that mutated the shared optimiser's internal state.  Worker B could overwrite the weights mid-solve for worker A, returning a result computed against the wrong configuration.  The current API exposes `solve_with_weights(patients, weights, time_limit)` so each worker carries its own configuration as an argument, eliminating cross-worker contamination by construction.
+
+#### A.9.3 Weight configurations raced
 
 | Config | priority | utilization | noshow_risk | waiting_time | robustness | travel |
 |--------|----------|-------------|-------------|--------------|------------|--------|
@@ -2421,11 +2459,11 @@ CP-SAT solve time is structurally unpredictable — the same instance can take 0
 
 All weights sum to 1.0.
 
-#### 9b.9.4 Greedy fallback
+#### A.9.4 Greedy fallback
 
 Priority-first placement: sort patients by `(priority ASC, earliest_time ASC)`; round-robin chairs from `DEFAULT_SITES`; place on first open slot with 5-minute slack between appointments. No overlap, respects chair count per site, obeys `day_start_hour=8` / `day_end_hour=18`. Always runs in <100ms for cohorts up to ~1000 patients.
 
-#### 9b.9.5 Integration
+#### A.9.5 Integration
 
 | Event                                    | What happens                                    |
 |------------------------------------------|-------------------------------------------------|
@@ -2437,7 +2475,7 @@ Priority-first placement: sort patients by `(priority ASC, earliest_time ASC)`; 
 
 JSONL log at `data_cache/auto_scaling/runs.jsonl`. §30 of `dissertation_analysis.R` reads it. No UI panel. Invisible integration: legacy `/api/optimize` keeps the single-solve path; auto-scaling is opt-in.
 
-#### 9b.9.6 Invariants (enforced by `tests/test_auto_scaling_optimizer.py`)
+#### A.9.6 Invariants (enforced by `tests/test_auto_scaling_optimizer.py`)
 
 - Successful parallel race returns `winner_stage == 'parallel'`
 - All CP-SAT attempts failing triggers greedy fallback: `winner_stage == 'greedy'` AND `greedy_fallback == True`
@@ -2446,17 +2484,17 @@ JSONL log at `data_cache/auto_scaling/runs.jsonl`. §30 of `dissertation_analysi
 - Greedy schedule: no chair overlaps, respects site capacity, priority-1 patient gets earliest slot
 - `early_stopped == True` iff solve_time < 0.9 × budget AND success
 - No base optimizer ⇒ falls straight through to greedy
-- **Race-isolation invariants (T2.2):** with `solve_with_weights` injected, four configs racing in parallel each observe their OWN weights — no cross-contamination (`TestParallelRaceWeightIsolation.test_per_call_weights_no_cross_contamination`), wall-time is dominated by ONE solve not all four (`...test_solve_with_weights_truly_parallel`); with the legacy `set_weights` path, max concurrent active solves is 1 (`...test_legacy_set_weights_serialises_under_lock`)
+- **Race-isolation invariants:** with `solve_with_weights` injected, four configs racing in parallel each observe their OWN weights — no cross-contamination (`TestParallelRaceWeightIsolation.test_per_call_weights_no_cross_contamination`), wall-time is dominated by ONE solve not all four (`...test_solve_with_weights_truly_parallel`); with the legacy `set_weights` path, max concurrent active solves is 1 (`...test_legacy_set_weights_serialises_under_lock`)
 
 ---
 
-### 9b.10 Human-in-the-Loop Override Learning (§5.2)
+### A.10 Human-in-the-Loop Override Learning (§5.2)
 
-#### 9b.10.1 Motivation
+#### A.10.1 Motivation
 
 The scheduler's throughput + fairness + safety guarantees mean nothing if clinicians don't trust it. §5.2 closes the feedback loop: every manual override is a fragment of preference data; the system should harvest, model, and preemptively suggest the clinician's preferred alternative.
 
-#### 9b.10.2 Event schema
+#### A.10.2 Event schema
 
 `OverrideEvent` dataclass:
 - `ts` (ISO UTC)
@@ -2468,7 +2506,7 @@ The scheduler's throughput + fairness + safety guarantees mean nothing if clinic
 
 Append-only JSONL log at `data_cache/override_learning/events.jsonl`.
 
-#### 9b.10.3 Prediction model
+#### A.10.3 Prediction model
 
 Features: `(hour_of_day, day_of_week, priority, duration_min, noshow_prob, site_idx)` — numeric only, 6-dim.
 
@@ -2490,7 +2528,7 @@ $$
 
 Cold start (before `min_events_for_fit`): returns `cold_start_prior` (default 0.10).
 
-#### 9b.10.4 Preemptive suggestion rule
+#### A.10.4 Preemptive suggestion rule
 
 For candidate alternatives $\mathcal{A}$ (default: ±1, ±2 hours on the same chair):
 
@@ -2511,7 +2549,7 @@ The two-clause rule combines:
 
 The "no improvement" guard means the system stays silent when it cannot propose anything better — bad advice is worse than no advice.
 
-#### 9b.10.5 Integration
+#### A.10.5 Integration
 
 | Event                                | What happens                                      |
 |--------------------------------------|---------------------------------------------------|
@@ -2524,7 +2562,7 @@ The "no improvement" guard means the system stays silent when it cannot propose 
 
 JSONL logs at `data_cache/override_learning/{events,suggestions}.jsonl`. §31 of `dissertation_analysis.R` reads them. No UI panel.
 
-#### 9b.10.6 Invariants (enforced by `tests/test_override_learning.py`)
+#### A.10.6 Invariants (enforced by `tests/test_override_learning.py`)
 
 - Cold start (events < `min_events_for_fit`) ⇒ predicted prob = `cold_start_prior`
 - Post-fit probabilities ∈ [0, 1]
@@ -2537,13 +2575,13 @@ JSONL logs at `data_cache/override_learning/{events,suggestions}.jsonl`. §31 of
 
 ---
 
-### 9b.11 Explainable Rejection Reports (§5.3)
+### A.11 Explainable Rejection Reports (§5.3)
 
-#### 9b.11.1 Motivation
+#### A.11.1 Motivation
 
 When CP-SAT cannot place a patient, today the only signal is a patient-id in `OptimizationResult.unscheduled`. §5.3 requires (i) a human-readable reason list per-chair and (ii) a concrete counterfactual alternative slot, matching the brief's template verbatim.
 
-#### 9b.11.2 Blocker taxonomy
+#### A.11.2 Blocker taxonomy
 
 Seven stable categories:
 
@@ -2559,7 +2597,7 @@ Seven stable categories:
 
 The bump classifier picks the **highest-priority** colliding appointment (lowest priority number) to match the brief's "would require bumping P1 patient" phrasing — the toughest swap to justify.
 
-#### 9b.11.3 Gap analysis per chair
+#### A.11.3 Gap analysis per chair
 
 For each chair, walk its appointments sorted by `start_time`:
 
@@ -2575,7 +2613,7 @@ trailing_gap = day_end − cursor
 
 Return `(best_slack, max_slack_any, colliding_appt)` where `best_slack` is the first gap >= duration, `max_slack_any` is the biggest gap seen at all (used for insufficient-slack detail even when none fit).
 
-#### 9b.11.4 Alternative-slot finder
+#### A.11.4 Alternative-slot finder
 
 Bounded forward scan:
 
@@ -2592,7 +2630,7 @@ return None
 
 Returns an `AlternativeSlot` with `chair_id`, `site_code`, `date`, `start_time`, `duration_minutes`, `wait_increase_minutes`, and a human-readable `narrative` like "Thursday 9am (24 h wait increase)".
 
-#### 9b.11.5 Narrative template
+#### A.11.5 Narrative template
 
 Renders the §5.3 brief pattern verbatim:
 
@@ -2606,7 +2644,7 @@ Patient {pid} (P{priority}, previous no-shows: {prev_ns}) not scheduled because:
 
 Top-3 blockers deduplicated by `(blocker_type, chair_id)`; when no alternative is found, the last line is `"No alternative within {N} days lookahead."`
 
-#### 9b.11.6 Integration
+#### A.11.6 Integration
 
 | Event                                | What happens                                        |
 |--------------------------------------|-----------------------------------------------------|
@@ -2619,7 +2657,7 @@ Top-3 blockers deduplicated by `(blocker_type, chair_id)`; when no alternative i
 
 JSONL log at `data_cache/rejection_explainer/explanations.jsonl`. §32 of `dissertation_analysis.R` reads it. No UI panel.
 
-#### 9b.11.7 Invariants (enforced by `tests/test_rejection_explainer.py`)
+#### A.11.7 Invariants (enforced by `tests/test_rejection_explainer.py`)
 
 - Narrative starts with exact brief header `"Patient {pid} (P{priority}, previous no-shows: {n}) not scheduled because:"`
 - Narrative ends with `"Alternative: offer ..."` or `"No alternative within {N} days lookahead."`
@@ -2631,13 +2669,13 @@ JSONL log at `data_cache/rejection_explainer/explanations.jsonl`. §32 of `disse
 
 ---
 
-### 9b.12 SACT Version Adapter (§5.4)
+### A.12 SACT Version Adapter (§5.4)
 
-#### 9b.12.1 Motivation
+#### A.12.1 Motivation
 
 NHS SACT v4.0 (May 2025) will be superseded by v4.1 (~2028) with new molecular-marker fields and a gender-code rename. The production pipeline must not break on that day. §5.4 demands an ABC-based adapter layer so downstream ML binds to a canonical schema, not to version-specific raw column names.
 
-#### 9b.12.2 ABC contract
+#### A.12.2 ABC contract
 
 ```python
 class SACTVersionAdapter(ABC):
@@ -2646,7 +2684,7 @@ class SACTVersionAdapter(ABC):
         """Return DataFrame with columns from CANONICAL_COLUMNS."""
 ```
 
-#### 9b.12.3 Canonical schema (24 columns, fixed point)
+#### A.12.3 Canonical schema (24 columns, fixed point)
 
 | Category | Columns |
 |----------|---------|
@@ -2658,24 +2696,24 @@ class SACTVersionAdapter(ABC):
 | External | Weather_Severity |
 | v4.1 forward-compat (empty on v4.0) | Molecular_Marker_Status, Biomarker_Panel_Code, Subcutaneous_Administration_Flag, Comorbidity_Count, Commissioning_Organisation_Code |
 
-#### 9b.12.4 Concrete adapters
+#### A.12.4 Concrete adapters
 
 - **`SACTv4Adapter`** (live): maps v4.0's 82 raw fields → 24 canonical columns via `SPEC_V4_0.canonical_map`. Handles both `Person_Stated_Gender_Code`/`Gender_Code`, `Ethnic_Category_Code`/`Ethnic_Category`, etc.
 
 - **`SACTv4_1Adapter`** (placeholder per §5.4 brief): inherits v4.0 mapping, adds v4.1's new fields and renamed columns (`Gender_Identity_Code` → `Gender_Code`, `Provider_Code` → `Commissioning_Organisation_Code`). Coerces `Subcutaneous_Administration_Flag` from Y/N/1/0 → Python bool.
 
-#### 9b.12.5 Auto-detection rule
+#### A.12.5 Auto-detection rule
 
 `auto_detect_version(raw_df)` iterates registered versions from highest to lowest. Picks the first version whose `expected_fields` ⊆ `raw_df.columns`. Falls back to v4.0 with a WARNING log if no version matches strictly.
 
 v4.0 signature: `{Patient_ID, Regimen_Code, Cycle_Number, Person_Stated_Gender_Code, Ethnic_Category_Code}`  
 v4.1 signature: `{Molecular_Marker_Status, Biomarker_Panel_Code, Gender_Identity_Code, Commissioning_Organisation_Code}`
 
-#### 9b.12.6 Registry
+#### A.12.6 Registry
 
 `ADAPTERS: Dict[str, SACTVersionAdapter]` + `SPECS: Dict[str, VersionSpec]` are the canonical lookups. Runtime registration via `register_adapter(version, adapter, spec)` lets third parties add v5.x adapters without touching core code.
 
-#### 9b.12.7 Integration
+#### A.12.7 Integration
 
 | Event                              | What happens                                                            |
 |------------------------------------|-------------------------------------------------------------------------|
@@ -2687,7 +2725,7 @@ v4.1 signature: `{Molecular_Marker_Status, Biomarker_Panel_Code, Gender_Identity
 
 JSONL log at `data_cache/sact_adapter/adapter_events.jsonl`. §33 of `dissertation_analysis.R` reads it. No UI panel.
 
-#### 9b.12.8 Invariants (enforced by `tests/test_sact_version_adapter.py`)
+#### A.12.8 Invariants (enforced by `tests/test_sact_version_adapter.py`)
 
 - `SACTVersionAdapter()` raises TypeError (ABC)
 - `CANONICAL_COLUMNS` is the set of output columns for **every** adapter, regardless of input version
@@ -2700,13 +2738,13 @@ JSONL log at `data_cache/sact_adapter/adapter_events.jsonl`. §33 of `dissertati
 
 ---
 
-### 9b.13 Stochastic MPC Scheduler (§5.5)
+### A.13 Stochastic MPC Scheduler (§5.5)
 
-#### 9b.13.1 Motivation
+#### A.13.1 Motivation
 
 The static optimiser produces a morning schedule; real-time disruption (urgent arrivals, cancellations, overruns) was previously handled by the deterministic squeeze-in heuristic. §5.5 replaces that with a receding-horizon controller that reacts optimally to same-day uncertainty.
 
-#### 9b.13.2 MDP formulation
+#### A.13.2 MDP formulation
 
 $$
 S_t = \left( \text{time}_t, \{\text{chair}_c^{(t)}\}_{c=1}^C, Q_t, \text{stats}_t \right)
@@ -2731,7 +2769,9 @@ $$
 
 with $b_{\text{complete}} = $ `DEFAULT_PRIORITY_COMPLETE_BASE` and $w_{\text{idle}} = $ `DEFAULT_IDLE_PENALTY`.  The multiplier is $(6 - \text{prio}_p)$ rather than $(5 - \text{prio}_p)$ — applied to $\text{prio}_p \in \{1,\dots,5\}$ this gives priority-1 (most urgent) the largest credit ($5 b_{\text{complete}}$) and priority-5 a positive but minimal credit ($1 \cdot b_{\text{complete}}$).  The +1 floor matters clinically: every completed chemotherapy session must be rewarded, even when the patient was lowest priority, otherwise the optimiser has no incentive to ever schedule routine cycles.  When a chair was already `OCCUPIED` at day-start (no captured priority), the formula falls back to $\text{prio}_p = 3$ (mid).
 
-`prio_p` is recovered from `ChairState.priority_at_assignment` (T2.1 fix), which the planner stamps onto the chair at `_apply_action` time and preserves across the `OCCUPIED→IDLE` transition for the duration of the step so the reward function can read it after the patient finishes.
+`prio_p` is recovered from `ChairState.priority_at_assignment`, the field that preserves the assigned patient's priority across the chair's `OCCUPIED→IDLE` transition.[^prio-stash] The planner stamps it onto the chair at `_apply_action` time and keeps the value live through one decision step so the reward function can credit a completion by the priority of the patient who finished, not by some downstream proxy.
+
+[^prio-stash]: Without this stashed field the reward code could only see whichever patient was queued for the chair *next*, since the completed patient's queue entry has already been removed by the time `compute_immediate_reward` runs.  Earlier revisions defaulted to a hard-coded mid-priority constant, which made the multi-objective formula insensitive to who finished — a priority-1 completion produced the same credit as a priority-5 completion.
 
 **Terminal penalty** at $t = H$:
 
@@ -2741,7 +2781,7 @@ $$
 
 with $u = $ `DEFAULT_TERMINAL_UNSCHEDULED_PENALTY`.  The $\max(\cdot, 1)$ floor mirrors the $(6 - \text{prio})$ choice in $R_t$: an unscheduled priority-5 patient still incurs a non-zero terminal penalty so the planner cannot park them indefinitely.
 
-#### 9b.13.3 MPC with scenario rollout
+#### A.13.3 MPC with scenario rollout
 
 $K$ scenarios sampled from the posterior $\lambda(t)$ and per-patient $(\pi, \gamma)$:
 
@@ -2756,7 +2796,7 @@ action* = argmax_a r_a
 
 Tie-break: deterministic on `(-n_assignments, config_name)` so replays are byte-identical.
 
-#### 9b.13.4 Terminal value function
+#### A.13.4 Terminal value function
 
 Linear feature combiner:
 
@@ -2766,7 +2806,7 @@ $$
 
 with $\mathbf{x}(S) = (n_{\text{queue,high}}, n_{\text{queue,low}}, n_{\text{idle}}, t/H, \text{cumwait}_{\text{h}}, \text{remaining\_cap})$ and default weights `[-4, -1, +2, -5, -1.5, +0.01]`. Operator can retrain offline on simulated days and swap in an MLP via JSON persistence.
 
-#### 9b.13.5 Bayesian urgent arrival model (Gamma-Poisson)
+#### A.13.5 Bayesian urgent arrival model (Gamma-Poisson)
 
 Prior: $\lambda \sim \text{Gamma}(\alpha_0, \beta_0)$. Observed $n$ arrivals in $\Delta$ minutes → posterior Gamma$(\alpha_0 + n, \beta_0 + \Delta)$. Posterior mean rate = $\alpha / \beta$ arrivals/min (60α/β per hour).
 
@@ -2779,11 +2819,11 @@ class UrgentArrivalModel:
 
 Persisted JSON at `data_cache/mpc_scheduler/arrival_model.json`.
 
-#### 9b.13.6 Fail-safe fallback
+#### A.13.6 Fail-safe fallback
 
 When total scenario-evaluation time exceeds `total_timeout_s` (default 500 ms) OR no candidate actions exist, controller falls back to the injected `fallback_fn` (squeeze-in handler in production) or priority-first greedy fill. The `MPCDecision` records `used_fallback=True` + `fallback_reason` so audits distinguish optimised vs degraded decisions.
 
-#### 9b.13.7 Integration
+#### A.13.7 Integration
 
 | Event                                | What happens                                              |
 |--------------------------------------|-----------------------------------------------------------|
@@ -2797,7 +2837,7 @@ When total scenario-evaluation time exceeds `total_timeout_s` (default 500 ms) O
 
 JSONL logs at `data_cache/mpc_scheduler/{events,decisions,simulations}.jsonl`. §34 of `dissertation_analysis.R` reads them. No UI panel.
 
-#### 9b.13.8 Invariants (enforced by `tests/test_stochastic_mpc_scheduler.py`)
+#### A.13.8 Invariants (enforced by `tests/test_stochastic_mpc_scheduler.py`)
 
 - Prior `UrgentArrivalModel(α=1,β=1)` ⇒ rate = 1.0 arrivals/min
 - `update(n, Δ)` ⇒ `α ← α+n`, `β ← β+Δ` (conjugate Gamma update)
@@ -2809,7 +2849,7 @@ JSONL logs at `data_cache/mpc_scheduler/{events,decisions,simulations}.jsonl`. �
 - Priority-1 patient in queue ⇒ assigned to first idle chair under greedy fill
 - `evaluate_action` returns finite reward + valid final state
 - `simulate_day` returns per-policy metrics with `0 ≤ urgent_acceptance_rate ≤ 1` and `utilisation ≤ 1`
-- **Priority-weighted completion credit (T2.1):** completing a priority-1 patient yields strictly more reward than completing a priority-5 patient, monotone across $\text{prio} \in \{1,\dots,5\}$ (`TestPriorityWeightedReward.test_priority_multiplier_is_monotone`)
+- **Priority-weighted completion credit:** completing a priority-1 patient yields strictly more reward than completing a priority-5 patient, monotone across $\text{prio} \in \{1,\dots,5\}$ (`TestPriorityWeightedReward.test_priority_multiplier_is_monotone`)
 - `ChairState.priority_at_assignment` is captured at `RolloutPlanner._apply_action` time and copied through `ChairState.copy()` (`TestPriorityWeightedReward.test_chairstate_copy_preserves_priority`)
 - A chair `OCCUPIED` at day-start with no captured priority falls back to mid-priority (3) and still produces a positive completion reward (`TestPriorityWeightedReward.test_missing_priority_defaults_to_mid`)
 
