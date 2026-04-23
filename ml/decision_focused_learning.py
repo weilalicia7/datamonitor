@@ -279,7 +279,12 @@ class DFLCalibrator:
             x0=np.array([1.0, 0.0]),             # identity warm-start
             jac=True,
             method='L-BFGS-B',
-            bounds=[(1e-4, 20.0), (-20.0, 20.0)],  # monotonicity + saturation clip
+            # Tightened bounds to prevent the bias from saturating at ±20
+            # (which destroys cross-entropy by collapsing every probability
+            # to ≈ 0 or ≈ 1).  The new bounds still let the calibration
+            # span ~95% of the sigmoid range (σ(±3) ≈ 0.05 / 0.95) and let
+            # the slope amplify by ≤ 5×.
+            bounds=[(1e-4, 5.0), (-3.0, 3.0)],
             options={'maxiter': max_iterations, 'ftol': tol, 'gtol': tol},
         )
         self.a = float(result.x[0])
