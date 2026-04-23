@@ -202,7 +202,7 @@ Comorbidities ────▶ Clinical_Complexity ─────┘
 
 | Validation Check | Method | Result |
 |------------------|--------|--------|
-| No-show rate | Mean comparison | 13.1% (target: 8-15%) |
+| No-show rate | Mean comparison | 13.3% (target: 8-15%) |
 | Duration variance | CV comparison | 18% (target: 15-25%) |
 | Age distribution | KS test | p > 0.05 (pass) |
 | Geographic spread | Chi-square | p > 0.05 (pass) |
@@ -713,7 +713,7 @@ Subject to:
 
 | Metric | Target | Achieved | Status |
 |--------|--------|----------|--------|
-| No-show rate | 8-15% | 13.1% | PASS |
+| No-show rate | 8-15% | 13.3% | PASS |
 | Duration CV | 15-25% | 18.2% | PASS |
 | Age mean | 60-65 | 62.3 | PASS |
 | Travel time mean | 25-35 min | 28.7 min | PASS |
