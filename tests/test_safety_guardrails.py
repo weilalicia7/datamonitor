@@ -332,3 +332,101 @@ class TestSerialization:
         back = json.loads(dumped)
         assert back['verdict'] in {VERDICT_ACCEPT, VERDICT_WARN, VERDICT_REJECT}
         assert isinstance(back['violations'], list)
+
+
+# --------------------------------------------------------------------------- #
+# 11. Verdict invariants — regression for §4.5.14 contradiction
+# --------------------------------------------------------------------------- #
+
+
+class TestVerdictInvariants:
+    """
+    Regression for the dissertation §4.5.14 finding: rendered prose said
+    'monitor returns ACCEPT with 0 CRITICAL' AND 'narrative: REJECT — 1
+    total violations' on the same example.  The runtime is internally
+    consistent (verdict and narrative both come from the same evaluate()
+    call), but the dissertation prose mixed a macro-driven verdict line
+    with a hardcoded REJECT narrative.
+
+    Lock the runtime invariants so any code change that breaks
+    verdict ↔ violation-count consistency fails loudly here long before
+    a stale narrative can ever land in the dissertation again:
+
+        verdict == REJECT  iff  n_critical > 0
+        verdict == WARN    iff  n_critical == 0 and (n_high + n_moderate) > 0
+        verdict == ACCEPT  iff  n_critical == n_high == n_moderate == 0
+
+    The narrative string MUST also start with the verdict it reports —
+    a UPPER-cased verdict word as the first token after the prefix.
+    """
+
+    @pytest.mark.parametrize("priority,second_hh,second_mm,expected", [
+        (1,  9, 31, VERDICT_REJECT),   # priority-1 with 1-min slack → critical_slack_floor
+        (3, 10, 30, VERDICT_ACCEPT),   # routine appt, 60-min gap, well clear of all rules
+    ])
+    def test_verdict_matches_critical_count(
+        self, monitor, priority, second_hh, second_mm, expected
+    ):
+        appts = [
+            _appt('A', 'WC-C01', 'WC', 9, 0, 30),
+            _appt('B', 'WC-C01', 'WC', second_hh, second_mm, 30, priority=priority),
+        ]
+        r = monitor.evaluate(appts, [_patient('A'), _patient('B')])
+        assert r.verdict == expected
+        # Core invariant: REJECT iff n_critical > 0
+        if r.verdict == VERDICT_REJECT:
+            assert r.n_critical > 0, (
+                f"REJECT verdict with n_critical={r.n_critical} — invariant broken"
+            )
+        else:
+            assert r.n_critical == 0, (
+                f"Non-reject verdict {r.verdict!r} with n_critical={r.n_critical}"
+            )
+
+    def test_warn_iff_no_critical_but_high_or_moderate(self, monitor):
+        # 4-hour infusion starting at 14:00 trips long_infusion_cutoff (HIGH)
+        appts = [
+            _appt('A', 'WC-C01', 'WC', 14, 0, 240, priority=3),
+        ]
+        r = monitor.evaluate(appts, [_patient('A')])
+        assert r.verdict == VERDICT_WARN
+        assert r.n_critical == 0
+        assert r.n_high + r.n_moderate > 0
+
+    def test_accept_iff_all_severity_buckets_zero(self, monitor):
+        appts = [
+            _appt('A', 'WC-C01', 'WC', 9, 0, 30),
+            _appt('B', 'WC-C02', 'WC', 9, 30, 30),
+        ]
+        r = monitor.evaluate(appts, [_patient('A'), _patient('B')])
+        assert r.verdict == VERDICT_ACCEPT
+        assert r.n_critical == 0 and r.n_high == 0 and r.n_moderate == 0
+
+    def test_narrative_first_word_matches_verdict(self, monitor):
+        """
+        The narrative MUST start with the same verdict it reports.  This
+        is what would have caught the dissertation prose desync at the
+        runtime level: any narrative whose leading verdict token disagrees
+        with the report.verdict field is a bug.
+        """
+        # Force a REJECT case (priority-1 with sub-floor slack)
+        appts = [
+            _appt('A', 'WC-C01', 'WC', 9, 0, 30),
+            _appt('B', 'WC-C01', 'WC', 9, 31, 30, priority=1),
+        ]
+        r = monitor.evaluate(appts, [_patient('A'), _patient('B')])
+        assert r.verdict == VERDICT_REJECT
+        # Narrative starts with "Safety guardrails: REJECT --" or similar.
+        assert (
+            'REJECT' in r.narrative.split('--')[0]
+            or 'reject' in r.narrative.split('--')[0].lower()
+        ), f"REJECT verdict but narrative does not begin with REJECT: {r.narrative!r}"
+
+        # Force an ACCEPT case
+        appts2 = [_appt('A', 'WC-C01', 'WC', 9, 0, 30)]
+        r2 = monitor.evaluate(appts2, [_patient('A')])
+        assert r2.verdict == VERDICT_ACCEPT
+        assert (
+            'ACCEPT' in r2.narrative.split('--')[0]
+            or 'accept' in r2.narrative.split('--')[0].lower()
+        ), f"ACCEPT verdict but narrative does not begin with ACCEPT: {r2.narrative!r}"
