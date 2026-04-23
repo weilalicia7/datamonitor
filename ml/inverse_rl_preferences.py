@@ -75,6 +75,25 @@ IRL_HISTORY_FILE: Path = DATA_CACHE_DIR / 'irl_weights_history.jsonl'
 # actual clinician overrides start streaming in.
 BOOTSTRAP_N_DEFAULT: int = 200
 
+# Latent "Velindre-style truth" weight vector used to fabricate synthetic
+# overrides during cold-start.  MUST stay aligned with OBJECTIVE_KEYS:
+# index 0 = priority, 1 = utilization, 2 = noshow_risk, 3 = waiting_time,
+# 4 = robustness, 5 = travel.  Sum must be 1.00 — enforced at import time
+# below and by tests/test_irl_preferences.py::test_bootstrap_prior_is_well_formed.
+# Cited verbatim in dissertation §4.5.3 and MATH_LOGIC.md §A.10, so a length
+# or sum mismatch silently desynchronises three different documents.
+BOOTSTRAP_PRIOR: np.ndarray = np.array(
+    [0.35, 0.10, 0.25, 0.20, 0.05, 0.05], dtype=float,
+)
+assert len(BOOTSTRAP_PRIOR) == len(OBJECTIVE_KEYS), (
+    f"BOOTSTRAP_PRIOR has {len(BOOTSTRAP_PRIOR)} entries but OBJECTIVE_KEYS "
+    f"has {len(OBJECTIVE_KEYS)} — these MUST match (one weight per objective)."
+)
+assert abs(float(BOOTSTRAP_PRIOR.sum()) - 1.0) < 1e-9, (
+    f"BOOTSTRAP_PRIOR sums to {float(BOOTSTRAP_PRIOR.sum()):.6f}, must be 1.0 — "
+    f"the values are interpreted as a probability simplex."
+)
+
 # L2 prior strength pulling θ toward uniform — tuned so that with 20
 # real overrides the prior contributes ≈ 1 effective sample.
 L2_LAMBDA_DEFAULT: float = 0.05
@@ -346,7 +365,7 @@ class InverseRLPreferenceLearner:
         true = (
             np.asarray(true_theta, dtype=float)
             if true_theta is not None
-            else np.array([0.35, 0.10, 0.25, 0.20, 0.05, 0.05])
+            else BOOTSTRAP_PRIOR.copy()
         )
         true = true / true.sum()
 

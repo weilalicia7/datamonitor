@@ -24,6 +24,7 @@ import numpy as np
 
 from ml.inverse_rl_preferences import (
     OBJECTIVE_KEYS,
+    BOOTSTRAP_PRIOR,
     InverseRLPreferenceLearner,
     ObjectiveFeatures,
     compute_objective_features,
@@ -78,6 +79,56 @@ class TestObjectiveFeatures(unittest.TestCase):
         np.testing.assert_allclose(f.as_array(), vec)
 
 
+class TestBootstrapPrior(unittest.TestCase):
+    """
+    Regression for §4.5.3 review finding: dissertation reviewer counted
+    only 5 entries in the bootstrap prior summing to 0.95 (the rendered
+    PDF was truncating the 6th entry due to an overfull hbox; the source
+    array always had 6).  Lock the structural invariants so any silent
+    regression — code drops a dim, weights stop summing to 1 — fails
+    loudly here long before it can re-appear in the dissertation.
+    """
+
+    def test_bootstrap_prior_length_matches_objective_keys(self):
+        self.assertEqual(
+            len(BOOTSTRAP_PRIOR), len(OBJECTIVE_KEYS),
+            f"BOOTSTRAP_PRIOR has {len(BOOTSTRAP_PRIOR)} weights but "
+            f"OBJECTIVE_KEYS has {len(OBJECTIVE_KEYS)} objectives — these "
+            f"MUST match (one weight per objective)."
+        )
+
+    def test_bootstrap_prior_sums_to_one(self):
+        s = float(BOOTSTRAP_PRIOR.sum())
+        self.assertAlmostEqual(
+            s, 1.0, places=9,
+            msg=f"BOOTSTRAP_PRIOR sums to {s:.6f}, must be 1.0 — values "
+                f"are interpreted as a probability simplex."
+        )
+
+    def test_bootstrap_prior_all_nonnegative(self):
+        self.assertTrue(
+            (BOOTSTRAP_PRIOR >= 0).all(),
+            f"BOOTSTRAP_PRIOR has negative entries: {BOOTSTRAP_PRIOR}"
+        )
+
+    def test_bootstrap_prior_values_match_documented(self):
+        """
+        Lock the exact values cited by dissertation §4.5.3 and
+        MATH_LOGIC.md §A.10 so any code-side change forces a doc update.
+        """
+        np.testing.assert_allclose(
+            BOOTSTRAP_PRIOR,
+            np.array([0.35, 0.10, 0.25, 0.20, 0.05, 0.05]),
+            atol=0.0,
+            err_msg=(
+                "BOOTSTRAP_PRIOR has drifted from the documented values. "
+                "If you intended this, update dissertation §4.5.3 + "
+                "MATH_LOGIC.md §A.10 + dissertation_analysis.R macro "
+                "emission to match the new vector."
+            ),
+        )
+
+
 class TestIRLLearner(unittest.TestCase):
 
     def setUp(self):
@@ -110,7 +161,7 @@ class TestIRLLearner(unittest.TestCase):
         """The key IRL invariant: after fitting, the learner should
         correctly predict the manual schedule as preferred on held-out
         synthetic overrides drawn from the same generating process."""
-        true_theta = np.array([0.35, 0.10, 0.25, 0.20, 0.05, 0.05])
+        true_theta = BOOTSTRAP_PRIOR.copy()
         self.learner.seed_bootstrap(n=400, true_theta=true_theta)
         fit = self.learner.fit(bootstrap_if_empty=False, min_real_overrides=0)
         self.assertTrue(fit.converged)

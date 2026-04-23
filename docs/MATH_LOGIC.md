@@ -985,7 +985,19 @@ w_k  =  θ̃_k / Σ_j θ̃_j        ← drop-in replacement for OPTIMIZATION_WEI
 
 #### 2.13.6 Bootstrap for Cold Start
 
-When the override log has < 20 real entries, the learner auto-seeds N = 200 synthetic pairs drawn from a latent clinician truth θ*_boot = (0.35, 0.10, 0.25, 0.20, 0.05, 0.05). Synthetic overrides are flagged (`source="synthetic"`) and are eventually outweighed by real data as the system accumulates history.
+When the override log has < 20 real entries, the learner auto-seeds N = 200 synthetic pairs drawn from a latent clinician truth (`BOOTSTRAP_PRIOR` in `ml/inverse_rl_preferences.py`):
+
+| index | objective       | weight |
+|-------|-----------------|--------|
+| 0     | priority        | 0.35   |
+| 1     | utilization     | 0.10   |
+| 2     | noshow_risk     | 0.25   |
+| 3     | waiting_time    | 0.20   |
+| 4     | robustness      | 0.05   |
+| 5     | travel          | 0.05   |
+| **Σ** |                 | **1.00** |
+
+The vector has exactly six entries (one per objective in `OBJECTIVE_KEYS`) and sums to 1.0; both invariants are asserted at module import time and locked by `tests/test_irl_preferences.py::TestBootstrapPrior` so a silent shape regression cannot desynchronise the dissertation, this document, and the code. Synthetic overrides are flagged (`source="synthetic"`) and are eventually outweighed by real data as the system accumulates history.
 
 #### 2.13.7 Persistence & API
 
