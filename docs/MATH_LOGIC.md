@@ -26,14 +26,36 @@ This document describes all mathematical formulas, algorithms, and optimization 
 
 ### Core Models
 1. [Data Requirements (SACT v4.0)](#1-data-requirements)
-2. [Constraint Programming Optimization](#2-constraint-programming-optimization) — CP-SAT with 6 objectives + fairness constraints + warm-start hints (2.10) + GNN pre-filter (2.11) + column generation (2.12)
+2. [Constraint Programming Optimization](#2-constraint-programming-optimization) — CP-SAT with 6 objectives + fairness constraints
+   - 2.10 [Warm-Start with Solution Hints](#210-warm-start-with-solution-hints)
+   - 2.11 [GNN Feasibility Pre-Filter](#211-gnn-feasibility-pre-filter)
+   - 2.12 [Column Generation for Large Instances](#212-column-generation-for-large-instances)
+   - 2.13 [Multi-Objective with Learned Preferences (Inverse RL)](#213-multi-objective-with-learned-preferences-inverse-rl)
 3. [No-Show Prediction Model](#3-no-show-prediction-model) — Stacked Ensemble (RF + GB + XGBoost)
+   - 3.6 [RNN Sequence Model for Patient History](#36-rnn-sequence-model-for-patient-history)
+   - 3.7 [Decision-Focused Learning (SPO+)](#37-decision-focused-learning-smart-predict-then-optimise)
+   - 3.8 [Temporal Fusion Transformer](#38-temporal-fusion-transformer-joint-multi-output)
 4. [Duration Prediction Model](#4-duration-prediction-model) — Protocol-specific with variance
 5. [Feature Engineering](#5-feature-engineering) — 80+ features in 5 categories
 6. [Travel Time Estimation](#6-travel-time-estimation)
 7. [Risk Scoring](#7-risk-scoring)
 8. [Performance Metrics](#8-performance-metrics)
 9. [Urgent Patient Insertion](#9-urgent-patient-insertion) — Squeeze-in with robustness-aware scoring (9.8)
+
+### Production-Grade Subsystems (v5.0 §9b.x)
+- 9b.1 [Online Feature Store](#9b1-online-feature-store-31--streaming-ml)
+- 9b.2 [Micro-Batch Optimizer](#9b2-micro-batch-optimizer-32--three-tier-orchestration)
+- 9b.3 [Digital Twin (What-If Simulation)](#9b3-digital-twin-33--what-if-simulation)
+- 9b.4 [Drift Root-Cause Attribution](#9b4-drift-root-cause-attribution-34)
+- 9b.5 [Distributionally Robust Fairness (DRO)](#9b5-distributionally-robust-fairness-41)
+- 9b.6 [Individual (Lipschitz) Fairness](#9b6-individual-lipschitz-fairness-42)
+- 9b.7 [Safety Guardrails with Runtime Monitoring](#9b7-safety-guardrails-with-runtime-monitoring-43)
+- 9b.8 [Counterfactual Fairness Audit](#9b8-counterfactual-fairness-audit-44)
+- 9b.9 [Auto-scaling Optimizer with Timeout Guarantees](#9b9-auto-scaling-optimizer-with-timeout-guarantees-51)
+- 9b.10 [Human-in-the-Loop Override Learning](#9b10-human-in-the-loop-override-learning-52)
+- 9b.11 [Explainable Rejection Reports](#9b11-explainable-rejection-reports-53)
+- 9b.12 [SACT Version Adapter](#9b12-sact-version-adapter-54)
+- 9b.13 [Stochastic MPC Scheduler](#9b13-stochastic-mpc-scheduler-55)
 
 ### Advanced ML Models (v2.0)
 10. [Survival Analysis (Cox Proportional Hazards)](#10-survival-analysis)
@@ -47,7 +69,7 @@ This document describes all mathematical formulas, algorithms, and optimization 
 16. [Instrumental Variables (2SLS)](#16-instrumental-variables)
 17. [Double Machine Learning](#17-double-machine-learning)
 18. [Event Impact Model](#18-event-impact-model)
-19. [Conformal Prediction](#19-conformal-prediction)
+19. [Conformal Prediction](#19-conformal-prediction) — incl. 19.10 Risk-Adaptive α
 20. [Monte Carlo Dropout](#20-monte-carlo-dropout)
 
 ### Auto-Learning & Data Pipeline (v3.0)
@@ -677,7 +699,7 @@ Column generation activates automatically when `len(patients) > COLUMN_GEN_THRES
 }
 ```
 
-### 2.13 Multi-Objective with Learned Preferences (Inverse RL) — §1.4
+### 2.13 Multi-Objective with Learned Preferences (Inverse RL)
 
 #### 2.13.1 Motivation
 
@@ -1070,9 +1092,9 @@ The sequence model is most beneficial for:
 - Detecting behavior changes (e.g., patient becoming unreliable)
 - Capturing seasonal patterns in individual patient behavior
 
-### 3.6 Decision-Focused Learning (§2.1 — Smart Predict-then-Optimise)
+### 3.7 Decision-Focused Learning (Smart Predict-then-Optimise)
 
-#### 3.6.1 Motivation
+#### 3.7.1 Motivation
 
 Standard cross-entropy training makes the ensemble **statistically accurate**, but scheduling cost depends on the **decision** taken on the back of the prediction (assign a dedicated slot vs. double-book):
 
@@ -1081,7 +1103,7 @@ Standard cross-entropy training makes the ensemble **statistically accurate**, b
 
 Decision-focused learning (DFL) closes this gap by training on the scheduling cost itself — the gap flagged by Elmachtoub & Grigas (2022) and by the blackbox-solver-gradient route of Wilder et al. (2019).
 
-#### 3.6.2 Calibration head
+#### 3.7.2 Calibration head
 
 A two-parameter head sits on top of the XGBoost / GB / RF ensemble:
 
@@ -1091,7 +1113,7 @@ g(p) = σ( a · logit(p) + b ),    a ≥ 0
 
 The non-negativity constraint on `a` keeps the calibration monotone so the ordering of patients by no-show risk (used by the squeeze-in double-booking score in §9.3) is preserved.
 
-#### 3.6.3 Smooth decision-cost surrogate
+#### 3.7.3 Smooth decision-cost surrogate
 
 ```
 c̃(p, y; τ, β) = (1 − σ_τ(p)) · y · C_waste  +  σ_τ(p) · (1 − y) · C_crowd
@@ -1103,9 +1125,9 @@ c̃(p, y; τ, β) = (1 − σ_τ(p)) · y · C_waste  +  σ_τ(p) · (1 − y) �
 - `C_waste = 100 · w_utilization` — cost of an empty chair when patient no-shows
 - `C_crowd = 100 · w_robustness` — cost of crowding when a predicted-risky patient attends
 
-Both cost constants are derived from the current `OPTIMIZATION_WEIGHTS` (fixed prior or learned θ from §1.4) so the DFL loss stays consistent with whatever Pareto point the optimiser is using.
+Both cost constants are derived from the current `OPTIMIZATION_WEIGHTS` (fixed prior or learned θ from §2.13) so the DFL loss stays consistent with whatever Pareto point the optimiser is using.
 
-#### 3.6.4 SPO+ gradient
+#### 3.7.4 SPO+ gradient
 
 The SPO+ loss of Elmachtoub & Grigas (2022) for a threshold decision reduces exactly to `c̃` above, so the gradient w.r.t. `(a, b)` is analytic:
 
@@ -1116,7 +1138,7 @@ The SPO+ loss of Elmachtoub & Grigas (2022) for a threshold decision reduces exa
 
 Fitted by projected gradient descent with an L2 prior pulling `(a, b)` toward identity `(1, 0)`. No CP-SAT call inside the training loop — the Wilder et al. (2019) blackbox-perturbation route is reserved for a future upgrade if the head is lifted to a deeper MLP.
 
-#### 3.6.5 Integration
+#### 3.7.5 Integration
 
 | File | Purpose |
 |------|---------|
@@ -1135,7 +1157,7 @@ Endpoints:
 | `/api/ml/dfl/train` | POST | Fit head on historical Attended_Status outcomes |
 | `/api/ml/dfl/reset` | POST | Revert to identity calibration |
 
-### 3.7 Temporal Fusion Transformer (§2.3 — joint multi-output)
+### 3.8 Temporal Fusion Transformer (joint multi-output)
 
 A single attention-based model that replaces the 3-pillar stack
 (tree ensemble + sequence GRU + multi-task MLP) when fitted.
@@ -1187,7 +1209,7 @@ Endpoints:
 
 **Native quantiles** — the duration head outputs τ ∈ {0.1, 0.5, 0.9} directly, so the TFT duration predictions carry their own 10/50/90 interval without an external CQR wrapper. The adaptive-α machinery in §3.6 still applies to the tree ensemble conformal pipeline; the TFT simply provides an alternative uncertainty channel.
 
-No UI panel — feature runs invisibly; when TFT is unfitted, the pipeline is bit-identical to the pre-§2.3 code.
+No UI panel — feature runs invisibly; when TFT is unfitted, the pipeline is bit-identical to the pre-TFT code.
 
 ---
 
@@ -3987,7 +4009,7 @@ result = noshow_predictor.predict(patient_features)
 # }
 ```
 
-### 19.10 Risk-Adaptive α (§2.2 — Dissertation)
+### 19.10 Risk-Adaptive α
 
 #### 19.10.1 Motivation
 
@@ -4723,27 +4745,27 @@ $$P(U < U_{\text{threshold}}) = \frac{|\{k : U_k < 0.5\}|}{K}$$
 23. Hadid, M., et al. (2022). Clustering and stochastic simulation optimisation for outpatient chemotherapy appointment planning and scheduling. *International Journal of Environmental Research and Public Health*, 19(23), p.15539. doi:10.3390/ijerph192315539
 
 ### Drift Detection & Monitoring
-22. Siddiqi, N. (2006). Credit Risk Scorecards: PSI and CSI
-23. Page, E. S. (1954). Continuous Inspection Schemes. *Biometrika*
+24. Siddiqi, N. (2006). Credit Risk Scorecards: PSI and CSI
+25. Page, E. S. (1954). Continuous Inspection Schemes. *Biometrika*
 
 ### Sensitivity Analysis
-24. Saltelli, A., et al. (2008). Global Sensitivity Analysis: The Primer. *Wiley*
-25. Sobol', I. M. (1993). Sensitivity Estimates for Nonlinear Mathematical Models. *MMCE*
+26. Saltelli, A., et al. (2008). Global Sensitivity Analysis: The Primer. *Wiley*
+27. Sobol', I. M. (1993). Sensitivity Estimates for Nonlinear Mathematical Models. *MMCE*
 
 ### Model Transparency & Fairness
-26. Mitchell, M., et al. (2019). Model Cards for Model Reporting. *FAT\* Conference*
-27. NHS England (2023). A Buyer's Guide to AI in Health and Care
-28. Barocas, S. & Selbst, A. (2016). Big Data's Disparate Impact. *California Law Review*
-29. Equality Act 2010 (UK). Protected characteristics and discrimination
-30. Chen, R.J., et al. (2023). Algorithmic fairness in artificial intelligence for medicine and healthcare. *Nature Biomedical Engineering*, 7(6), pp.719–742. doi:10.1038/s41551-023-01056-8
+28. Mitchell, M., et al. (2019). Model Cards for Model Reporting. *FAT\* Conference*
+29. NHS England (2023). A Buyer's Guide to AI in Health and Care
+30. Barocas, S. & Selbst, A. (2016). Big Data's Disparate Impact. *California Law Review*
+31. Equality Act 2010 (UK). Protected characteristics and discrimination
+32. Chen, R.J., et al. (2023). Algorithmic fairness in artificial intelligence for medicine and healthcare. *Nature Biomedical Engineering*, 7(6), pp.719–742. doi:10.1038/s41551-023-01056-8
 
 ### Reinforcement Learning
-30. Watkins, C. J. C. H. & Dayan, P. (1992). Q-Learning. *Machine Learning*
-31. Sutton, R. S. & Barto, A. G. (2018). Reinforcement Learning: An Introduction
+33. Watkins, C. J. C. H. & Dayan, P. (1992). Q-Learning. *Machine Learning*
+34. Sutton, R. S. & Barto, A. G. (2018). Reinforcement Learning: An Introduction
 
 ### Causal Validation
-32. Imbens, G. W. & Rubin, D. B. (2015). Causal Inference for Statistics
-33. Rosenbaum, P. R. (2002). Observational Studies. *Springer*
+35. Imbens, G. W. & Rubin, D. B. (2015). Causal Inference for Statistics
+36. Rosenbaum, P. R. (2002). Observational Studies. *Springer*
 
 ---
 

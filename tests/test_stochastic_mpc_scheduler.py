@@ -554,13 +554,22 @@ class TestEdgeCases:
         """The highest-priority patient (P001) should land on an idle
         chair regardless of whether we sample 1 or 100 scenarios —
         scenario count should not change the top pick when rewards are
-        deterministic in priority."""
+        deterministic in priority.  Both controllers use seeded
+        ScenarioSamplers so the test is reproducible (otherwise
+        unseeded RNGs occasionally produce a tied argmax that picks
+        a different chair, flaking the assertion)."""
+        sampler1 = ScenarioSampler(
+            arrival_model=arrival_model, n_scenarios=1, rng_seed=0,
+        )
+        sampler100 = ScenarioSampler(
+            arrival_model=arrival_model, n_scenarios=100, rng_seed=0,
+        )
         c1 = MPCController(
-            arrival_model=arrival_model, n_scenarios=1,
+            arrival_model=arrival_model, sampler=sampler1, n_scenarios=1,
             lookahead_minutes=60, storage_dir=tmp_mpc_dir / "n1",
         )
         c100 = MPCController(
-            arrival_model=arrival_model, n_scenarios=100,
+            arrival_model=arrival_model, sampler=sampler100, n_scenarios=100,
             lookahead_minutes=60,
             total_timeout_s=30.0,      # allow 100 scenarios to finish
             storage_dir=tmp_mpc_dir / "n100",
