@@ -157,6 +157,62 @@ class TestReproducibilityArtefacts(unittest.TestCase):
                       "Taskesen AISTATS 2021 bibitem key missing "
                       "(added per external-review point 2)")
 
+    def test_every_ref_target_has_matching_label(self):
+        """Regression for external-review point 3 (§5.6.5 cited
+        §4.5.1 for DRO fairness penalties, but §4.5.1 is about the
+        basic CP-SAT implementation).  Catches the failure mode where
+        a `\\ref{key}`/`\\autoref{key}`/`\\eqref{key}` exists with no
+        matching `\\label{key}` — which would render `??` in the PDF.
+
+        Also asserts specific labels introduced for the §5.6.5 fix
+        actually resolve, so a future edit cannot silently revert the
+        repair.
+        """
+        import re
+
+        tex_path = _REPO_ROOT.parent / "dissertation" / "main.tex"
+        if not tex_path.exists():
+            self.skipTest("dissertation/main.tex not present (outside repo)")
+        text = tex_path.read_text(encoding="utf-8")
+
+        # Collect every cross-reference target used in the prose
+        referenced: set = set()
+        # \ref{x}, \autoref{x}, \eqref{x}, \pageref{x}, \cref{x},
+        # \Cref{x} all expand to a label lookup
+        ref_pattern = re.compile(
+            r"\\(?:ref|autoref|eqref|pageref|cref|Cref)\{([^}]+)\}",
+            re.IGNORECASE,
+        )
+        for m in ref_pattern.finditer(text):
+            # Multi-key refs are rare but possible: \cref{a,b,c}
+            for key in m.group(1).split(","):
+                key = key.strip()
+                if key:
+                    referenced.add(key)
+
+        # Collect every \label{key} in the prose
+        defined: set = set()
+        for m in re.finditer(r"\\label\{([^}]+)\}", text):
+            defined.add(m.group(1).strip())
+
+        missing = sorted(referenced - defined)
+        self.assertFalse(
+            missing,
+            f"{len(missing)} \\ref target(s) have no matching "
+            f"\\label in main.tex: {missing[:10]}"
+            f"{'...' if len(missing) > 10 else ''}",
+        )
+
+        # Specific anchors the §5.6.5 fix relies on — the DRO fairness
+        # label must exist and be the target the fairness-mitigation
+        # prose cites.
+        self.assertIn("sec:dro-fairness", defined,
+                      "sec:dro-fairness label missing — §5.6.5 "
+                      "fix for external-review point 3 relies on it")
+        self.assertIn("sec:fairness-mitigation", defined,
+                      "sec:fairness-mitigation label missing — §5.6.5 "
+                      "prose cannot self-reference its own subsection")
+
 
 if __name__ == "__main__":
     unittest.main()
