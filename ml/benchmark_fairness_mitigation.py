@@ -147,23 +147,39 @@ def _build_chairs(n_chairs: int):
 def _worst_ratio(auditor, audit_rows, scheduled_ids, group_column):
     """Run the fairness auditor over ``group_column`` and return the
     worst (smallest) Four-Fifths ratio across all group pairs.  A
-    ratio of 1.0 means perfect parity; < 0.80 fails the rule."""
-    report = auditor.audit_schedule(audit_rows, scheduled_ids, group_column=group_column)
+    ratio of 1.0 means perfect parity; < 0.80 fails the rule.
+
+    For ``Gender`` we drop rows with value 'unknown' (from the
+    SACT v4.0 Person_Stated_Gender_Code = 0 or 9 "not stated" bucket)
+    — that is missing data, not a protected class.  The hard
+    equalised-odds constraint in ``ScheduleOptimizer`` uses the
+    same filter (n >= 3 per group) so the audit and the constraint
+    see the same comparison pairs.
+    """
+    if group_column == "Gender":
+        filtered = [r for r in audit_rows if r.get("Gender") != "unknown"]
+    else:
+        filtered = audit_rows
+    report = auditor.audit_schedule(filtered, scheduled_ids, group_column=group_column)
     ratios = [m.ratio for m in report.metrics if m.ratio is not None]
     return min(ratios) if ratios else 1.0
 
 
 def _run_arm(
-    patients, audit_rows, chairs, *, fairness_enabled: bool,
+    patients, audit_rows, chairs, *,
+    fairness_mode: str,           # "none" | "soft" | "hard"
     time_limit_s: float,
 ) -> Dict:
-    """One scheduling pass with fairness constraints on/off."""
+    """One scheduling pass with a specific fairness-constraint mode."""
     from optimization.optimizer import ScheduleOptimizer
     from ml.fairness_audit import FairnessAuditor
 
     opt = ScheduleOptimizer()
     opt.chairs = chairs
-    opt._fairness_constraints_enabled = fairness_enabled
+    opt._fairness_mode = fairness_mode
+    # Back-compat mirror so legacy code paths reading this flag see
+    # the same enabled/disabled verdict.
+    opt._fairness_constraints_enabled = (fairness_mode != "none")
     # Don't route to column generation — we want the monolithic CP-SAT
     # path which is where the fairness penalties live.
     opt._cg_enabled = False
@@ -182,7 +198,8 @@ def _run_arm(
     }
 
     return {
-        "fairness_enabled": bool(fairness_enabled),
+        "fairness_mode": fairness_mode,
+        "fairness_enabled": bool(fairness_mode != "none"),
         "solve_time_s": float(dt),
         "utilisation": float(utilisation),
         "n_scheduled": int(len(scheduled_ids)),
@@ -203,14 +220,21 @@ def benchmark(
           flush=True)
 
     arm_off = _run_arm(patients, audit_rows, chairs,
-                       fairness_enabled=False, time_limit_s=time_limit_s)
-    print(f"  OFF: util={arm_off['utilisation']:.3f}  "
+                       fairness_mode="none", time_limit_s=time_limit_s)
+    print(f"  OFF : util={arm_off['utilisation']:.3f}  "
           f"worst ratios = {arm_off['worst_four_fifths_ratio']}",
           flush=True)
     arm_on = _run_arm(patients, audit_rows, chairs,
-                      fairness_enabled=True, time_limit_s=time_limit_s)
-    print(f"  ON : util={arm_on['utilisation']:.3f}  "
+                      fairness_mode="soft", time_limit_s=time_limit_s)
+    print(f"  SOFT: util={arm_on['utilisation']:.3f}  "
           f"worst ratios = {arm_on['worst_four_fifths_ratio']}",
+          flush=True)
+    # §5.6.2 Improvement D — hard equalised-odds constraint arm
+    arm_hard = _run_arm(patients, audit_rows, chairs,
+                        fairness_mode="hard", time_limit_s=time_limit_s)
+    print(f"  HARD: util={arm_hard['utilisation']:.3f}  "
+          f"worst ratios = {arm_hard['worst_four_fifths_ratio']}  "
+          f"status = {arm_hard['status']}",
           flush=True)
 
     deltas = {
@@ -218,9 +242,17 @@ def benchmark(
              - arm_off["worst_four_fifths_ratio"][col]
         for col in arm_off["worst_four_fifths_ratio"]
     }
+    deltas_hard = {
+        col: arm_hard["worst_four_fifths_ratio"][col]
+             - arm_on["worst_four_fifths_ratio"][col]
+        for col in arm_off["worst_four_fifths_ratio"]
+    }
     util_delta = arm_on["utilisation"] - arm_off["utilisation"]
-    print(f"  ratio deltas (ON - OFF): {deltas}", flush=True)
-    print(f"  util delta:              {util_delta:+.4f}", flush=True)
+    util_delta_hard = arm_hard["utilisation"] - arm_on["utilisation"]
+    print(f"  ratio deltas (SOFT - OFF): {deltas}", flush=True)
+    print(f"  ratio deltas (HARD - SOFT): {deltas_hard}", flush=True)
+    print(f"  util delta (SOFT - OFF):   {util_delta:+.4f}", flush=True)
+    print(f"  util delta (HARD - SOFT):  {util_delta_hard:+.4f}", flush=True)
 
     row = {
         "ts": datetime.utcnow().isoformat(timespec="seconds"),
@@ -229,16 +261,25 @@ def benchmark(
         "time_limit_s": float(time_limit_s),
         "seed": int(seed),
         "arm_off": arm_off,
-        "arm_on": arm_on,
+        "arm_on": arm_on,            # kept under this legacy key for
+                                      # back-compat with the R reader
+        "arm_hard": arm_hard,
         "delta_worst_ratio": {k: float(v) for k, v in deltas.items()},
+        "delta_worst_ratio_hard_vs_soft": {
+            k: float(v) for k, v in deltas_hard.items()
+        },
         "delta_utilisation": float(util_delta),
+        "delta_utilisation_hard_vs_soft": float(util_delta_hard),
         "comparison_note": (
-            "Both arms schedule the same cohort on the same chair grid; "
-            "only ScheduleOptimizer._fairness_constraints_enabled differs. "
-            "worst_four_fifths_ratio is the MIN over pairwise "
-            "min(rate_a, rate_b) / max(rate_a, rate_b) across the "
-            "group column's pairs — 1.0 = perfect parity, < 0.80 fails "
-            "the Four-Fifths Rule."
+            "Three arms on the same cohort + grid: arm_off (no parity "
+            "constraint), arm_on (soft demographic-parity penalty — the "
+            "historical default), arm_hard (HARD equalised-odds CP-SAT "
+            "constraint added in Improvement D, enforcing |rate_g1 - "
+            "rate_g2| <= 0.15 for every Age_Band and Gender pair with "
+            ">= 3 members).  worst_four_fifths_ratio is the MIN over "
+            "pairwise min(rate_a, rate_b)/max(rate_a, rate_b) across "
+            "the group column's pairs — 1.0 = perfect parity, < 0.80 "
+            "fails the Four-Fifths Rule."
         ),
     }
 

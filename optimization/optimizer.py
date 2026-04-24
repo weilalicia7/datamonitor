@@ -564,10 +564,26 @@ class ScheduleOptimizer:
         # attributable to these constraints.
         # =====================================================================
 
-        if getattr(self, '_fairness_constraints_enabled', True):
-            fairness_block_enabled = True
-        else:
-            fairness_block_enabled = False
+        # Fairness mode (§5.6.2 / Improvement D):
+        #   "none" — no fairness block at all
+        #   "soft" — demographic-parity penalty added to objective
+        #            (the historical default; behaves the same as
+        #            _fairness_constraints_enabled=True)
+        #   "hard" — equalised-odds HARD constraint per group pair,
+        #            with tolerance ``fairness_tolerance`` (default
+        #            0.15 → disparate-impact ratio ≥ 0.85).  Also
+        #            adds the same term to the objective so CP-SAT
+        #            finds the least-utilisation-lossy feasible
+        #            point within the parity envelope.
+        # Back-compat: when _fairness_mode is unset, read the legacy
+        # _fairness_constraints_enabled flag.
+        _fm = getattr(self, '_fairness_mode', None)
+        if _fm is None:
+            _fm = "soft" if getattr(self, '_fairness_constraints_enabled', True) else "none"
+        if _fm not in ("none", "soft", "hard"):
+            logger.warning(f"Unknown fairness_mode {_fm!r}; falling back to 'soft'")
+            _fm = "soft"
+        fairness_block_enabled = (_fm != "none")
 
         # Group patients by protected attributes
         age_groups = {}
@@ -601,38 +617,77 @@ class ScheduleOptimizer:
         # Using soft constraints (penalty in objective) for feasibility
         fairness_tolerance = 0.15  # Allow 15% max difference in scheduling rates
 
-        # For each pair of age groups, constrain scheduling rate difference
-        age_group_list = list(age_groups.items()) if fairness_block_enabled else []
-        for i, (g1_name, g1_patients) in enumerate(age_group_list):
-            for g2_name, g2_patients in age_group_list[i+1:]:
-                if len(g1_patients) < 3 or len(g2_patients) < 3:
-                    continue  # Skip tiny groups
+        # Build the group-pair list for all protected attributes we
+        # have enough data for.  Includes Gender under mode="hard" so
+        # the dissertation's §5.6.2 "gender disparity 0.766 → >0.85"
+        # target actually moves on real data (the previous soft-only
+        # block operated on Age_Band pairs only).
+        def _pairs(group_dict, prefix):
+            items = list(group_dict.items())
+            out = []
+            for i, (gn1, gp1) in enumerate(items):
+                for gn2, gp2 in items[i+1:]:
+                    if len(gp1) < 3 or len(gp2) < 3:
+                        continue  # skip statistically-noisy groups
+                    out.append((f"{prefix}_{gn1}", f"{prefix}_{gn2}", gp1, gp2))
+            return out
 
-                # Sum of assigned vars for each group
-                g1_assigned = sum(patient_vars[p.patient_id]['assigned'] for p in g1_patients)
-                g2_assigned = sum(patient_vars[p.patient_id]['assigned'] for p in g2_patients)
+        parity_pairs: list = []
+        if fairness_block_enabled:
+            parity_pairs.extend(_pairs(age_groups, "age"))
+            if _fm == "hard":
+                # Gender pairs only join the HARD-mode constraint — the
+                # historical soft path was age-only and we preserve its
+                # behaviour so back-compat tests don't shift.
+                parity_pairs.extend(_pairs(gender_groups, "gender"))
 
-                # Proportional fairness: assigned_g1/|g1| ≈ assigned_g2/|g2|
-                # Cross-multiply to avoid division: assigned_g1 * |g2| ≈ assigned_g2 * |g1|
-                n1, n2 = len(g1_patients), len(g2_patients)
+        # Target disparate-impact ratio (§5.6.2 / Improvement D).
+        # Soft mode uses the legacy 0.15 rate-difference penalty in
+        # the objective (backwards-compatible).  Hard mode enforces
+        # the Four-Fifths Rule directly as a CP-SAT constraint:
+        #   min(rate_g1, rate_g2) / max(rate_g1, rate_g2) >= target
+        # Rearranged (without knowing which rate is the max) into a
+        # SYMMETRIC pair of inequalities — both must hold:
+        #   rate_g1 >= target * rate_g2
+        #   rate_g2 >= target * rate_g1
+        # Cross-multiplied:
+        #   assigned_g1 * n2 * 100 >= target_int * assigned_g2 * n1
+        #   assigned_g2 * n1 * 100 >= target_int * assigned_g1 * n2
+        # with target_int = round(target * 100) keeping everything
+        # integer for CP-SAT.
+        hard_target_ratio = float(getattr(self, '_fairness_hard_ratio', 0.85))
+        hard_target_int = int(round(hard_target_ratio * 100.0))
 
-                # |assigned_g1 * n2 - assigned_g2 * n1| ≤ tolerance * n1 * n2
-                max_diff = int(fairness_tolerance * n1 * n2)
-                diff_var = model.NewIntVar(-max_diff * 2, max_diff * 2,
-                                           f'fair_diff_{g1_name}_{g2_name}')
-                model.Add(diff_var == g1_assigned * n2 - g2_assigned * n1)
+        for g1_name, g2_name, g1_patients, g2_patients in parity_pairs:
+            # Sum of assigned vars for each group
+            g1_assigned = sum(patient_vars[p.patient_id]['assigned'] for p in g1_patients)
+            g2_assigned = sum(patient_vars[p.patient_id]['assigned'] for p in g2_patients)
+            n1, n2 = len(g1_patients), len(g2_patients)
 
-                # Soft constraint: penalize if difference exceeds tolerance
-                # (Using absolute value via auxiliary variable)
-                abs_diff = model.NewIntVar(0, max_diff * 2,
-                                           f'fair_abs_{g1_name}_{g2_name}')
-                model.AddAbsEquality(abs_diff, diff_var)
+            # Soft penalty term (always in the objective, identical
+            # to the historical soft path)
+            max_diff = int(fairness_tolerance * n1 * n2)
+            diff_var = model.NewIntVar(-max_diff * 2, max_diff * 2,
+                                       f'fair_diff_{g1_name}_{g2_name}')
+            model.Add(diff_var == g1_assigned * n2 - g2_assigned * n1)
+            abs_diff = model.NewIntVar(0, max_diff * 2,
+                                       f'fair_abs_{g1_name}_{g2_name}')
+            model.AddAbsEquality(abs_diff, diff_var)
 
-                # Add to objective as penalty (will be subtracted in the objective)
-                fairness_penalty = abs_diff
-                objective_terms_fairness = getattr(self, '_fairness_penalties', [])
-                objective_terms_fairness.append(fairness_penalty)
-                self._fairness_penalties = objective_terms_fairness
+            if _fm == "hard":
+                # Two-sided ratio constraint (Four-Fifths ≥ target)
+                model.Add(
+                    g1_assigned * n2 * 100 >= hard_target_int * g2_assigned * n1
+                )
+                model.Add(
+                    g2_assigned * n1 * 100 >= hard_target_int * g1_assigned * n2
+                )
+
+            # Objective penalty — present in both soft and hard so
+            # CP-SAT prefers the least-unfair feasible point.
+            objective_terms_fairness = getattr(self, '_fairness_penalties', [])
+            objective_terms_fairness.append(abs_diff)
+            self._fairness_penalties = objective_terms_fairness
 
         # Distance-based equity: remote patients should not be disadvantaged
         _equity_groups = (
