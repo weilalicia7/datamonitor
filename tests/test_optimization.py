@@ -1412,6 +1412,115 @@ class TestRobustnessMetric(unittest.TestCase):
         self.assertAlmostEqual(row["delta_robustness"], implied, places=6)
 
 
+class TestConformalIntervalDepth(unittest.TestCase):
+    """
+    Regression for §4.5 external-review finding (mistake 15): the
+    dissertation's "mean interval width 87 min vs MAE 24.3 min"
+    claim needed a depth paragraph explaining why widths are ~3.6x
+    the MAE.  The heteroscedasticity + long-tail argument is only
+    honest if the benchmark actually exhibits those properties.
+
+    Lock two invariants so the depth paragraph cannot drift into
+    false advertising:
+
+      1. On a deliberately-heteroscedastic synthetic cohort the
+         interval-over-MAE ratio MUST be >= 2.0.  This catches a
+         future re-calibration that silently tightens to the point
+         estimate (and loses the tail-coverage promise in §3.6).
+      2. Empirical coverage on the held-out split stays within 0.10
+         of the target 1 - alpha.  A badly-calibrated conformal
+         quantile would under-cover and invalidate the §3.6 claim.
+    """
+
+    def _synthetic_cohort(self, n=600, seed=0):
+        """
+        Two-regime cohort where duration depends on a `complexity`
+        flag: 'simple' gets mean 45 ± 5 min, 'complex' gets mean 150 ±
+        40 min.  The large between-regime spread guarantees
+        heteroscedasticity and a long tail — the exact conditions the
+        dissertation depth paragraph cites.
+        """
+        import numpy as np
+        rng = np.random.RandomState(seed)
+        patients = []
+        durations = []
+        for i in range(n):
+            complex_flag = rng.rand() < 0.30
+            if complex_flag:
+                d = float(rng.normal(150, 40))
+                cf = 1.0
+            else:
+                d = float(rng.normal(45, 5))
+                cf = 0.0
+            d = max(15.0, d)
+            patients.append({
+                "patient_id": f"SYN{i:04d}",
+                "expected_duration": d + float(rng.normal(0, 5)),
+                "cycle_number": int(rng.randint(1, 6)),
+                "age": int(rng.randint(30, 85)),
+                "complexity_factor": cf,
+                "weight": float(rng.normal(70, 10)),
+            })
+            durations.append(d)
+        import numpy as _np
+        return patients, _np.asarray(durations, dtype=float)
+
+    def test_interval_width_at_least_2x_mae_when_heteroscedastic(self):
+        from ml.conformal_prediction import ConformalDurationPredictor
+        import numpy as np
+
+        patients, y = self._synthetic_cohort(n=600, seed=0)
+        rng = np.random.RandomState(7)
+        idx = np.arange(len(patients))
+        rng.shuffle(idx)
+        cut = int(len(patients) * 0.75)
+        p_tr, y_tr = [patients[i] for i in idx[:cut]], y[idx[:cut]]
+        p_te, y_te = [patients[i] for i in idx[cut:]], y[idx[cut:]]
+
+        pred = ConformalDurationPredictor(alpha=0.10)
+        pred.fit(p_tr, y_tr)
+
+        preds = [pred.predict(p) for p in p_te]
+        points = np.array([pr.point_estimate for pr in preds])
+        widths = np.array([pr.interval_width for pr in preds])
+        mae = float(np.mean(np.abs(points - y_te)))
+        mean_w = float(widths.mean())
+        self.assertGreater(
+            mean_w / max(mae, 1e-9), 2.0,
+            "Heteroscedastic synthetic cohort: interval-width / MAE "
+            f"= {mean_w / max(mae, 1e-9):.2f} < 2.0.  The dissertation "
+            "§4.5 depth paragraph claims ~3.96x on real data; if this "
+            "invariant fails the paragraph is false on this fixture."
+        )
+
+    def test_empirical_coverage_within_tolerance_of_target(self):
+        from ml.conformal_prediction import ConformalDurationPredictor
+        import numpy as np
+
+        patients, y = self._synthetic_cohort(n=800, seed=1)
+        rng = np.random.RandomState(11)
+        idx = np.arange(len(patients))
+        rng.shuffle(idx)
+        cut = int(len(patients) * 0.75)
+        p_tr, y_tr = [patients[i] for i in idx[:cut]], y[idx[:cut]]
+        p_te, y_te = [patients[i] for i in idx[cut:]], y[idx[cut:]]
+
+        pred = ConformalDurationPredictor(alpha=0.10)
+        pred.fit(p_tr, y_tr)
+        preds = [pred.predict(p) for p in p_te]
+        lo = np.array([pr.lower_bound for pr in preds])
+        hi = np.array([pr.upper_bound for pr in preds])
+        covered = np.logical_and(y_te >= lo, y_te <= hi)
+        emp = float(covered.mean())
+        target = 0.90
+        self.assertLess(
+            abs(emp - target), 0.10,
+            f"Empirical coverage {emp:.3f} deviates from target "
+            f"{target:.2f} by more than 0.10.  The §3.6 / §4.5 coverage "
+            "promise is invalidated — re-calibrate the conformal quantile."
+        )
+
+
 class TestFairnessMitigationToggle(unittest.TestCase):
     """
     Regression for §5.6.2 external-review finding: the fairness audit
