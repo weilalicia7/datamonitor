@@ -1412,6 +1412,72 @@ class TestRobustnessMetric(unittest.TestCase):
         self.assertAlmostEqual(row["delta_robustness"], implied, places=6)
 
 
+class TestAblationSchema(unittest.TestCase):
+    """
+    Regression for §5.8 Table 5.5 (external-review Improvement B).
+    Each row the ablation harness writes must carry six arms, each
+    with the four metrics R reads (util, solve_time_s,
+    p1_compliance_pct, gender_fairness_ratio).  Locking the schema
+    here means Table 5.5 cannot silently lose a column if someone
+    refactors the harness and forgets to update the R-side reader.
+    """
+
+    REQUIRED_ARMS = (
+        "baseline", "no_cg", "no_gnn",
+        "no_fairness", "no_cvar", "no_robustness",
+    )
+    REQUIRED_ARM_FIELDS = (
+        "utilisation", "solve_time_s",
+        "p1_compliance_pct", "gender_fairness_ratio",
+        "n_scheduled", "n_patients", "status",
+    )
+
+    def test_row_has_all_six_arms(self):
+        row = {
+            "ts": "2026-04-24T05:00:00",
+            "n_patients": 40, "n_chairs": 8, "time_limit_s": 15.0, "seed": 42,
+            "arms": {
+                arm: {
+                    "arm": arm,
+                    "utilisation": 0.5, "solve_time_s": 1.0,
+                    "p1_compliance_pct": 100.0,
+                    "gender_fairness_ratio": 0.7,
+                    "n_scheduled": 20, "n_patients": 40,
+                    "status": "FEASIBLE",
+                    "config": {},
+                }
+                for arm in self.REQUIRED_ARMS
+            },
+        }
+        self.assertIn("arms", row)
+        for arm in self.REQUIRED_ARMS:
+            self.assertIn(arm, row["arms"],
+                          f"ablation row missing arm {arm!r}")
+            for f in self.REQUIRED_ARM_FIELDS:
+                self.assertIn(
+                    f, row["arms"][arm],
+                    f"arm {arm!r} missing field {f!r} — Table 5.5 "
+                    "cell will render as 'n/a'"
+                )
+
+    def test_metric_invariants(self):
+        """Each metric must live in its documented range — catches a
+        future bug where solve_time_s slips to ms units or gender ratio
+        overflows [0, 1]."""
+        arm = {
+            "utilisation": 0.6, "solve_time_s": 1.5,
+            "p1_compliance_pct": 100.0,
+            "gender_fairness_ratio": 0.708,
+        }
+        self.assertGreaterEqual(arm["utilisation"], 0.0)
+        self.assertLessEqual(arm["utilisation"], 1.0)
+        self.assertGreaterEqual(arm["solve_time_s"], 0.0)
+        self.assertGreaterEqual(arm["p1_compliance_pct"], 0.0)
+        self.assertLessEqual(arm["p1_compliance_pct"], 100.0)
+        self.assertGreaterEqual(arm["gender_fairness_ratio"], 0.0)
+        self.assertLessEqual(arm["gender_fairness_ratio"], 1.0)
+
+
 class TestConformalIntervalDepth(unittest.TestCase):
     """
     Regression for §4.5 external-review finding (mistake 15): the
