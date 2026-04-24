@@ -16,8 +16,9 @@ __pycache__
 *.pyc
 *.pyo
 
-# Test + dev
-tests
+# Test dev caches (tests themselves included — reproducibility stage
+# runs `pytest tests/` so the directory MUST ship; only the caches are
+# excluded).
 .pytest_cache
 .mypy_cache
 .ruff_cache

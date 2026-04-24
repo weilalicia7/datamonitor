@@ -1,9 +1,21 @@
 # =============================================================================
-# SACT Scheduler — production container image
+# SACT Scheduler — container images
 # =============================================================================
-# Multi-stage build:
-#   stage "builder": compile wheels from requirements.txt into a virtualenv
-#   stage "runtime": slim python + the pre-built venv + the app source
+# Two targets share the same builder stage:
+#
+#   --target runtime           production Flask + gunicorn, non-root, port 1421
+#   --target reproducibility   pytest-only image for dissertation §3.7
+#
+# Build either with:
+#
+#     docker build -t sact-scheduler:latest --target runtime .
+#     docker build -t sact-scheduler:repro  --target reproducibility .
+#
+# Dissertation §3.7 quotes:
+#     docker run --rm sact-scheduler:repro
+# which runs the full pytest suite on clean state; see also
+# reproducibility/generate_manifest.py for the git-SHA + pip-freeze
+# manifest that lives at reproducibility/manifest.json.
 #
 # The runtime image runs as non-root (uid 1000), has no build tools, no cache,
 # and no pip — strictly the deps + the app + gunicorn.  Expected size ~600 MB
@@ -107,3 +119,37 @@ CMD ["sh", "-c", "gunicorn \
       --access-logfile - \
       --error-logfile - \
       flask_app:app"]
+
+
+# -----------------------------------------------------------------------------
+# Stage 3 — reproducibility (dissertation §3.7 / Improvement H)
+# -----------------------------------------------------------------------------
+# Purpose: run the full pytest suite + any benchmark harness on a clean
+# checkout, so an examiner / auditor can verify the dissertation's
+# numeric claims without installing the Python stack locally.
+# Build:
+#     docker build -t sact-scheduler:repro --target reproducibility .
+# Run:
+#     docker run --rm sact-scheduler:repro              # default: pytest
+#     docker run --rm sact-scheduler:repro python -m ml.benchmark_weight_sensitivity
+#     docker run --rm -it sact-scheduler:repro bash     # shell for poking
+# -----------------------------------------------------------------------------
+FROM builder AS reproducibility
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PYTHONHASHSEED=42 \
+    PATH="/opt/venv/bin:$PATH" \
+    SACT_DOCKER_BUILD=1
+
+# Install pytest here so the repro image can run the suite even though
+# the production runtime image doesn't carry test deps.
+RUN pip install --no-cache-dir pytest>=7.4.0 pytest-timeout>=2.2.0
+
+WORKDIR /app
+COPY . /app
+
+# Deterministic default: the full pytest suite.  Matches what the
+# dissertation quotes ("All results can be reproduced by running
+# docker run --rm sact-scheduler:repro").
+CMD ["python", "-m", "pytest", "-q", "tests/"]

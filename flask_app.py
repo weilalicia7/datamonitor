@@ -7848,6 +7848,49 @@ def api_tuning_status():
         return jsonify({'success': False, 'error': str(exc)}), 500
 
 
+@app.route('/api/reproducibility/status', methods=['GET'])
+def api_reproducibility_status():
+    """
+    Reproducibility manifest (§3.7, Improvement H).  Read-only
+    diagnostic — returns the content of
+    ``reproducibility/manifest.json`` (or
+    ``{"source": "not_run"}`` if not generated).  Never triggers a
+    regeneration; the manifest is refreshed by
+    ``python -m reproducibility.generate_manifest`` which a compliance
+    reviewer runs explicitly.  The endpoint's payload is how a
+    dissertation examiner confirms the Docker-rebuild's git SHA +
+    JSONL checksums match the manifest the PDF was built against.
+    """
+    try:
+        cache_path = Path("reproducibility/manifest.json")
+        if not cache_path.exists():
+            return jsonify({"success": True, "source": "not_run"})
+        text = cache_path.read_text("utf-8")
+        manifest = json.loads(text)
+        # Compact summary keeps the response small; full pip_freeze
+        # is available at the file path the manifest's
+        # ``generator`` field advertises.
+        summary = {
+            "source": "real_manifest",
+            "ts_utc": manifest.get("ts_utc"),
+            "format_version": manifest.get("format_version"),
+            "python": manifest.get("python"),
+            "platform": manifest.get("platform"),
+            "git": manifest.get("git"),
+            "n_key_file_checksums":
+                len(manifest.get("key_file_checksums", {})),
+            "n_data_cache_jsonl_checksums":
+                len(manifest.get("data_cache_jsonl_checksums", {})),
+            "n_pip_deps": len(manifest.get("pip_freeze") or []),
+            "docker_repro_command": manifest.get("docker_repro_command"),
+            "docker_build_command": manifest.get("docker_build_command"),
+        }
+        return jsonify({"success": True, **summary})
+    except Exception as exc:
+        logger.error(f"reproducibility status error: {exc}")
+        return jsonify({"success": False, "error": str(exc)}), 500
+
+
 @app.route('/api/metrics/fairness-shap/status', methods=['GET'])
 def api_fairness_shap_status():
     """
