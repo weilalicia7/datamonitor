@@ -2114,14 +2114,16 @@ class TestExternalAlgorithmBenchmark(unittest.TestCase):
 
     def test_benchmark_row_schema(self):
         """Lock the JSONL contract so Table 5.6 cells can't silently
-        lose a column on harness refactor."""
+        lose a column on harness refactor.  Covers all four arms:
+        CP-SAT, NSGA-II, risk-greedy, and Patrick 2008 (the published
+        operations-research baseline added per the reviewer's request)."""
         REQUIRED_TOP = (
             "ts", "n_patients", "n_chairs", "time_limit_s", "seed",
             "nsga_population", "nsga_generations",
             "cpsat_points", "nsga_points", "risk_greedy_points",
-            "hypervolume",
+            "patrick_points", "hypervolume",
         )
-        REQUIRED_HV = ("cpsat", "nsga", "risk_greedy")
+        REQUIRED_HV = ("cpsat", "nsga", "risk_greedy", "patrick_2008")
         REQUIRED_POINT = (
             "utilisation", "p1_compliance", "gender_fairness_ratio",
             "mean_wait_min", "wait_score",
@@ -2132,7 +2134,7 @@ class TestExternalAlgorithmBenchmark(unittest.TestCase):
             "seed": 42, "nsga_population": 48, "nsga_generations": 20,
             "cpsat_points": [{
                 "utilisation": 0.6, "p1_compliance": 1.0,
-                "gender_fairness_ratio": 0.0, "mean_wait_min": 146.0,
+                "gender_fairness_ratio": 0.778, "mean_wait_min": 146.0,
                 "wait_score": 0.6,
             }],
             "nsga_points": [{
@@ -2145,7 +2147,15 @@ class TestExternalAlgorithmBenchmark(unittest.TestCase):
                 "gender_fairness_ratio": 0.357, "mean_wait_min": 116.0,
                 "wait_score": 0.7,
             }],
-            "hypervolume": {"cpsat": 0.0, "nsga": 0.228, "risk_greedy": 0.115},
+            "patrick_points": [{
+                "utilisation": 0.4, "p1_compliance": 1.0,
+                "gender_fairness_ratio": 0.286, "mean_wait_min": 116.0,
+                "wait_score": 0.8,
+            }],
+            "hypervolume": {
+                "cpsat": 0.353, "nsga": 0.228,
+                "risk_greedy": 0.115, "patrick_2008": 0.092,
+            },
         }
         for f in REQUIRED_TOP:
             self.assertIn(f, row, f"ext-benchmark row missing {f!r}")
@@ -2154,11 +2164,72 @@ class TestExternalAlgorithmBenchmark(unittest.TestCase):
                           f"hypervolume missing method {h!r}")
             self.assertGreaterEqual(row["hypervolume"][h], 0.0)
             self.assertLessEqual(row["hypervolume"][h], 1.0)
-        for arm in ("cpsat_points", "nsga_points", "risk_greedy_points"):
+        for arm in ("cpsat_points", "nsga_points",
+                    "risk_greedy_points", "patrick_points"):
             self.assertIsInstance(row[arm], list)
+            self.assertGreater(
+                len(row[arm]), 0,
+                f"{arm} is empty — method must produce at least 1 point",
+            )
             for p in row[arm]:
                 for k in REQUIRED_POINT:
                     self.assertIn(k, p, f"{arm}[*] missing {k!r}")
+
+    def test_patrick_2008_ordering_is_priority_then_earliest_time(self):
+        """The Patrick et al. 2008 priority-first-fit policy must sort
+        candidate patients by priority class (P1 first) with ties
+        broken by earliest_time.  This is the invariant the §5.10
+        prose claims is a faithful translation of the published
+        policy; locking it prevents a silent refactor from turning
+        the arm into a different heuristic."""
+        from ml.benchmark_external_algorithms import _run_patrick_2008
+        from optimization.optimizer import Patient, Chair
+        from datetime import datetime, timedelta
+
+        today = datetime(2026, 4, 24, 0, 0, 0)
+        # Three patients: B is P1 (higher priority), A is P3 but arrives
+        # earlier, C is P2 arriving middle.  Patrick's ordering should
+        # yield B first (lowest priority number), then C, then A.
+        ps = [
+            Patient(
+                patient_id="A", priority=3, protocol="R-CHOP",
+                expected_duration=60, postcode="CF14",
+                earliest_time=today.replace(hour=8),
+                latest_time=today.replace(hour=17),
+                noshow_probability=0.1,
+            ),
+            Patient(
+                patient_id="B", priority=1, protocol="R-CHOP",
+                expected_duration=60, postcode="CF14",
+                earliest_time=today.replace(hour=10),
+                latest_time=today.replace(hour=17),
+                noshow_probability=0.1,
+            ),
+            Patient(
+                patient_id="C", priority=2, protocol="R-CHOP",
+                expected_duration=60, postcode="CF14",
+                earliest_time=today.replace(hour=9),
+                latest_time=today.replace(hour=17),
+                noshow_probability=0.1,
+            ),
+        ]
+        chairs = [
+            Chair(chair_id="WC-C01", site_code="WC",
+                  is_recliner=False,
+                  available_from=today.replace(hour=8),
+                  available_until=today.replace(hour=17)),
+        ]
+        audit = [{"Patient_ID": p.patient_id, "Gender": "F",
+                  "Age_Band": "40-64"} for p in ps]
+        points = _run_patrick_2008(ps, audit, chairs, horizon_min=540)
+        self.assertEqual(len(points), 1,
+                         "Patrick arm must produce exactly one point")
+        pt = points[0]
+        self.assertEqual(pt["config_name"], "patrick_2008")
+        self.assertGreaterEqual(pt["utilisation"], 0.0)
+        self.assertLessEqual(pt["utilisation"], 1.0)
+        self.assertGreaterEqual(pt["p1_compliance"], 0.0)
+        self.assertLessEqual(pt["p1_compliance"], 1.0)
 
 
 class TestAblationSchema(unittest.TestCase):
