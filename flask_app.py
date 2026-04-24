@@ -7848,6 +7848,45 @@ def api_tuning_status():
         return jsonify({'success': False, 'error': str(exc)}), 500
 
 
+@app.route('/api/metrics/component-significance/status', methods=['GET'])
+def api_component_significance_status():
+    """
+    Component-significance benchmark (§5.12, Improvement F).  Read-only
+    diagnostic — returns the LATEST JSONL row written by
+    ``ml/benchmark_component_significance.py`` (or
+    ``{"source": "not_run"}`` when the file is absent).  Never triggers
+    a run: the benchmark is CLI-only and writes to
+    ``data_cache/component_significance/results.jsonl``.  Invisible to
+    the live prediction pipeline by design.
+    """
+    try:
+        cache_path = Path(
+            "data_cache/component_significance/results.jsonl"
+        )
+        if not cache_path.exists():
+            return jsonify({"success": True, "source": "not_run"})
+        text = cache_path.read_text("utf-8")
+        lines = [l for l in text.splitlines() if l.strip()]
+        if not lines:
+            return jsonify({"success": True, "source": "not_run"})
+        row = json.loads(lines[-1])
+        # Compact view: just the headline stats per (component, metric)
+        summary = {
+            "source": "real_benchmark",
+            "ts": row.get("ts"),
+            "n_patients": row.get("n_patients"),
+            "n_chairs": row.get("n_chairs"),
+            "n_bootstrap": row.get("n_bootstrap"),
+            "time_limit_s": row.get("time_limit_s"),
+            "wall_seconds": row.get("wall_seconds"),
+            "components": row.get("components", {}),
+        }
+        return jsonify({"success": True, **summary})
+    except Exception as exc:
+        logger.error(f"component-significance status error: {exc}")
+        return jsonify({"success": False, "error": str(exc)}), 500
+
+
 @app.route('/api/data/channel/real/status', methods=['GET'])
 def api_real_data_channel_status():
     """

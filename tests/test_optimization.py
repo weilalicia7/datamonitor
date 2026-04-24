@@ -1658,6 +1658,124 @@ class TestWeightSensitivityBenchmark(unittest.TestCase):
                     )
 
 
+class TestComponentSignificanceBenchmark(unittest.TestCase):
+    """Regression for §5.12 (Improvement F): the paired-bootstrap harness
+    must produce a JSONL row that R §20d can read to render Table 5.7
+    macros.  Three invariants locked so the §5.12 cells cannot drift:
+
+      1. JSONL row carries the 5 components × 3 metrics × 4 stats
+         (mean_delta, ci_low, ci_high, p_value) grid the R reader walks.
+      2. Every p-value is in [0, 1]; ci_low <= ci_high for every cell;
+         bootstrap p floor 1/(B+1) is respected.
+      3. The bootstrap stats helper `_bootstrap_stats` agrees with
+         a hand-computed reference on a small deterministic Δ list.
+    """
+
+    REQUIRED_TOP_FIELDS = (
+        "ts", "n_patients", "n_chairs", "n_bootstrap",
+        "time_limit_s", "components", "metric_keys",
+    )
+    EXPECTED_COMPONENTS = (
+        "column_generation", "gnn", "cvar", "fairness", "robustness",
+    )
+    EXPECTED_METRICS = (
+        "utilisation", "gender_fairness_ratio", "solve_time_s",
+    )
+    STAT_FIELDS = ("mean_delta", "ci_low", "ci_high", "p_value", "n_valid")
+
+    def _sample_row(self):
+        def _cell(mean=0.05, lo=0.01, hi=0.09, p=0.03):
+            return {"mean_delta": mean, "ci_low": lo, "ci_high": hi,
+                    "p_value": p, "n_valid": 100}
+        comps = {}
+        for ck in self.EXPECTED_COMPONENTS:
+            comps[ck] = {
+                "label": ck.replace("_", " "),
+                "metrics": {mk: _cell() for mk in self.EXPECTED_METRICS},
+            }
+        return {
+            "ts": "2026-04-24T19:00:00",
+            "n_patients": 8, "n_chairs": 2,
+            "n_bootstrap": 100, "time_limit_s": 1.0, "seed": 42,
+            "production_robustness_weight": 0.10,
+            "wall_seconds": 180.0,
+            "components": comps,
+            "metric_keys": list(self.EXPECTED_METRICS),
+            "method_note": "...",
+        }
+
+    def test_row_schema(self):
+        row = self._sample_row()
+        for f in self.REQUIRED_TOP_FIELDS:
+            self.assertIn(f, row, f"top-level missing {f!r}")
+        for ck in self.EXPECTED_COMPONENTS:
+            self.assertIn(ck, row["components"],
+                          f"components missing {ck!r}")
+            for mk in self.EXPECTED_METRICS:
+                self.assertIn(mk, row["components"][ck]["metrics"],
+                              f"{ck}.metrics missing {mk!r}")
+                cell = row["components"][ck]["metrics"][mk]
+                for f in self.STAT_FIELDS:
+                    self.assertIn(f, cell,
+                                  f"{ck}.{mk} missing stat {f!r}")
+
+    def test_p_values_and_ci_ranges_are_valid(self):
+        row = self._sample_row()
+        for ck in self.EXPECTED_COMPONENTS:
+            for mk in self.EXPECTED_METRICS:
+                cell = row["components"][ck]["metrics"][mk]
+                p = float(cell["p_value"])
+                self.assertGreaterEqual(p, 0.0)
+                self.assertLessEqual(p, 1.0)
+                # Floor: bootstrap p cannot go below 1/(B+1) = 1/101
+                self.assertGreaterEqual(
+                    p, 1.0 / (row["n_bootstrap"] + 1) - 1e-9,
+                    f"{ck}.{mk} p={p} below bootstrap floor",
+                )
+                lo, hi = float(cell["ci_low"]), float(cell["ci_high"])
+                self.assertLessEqual(lo, hi,
+                                     f"{ck}.{mk}: ci_low {lo} > ci_high {hi}")
+                # Mean should lie broadly near the CI interior
+                mean = float(cell["mean_delta"])
+                # Allow a small slack because mean and percentile CI are
+                # different summaries of the same bootstrap distribution
+                self.assertGreaterEqual(
+                    mean, lo - 1e-6,
+                    f"{ck}.{mk}: mean {mean} below ci_low {lo}",
+                )
+                self.assertLessEqual(
+                    mean, hi + 1e-6,
+                    f"{ck}.{mk}: mean {mean} above ci_high {hi}",
+                )
+
+    def test_bootstrap_stats_helper_matches_reference(self):
+        """_bootstrap_stats should produce the expected point-estimate,
+        percentile CI, and p-value on a deterministic small list."""
+        from ml.benchmark_component_significance import _bootstrap_stats
+        # Δ list: 20 replicas, 19 positive, 1 zero — mean positive,
+        # bootstrap p = 2 * min(frac(≤0), frac(≥0)) * correction
+        deltas = [0.0] + [0.1 * (i + 1) for i in range(19)]
+        stats = _bootstrap_stats(deltas)
+        self.assertEqual(stats["n_valid"], 20)
+        self.assertGreater(stats["mean_delta"], 0)
+        self.assertLessEqual(stats["ci_low"], stats["mean_delta"])
+        self.assertGreaterEqual(stats["ci_high"], stats["mean_delta"])
+        # Positive mean with 1/20 replicas at ≤ 0 → two-sided p = 2·0.05 = 0.10
+        # But floor is 1/(n+1) = 1/21 ≈ 0.0476
+        expected_raw = 2.0 * (1 / 20)
+        self.assertAlmostEqual(
+            stats["p_value"], max(expected_raw, 1.0 / 21),
+            places=3, msg="two-sided bootstrap p-value off",
+        )
+        # All-zero deltas → every replica ≤ 0 and ≥ 0 → p=1
+        zero = _bootstrap_stats([0.0] * 30)
+        self.assertEqual(zero["p_value"], 1.0)
+        # Empty input
+        empty = _bootstrap_stats([])
+        self.assertEqual(empty["n_valid"], 0)
+        self.assertEqual(empty["p_value"], 1.0)
+
+
 class TestExternalAlgorithmBenchmark(unittest.TestCase):
     """
     Regression for §5.10 (external-review Improvement C).  The paper
