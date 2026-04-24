@@ -2028,6 +2028,50 @@ class TestRobustnessWeightSweep(unittest.TestCase):
                 f"{rs_prev:.3f} -> {rs_next:.3f}",
             )
 
+    def test_weight_sweep_and_table53_record_cohort_sizes(self):
+        """Regression for the §5.9 text-vs-table inconsistency: an
+        earlier draft claimed the R(S) reported in Table 5.3 and the
+        black-diamond in Figure 5.9B were 'the same measurement.'
+        They are different cohorts and therefore different numbers.
+        Lock: both JSONL sources must record n_patients + n_chairs
+        explicitly so the §5.9 prose can cite the sizes via macros,
+        and the two cohorts must differ so a future edit cannot
+        silently re-introduce the identity claim."""
+        import json
+        import pathlib
+
+        repo_root = pathlib.Path(__file__).resolve().parent.parent
+        ws_path = repo_root / "data_cache" / "robustness_weight_sweep" / "results.jsonl"
+        rb_path = repo_root / "data_cache" / "robustness_benchmark" / "results.jsonl"
+        if not ws_path.exists() or not rb_path.exists():
+            self.skipTest(
+                "benchmark outputs not present — run both harnesses "
+                "(weight sweep + robustness benchmark) to exercise "
+                "this cohort-size contract")
+
+        def _last_row(p):
+            lines = [l for l in p.read_text("utf-8").splitlines() if l.strip()]
+            return json.loads(lines[-1]) if lines else None
+
+        ws = _last_row(ws_path)
+        rb = _last_row(rb_path)
+        self.assertIsNotNone(ws, "weight sweep JSONL empty")
+        self.assertIsNotNone(rb, "robustness benchmark JSONL empty")
+        # Required cohort-size fields so the §5.9 macros can cite them
+        for f in ("n_patients", "n_chairs"):
+            self.assertIn(f, ws, f"weight-sweep JSONL missing {f!r}")
+            self.assertIn(f, rb, f"robustness-benchmark JSONL missing {f!r}")
+        # Cohorts must differ — if they match, the §5.9 text's
+        # "different experimental setup" claim would be false
+        same_cohort = (ws["n_patients"] == rb["n_patients"] and
+                       ws["n_chairs"] == rb["n_chairs"])
+        self.assertFalse(
+            same_cohort,
+            f"weight-sweep ({ws['n_patients']}p/{ws['n_chairs']}c) and "
+            f"robustness benchmark ({rb['n_patients']}p/{rb['n_chairs']}c) "
+            "share a cohort — the §5.9 prose relies on them differing to "
+            "explain the Figure 5.9B vs Table 5.3 R(S) gap honestly")
+
 
 class TestExternalAlgorithmBenchmark(unittest.TestCase):
     """
