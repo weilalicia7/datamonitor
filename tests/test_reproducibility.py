@@ -112,6 +112,51 @@ class TestReproducibilityArtefacts(unittest.TestCase):
             self.assertIn("sact-scheduler:repro", m["docker_repro_command"])
             self.assertIn("--target reproducibility", m["docker_build_command"])
 
+    def test_every_citep_key_has_matching_bibitem(self):
+        """Regression for external-review point 2 (the Taskesen
+        citation was flagged as missing because the `\\bibitem` was
+        orphaned out of alphabetical order and the reviewer couldn't
+        find it on a visual scan).  Catches the simpler failure mode
+        where a `\\citep{key}` exists in main.tex with no matching
+        `\\bibitem{key}` at all — which would trigger a `[?]`
+        placeholder in the rendered PDF bibliography."""
+        import re
+
+        tex_path = _REPO_ROOT.parent / "dissertation" / "main.tex"
+        if not tex_path.exists():
+            self.skipTest("dissertation/main.tex not present (outside repo)")
+        text = tex_path.read_text(encoding="utf-8")
+
+        # Collect every citation key used in the prose
+        cited: set = set()
+        for m in re.finditer(r"\\cite[a-z]*\{([^}]+)\}", text):
+            for key in m.group(1).split(","):
+                key = key.strip()
+                if key:
+                    cited.add(key)
+
+        # Collect every bibliography entry key
+        defined: set = set()
+        for m in re.finditer(r"\\bibitem(?:\[[^\]]*\])?\{([^}]+)\}", text):
+            defined.add(m.group(1).strip())
+
+        missing = sorted(cited - defined)
+        self.assertFalse(
+            missing,
+            f"{len(missing)} \\citep key(s) have no matching "
+            f"\\bibitem in main.tex: {missing[:10]}"
+            f"{'...' if len(missing) > 10 else ''}",
+        )
+
+        # Sanity: the Taskesen entries flagged by the reviewer must
+        # both resolve.  Locks the fix for point 2 so a future edit
+        # cannot silently re-orphan them.
+        self.assertIn("taskesen2021statistical", defined,
+                      "Taskesen FAccT 2021 bibitem key missing")
+        self.assertIn("taskesen2021aistats", defined,
+                      "Taskesen AISTATS 2021 bibitem key missing "
+                      "(added per external-review point 2)")
+
 
 if __name__ == "__main__":
     unittest.main()
