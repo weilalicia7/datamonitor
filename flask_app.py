@@ -7848,6 +7848,28 @@ def api_tuning_status():
         return jsonify({'success': False, 'error': str(exc)}), 500
 
 
+@app.route('/api/data/channel/real/status', methods=['GET'])
+def api_real_data_channel_status():
+    """
+    Real-data channel detector (§4.7).  Read-only diagnostic — tells
+    operators whether datasets/real_data/ currently contains a valid,
+    DPIA-cleared cohort.  When the channel is "synthetic" (default
+    state of this repository), the prediction pipeline continues to
+    run on synthetic data; no behaviour changes.
+
+    Never triggers a retrain.  The companion benchmark
+    (ml/benchmark_real_vs_synthetic.py) is the only thing that reads
+    the real cohort, and it is invoked manually, not from here.
+    """
+    try:
+        from ml.real_data_channel import detect_channel
+        status = detect_channel(strict=True)
+        return jsonify({'success': True, **status.to_dict()})
+    except Exception as exc:
+        logger.error(f"real-data channel status error: {exc}")
+        return jsonify({'success': False, 'error': str(exc)}), 500
+
+
 @app.route('/api/tuning/run', methods=['POST'])
 def api_tuning_run():
     """Trigger a tuning run synchronously.
