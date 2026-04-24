@@ -131,6 +131,13 @@ class ScheduleOptimizer:
         self._cg_threshold: int = COLUMN_GEN_THRESHOLD
         self._cg_stats: Dict = {}  # last CG run diagnostics
 
+        # Explicit defaults for the two flags previously accessed via
+        # getattr(…, True) — so that set_components() operates on a
+        # known baseline rather than "whatever the first read happens
+        # to find."  Production defaults: CVaR + fairness both ON.
+        self._use_cvar_objective: bool = True
+        self._fairness_constraints_enabled: bool = True
+
         logger.info(f"Optimizer initialized with {len(self.chairs)} chairs")
 
     def set_chairs(self, chairs: List[Chair]):
@@ -148,6 +155,60 @@ class ScheduleOptimizer:
         self.active_events = events
         if events:
             logger.info(f"Set {len(events)} active events on optimizer")
+
+    def set_components(
+        self,
+        *,
+        column_generation: Optional[bool] = None,
+        gnn: Optional[bool] = None,
+        cvar: Optional[bool] = None,
+        fairness: Optional[bool] = None,
+    ) -> Dict[str, bool]:
+        """
+        Toggle the four heavy-component switches without touching the
+        private `_cg_enabled` / `_gnn_enabled` / `_use_cvar_objective` /
+        `_fairness_constraints_enabled` attributes directly.
+
+        Keyword-only; each argument defaults to ``None`` meaning "leave
+        this component's current state alone", so callers can flip one
+        component without accidentally resetting the others.
+
+        The public surface is how benchmarks (weight-sensitivity,
+        ablation, fairness-mitigation, robustness, external-algorithms,
+        column-generation) and regression tests should configure the
+        optimiser — direct underscore mutation silently ignores typos
+        and is brittle if the internals are renamed.
+
+        Args:
+            column_generation: route >50-patient instances through the
+                Dantzig-Wolfe column-generation pricing loop.
+            gnn: enable GNN feasibility pre-filtering (requires
+                ``enable_gnn_pruning()`` to have been called first).
+            cvar: add the CVaR worst-case objective to the CP-SAT
+                solve on top of DRO.
+            fairness: enforce the per-group DRO parity constraints
+                (soft/hard mode still follows ``_fairness_mode``).
+
+        Returns:
+            Dict mapping each component to its boolean state **after**
+            the update, so callers can log / assert.
+        """
+        if column_generation is not None:
+            self._cg_enabled = bool(column_generation)
+        if gnn is not None:
+            self._gnn_enabled = bool(gnn)
+        if cvar is not None:
+            self._use_cvar_objective = bool(cvar)
+        if fairness is not None:
+            self._fairness_constraints_enabled = bool(fairness)
+        state = {
+            "column_generation": bool(self._cg_enabled),
+            "gnn": bool(self._gnn_enabled),
+            "cvar": bool(self._use_cvar_objective),
+            "fairness": bool(self._fairness_constraints_enabled),
+        }
+        logger.info(f"Optimizer components set: {state}")
+        return state
 
     def set_weights(self, weights: Dict[str, float], normalise: bool = True) -> Dict[str, float]:
         """

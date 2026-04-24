@@ -162,8 +162,9 @@ def _run_arm(
 
     opt = ScheduleOptimizer()
     opt.chairs = chairs
-    opt._cg_enabled = False
-    opt._fairness_constraints_enabled = True  # keep production default for both arms
+    # Disable CG to stay on the monolithic CP-SAT path; keep fairness
+    # ON for both arms so the robustness delta isn't confounded.
+    opt.set_components(column_generation=False, fairness=True)
 
     # Snapshot, flip, restore.  Re-normalise so the 5 remaining
     # objectives still sum to 1 when we drop robustness.

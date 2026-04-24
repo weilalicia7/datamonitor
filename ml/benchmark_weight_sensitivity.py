@@ -32,8 +32,8 @@ Scope
 -----
 To keep the benchmark under a minute we:
   * use 20 patients and a 6-chair grid
-  * disable the expensive DRO+CVaR branch via _use_cvar_objective=False
-  * disable GNN + column generation
+  * disable the expensive DRO+CVaR branch via ``set_components(cvar=False)``
+  * disable GNN + column generation + fairness via the same helper
   * use an 8-second CP-SAT time limit per point (most points converge
     in well under a second on this size)
 
@@ -149,10 +149,9 @@ def _solve_with_weights(patients, chairs, weights, time_limit_s: float):
     # Keep the sweep fast + isolated — the trade-off is driven by the
     # weight change, not by the heavy components which already have
     # their own benchmarks.
-    opt._cg_enabled = False
-    opt._gnn_enabled = False
-    opt._use_cvar_objective = False
-    opt._fairness_constraints_enabled = False
+    opt.set_components(
+        column_generation=False, gnn=False, cvar=False, fairness=False,
+    )
     opt.set_weights(weights, normalise=False)
     t0 = time.perf_counter()
     result = opt.optimize(patients, time_limit_seconds=int(time_limit_s))

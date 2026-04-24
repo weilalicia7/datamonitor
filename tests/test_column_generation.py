@@ -353,13 +353,13 @@ def _run_mini_benchmark(patient_counts, time_limit_s, n_chairs=10):
             for i in range(n)
         ]
         opt_cpsat = ScheduleOptimizer(); opt_cpsat.chairs = chairs
-        opt_cpsat._cg_enabled = False
+        opt_cpsat.set_components(column_generation=False)
         t0 = _time.perf_counter()
         opt_cpsat.optimize(patients, time_limit_seconds=int(time_limit_s))
         cpsat_dt = _time.perf_counter() - t0
 
         opt_cg = ScheduleOptimizer(); opt_cg.chairs = chairs
-        opt_cg._cg_enabled = True
+        opt_cg.set_components(column_generation=True)
         opt_cg._cg_threshold = 1   # force CG path even at small n
         t0 = _time.perf_counter()
         opt_cg.optimize(patients, time_limit_seconds=int(time_limit_s))

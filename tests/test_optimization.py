@@ -87,6 +87,77 @@ class TestScheduleOptimizer(unittest.TestCase):
                 self.assertIsNotNone(p1_apt)
 
 
+class TestSetComponents(unittest.TestCase):
+    """Locks the public ``ScheduleOptimizer.set_components()`` API so
+    benchmarks and regression tests have a stable surface for toggling
+    heavy solver components.  Without this method, call-sites mutated
+    private ``_cg_enabled`` / ``_gnn_enabled`` / ``_use_cvar_objective``
+    / ``_fairness_constraints_enabled`` attributes directly — a typo
+    was silently a no-op and any future rename would break them all.
+    """
+
+    def test_no_op_call_preserves_all_flags(self):
+        """``set_components()`` with no kwargs must not change any flag."""
+        opt = ScheduleOptimizer()
+        before = (opt._cg_enabled, opt._gnn_enabled,
+                  opt._use_cvar_objective, opt._fairness_constraints_enabled)
+        state = opt.set_components()
+        after = (opt._cg_enabled, opt._gnn_enabled,
+                 opt._use_cvar_objective, opt._fairness_constraints_enabled)
+        self.assertEqual(before, after, "no-op call mutated a flag")
+        # Returned dict still reflects the current state
+        self.assertEqual(state["column_generation"], before[0])
+        self.assertEqual(state["gnn"], before[1])
+        self.assertEqual(state["cvar"], before[2])
+        self.assertEqual(state["fairness"], before[3])
+
+    def test_single_flag_update_leaves_others_untouched(self):
+        """Flipping one component must not clobber the other three."""
+        opt = ScheduleOptimizer()
+        # Baseline: CG True, GNN False, CVaR True, fairness True
+        opt.set_components(cvar=False)
+        self.assertTrue(opt._cg_enabled)   # untouched
+        self.assertFalse(opt._gnn_enabled) # untouched
+        self.assertFalse(opt._use_cvar_objective)  # flipped
+        self.assertTrue(opt._fairness_constraints_enabled)  # untouched
+
+    def test_all_four_flags_can_be_flipped_in_one_call(self):
+        opt = ScheduleOptimizer()
+        state = opt.set_components(
+            column_generation=False, gnn=True,
+            cvar=False, fairness=False,
+        )
+        self.assertFalse(opt._cg_enabled)
+        self.assertTrue(opt._gnn_enabled)
+        self.assertFalse(opt._use_cvar_objective)
+        self.assertFalse(opt._fairness_constraints_enabled)
+        self.assertEqual(state, {
+            "column_generation": False, "gnn": True,
+            "cvar": False, "fairness": False,
+        })
+
+    def test_init_sets_explicit_defaults_for_cvar_and_fairness(self):
+        """Previously ``_use_cvar_objective`` + ``_fairness_constraints_enabled``
+        were accessed via ``getattr(…, True)`` with no explicit default —
+        they had to exist after ``__init__`` for ``set_components()`` to
+        operate on a known baseline."""
+        opt = ScheduleOptimizer()
+        self.assertTrue(hasattr(opt, "_use_cvar_objective"))
+        self.assertTrue(hasattr(opt, "_fairness_constraints_enabled"))
+        self.assertIs(opt._use_cvar_objective, True)
+        self.assertIs(opt._fairness_constraints_enabled, True)
+
+    def test_truthy_non_bool_values_are_coerced(self):
+        """Arguments go through ``bool(…)`` so 1 / 0 / ''/ 'yes' round-trip
+        to canonical True / False on the stored attribute."""
+        opt = ScheduleOptimizer()
+        opt.set_components(column_generation=0, gnn=1, cvar="", fairness="x")
+        self.assertIs(opt._cg_enabled, False)
+        self.assertIs(opt._gnn_enabled, True)
+        self.assertIs(opt._use_cvar_objective, False)
+        self.assertIs(opt._fairness_constraints_enabled, True)
+
+
 class TestConstraintManager(unittest.TestCase):
     """Tests for ConstraintManager class"""
 
@@ -725,7 +796,7 @@ class TestColumnGeneration(unittest.TestCase):
     def test_optimizer_cg_disabled(self):
         """When CG disabled, large instance still uses CP-SAT."""
         optimizer = ScheduleOptimizer()
-        optimizer._cg_enabled = False
+        optimizer.set_components(column_generation=False)
         optimizer._cg_threshold = 5
         patients = self.patients[:8]
         result = optimizer.optimize(patients, date=self.today)
@@ -1344,8 +1415,7 @@ class TestRobustnessMetric(unittest.TestCase):
 
         opt0 = ScheduleOptimizer()
         opt0.chairs = self._mk_chairs_robust(n=4)
-        opt0._cg_enabled = False
-        opt0._fairness_constraints_enabled = True
+        opt0.set_components(column_generation=False, fairness=True)
         w = dict(opt0.weights); w.pop("robustness", 0.0)
         total = sum(w.values())
         for k in w:
@@ -1357,8 +1427,7 @@ class TestRobustnessMetric(unittest.TestCase):
 
         opt10 = ScheduleOptimizer()
         opt10.chairs = self._mk_chairs_robust(n=4)
-        opt10._cg_enabled = False
-        opt10._fairness_constraints_enabled = True
+        opt10.set_components(column_generation=False, fairness=True)
         result10 = opt10.optimize(self._mk_patients_robust(n=12), time_limit_seconds=5)
         rs10 = robustness_score(result10.appointments or [])["robustness_score"]
 
@@ -1923,7 +1992,7 @@ class TestHardEqualisedOddsConstraint(unittest.TestCase):
     def test_hard_mode_meets_target_ratio(self):
         opt = ScheduleOptimizer()
         opt.chairs = self._mk_chairs()
-        opt._cg_enabled = False
+        opt.set_components(column_generation=False)
         opt._fairness_mode = "hard"
         opt._fairness_hard_ratio = 0.85
         patients = self._mk_mixed_cohort(n=20)
@@ -1946,13 +2015,13 @@ class TestHardEqualisedOddsConstraint(unittest.TestCase):
 
         opt_soft = ScheduleOptimizer()
         opt_soft.chairs = chairs
-        opt_soft._cg_enabled = False
+        opt_soft.set_components(column_generation=False)
         opt_soft._fairness_mode = "soft"
         r_soft = opt_soft.optimize(patients, time_limit_seconds=5)
 
         opt_hard = ScheduleOptimizer()
         opt_hard.chairs = chairs
-        opt_hard._cg_enabled = False
+        opt_hard.set_components(column_generation=False)
         opt_hard._fairness_mode = "hard"
         opt_hard._fairness_hard_ratio = 0.85
         r_hard = opt_hard.optimize(patients, time_limit_seconds=5)
@@ -2046,8 +2115,7 @@ class TestFairnessMitigationToggle(unittest.TestCase):
     def test_toggle_off_produces_feasible_schedule(self):
         opt = ScheduleOptimizer()
         opt.chairs = self._mk_chairs()
-        opt._fairness_constraints_enabled = False
-        opt._cg_enabled = False
+        opt.set_components(fairness=False, column_generation=False)
         result = opt.optimize(self._mk_patients(n=12), time_limit_seconds=5)
         self.assertTrue(
             bool(result.success)
@@ -2058,8 +2126,7 @@ class TestFairnessMitigationToggle(unittest.TestCase):
     def test_toggle_off_leaves_penalty_list_empty_post_solve(self):
         opt = ScheduleOptimizer()
         opt.chairs = self._mk_chairs()
-        opt._fairness_constraints_enabled = False
-        opt._cg_enabled = False
+        opt.set_components(fairness=False, column_generation=False)
         _ = opt.optimize(self._mk_patients(n=12), time_limit_seconds=5)
         self.assertEqual(getattr(opt, "_fairness_penalties", []), [])
 

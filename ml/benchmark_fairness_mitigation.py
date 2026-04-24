@@ -2,10 +2,11 @@
 Head-to-head benchmark: fairness constraints OFF vs. ON
 =======================================================
 
-Runs the same cohort through ``ScheduleOptimizer`` twice:
+Runs the same cohort through ``ScheduleOptimizer`` twice via the
+public ``set_components()`` API:
 
-  * Arm A (baseline)   — `_fairness_constraints_enabled = False`
-  * Arm B (mitigation) — `_fairness_constraints_enabled = True`
+  * Arm A (baseline)   — ``set_components(fairness=False)``
+  * Arm B (mitigation) — ``set_components(fairness=True)``
 
 For each arm the script measures:
 
@@ -30,8 +31,8 @@ CLI
 
 Never invoked by the live Flask backend — benchmark only.  No UI
 panel; no email; the only side-effect is a JSONL append.  The
-optimiser's default remains `_fairness_constraints_enabled = True`
-so this script cannot affect the prediction pipeline.
+optimiser's default remains ``fairness=True`` so this script
+cannot affect the prediction pipeline.
 """
 from __future__ import annotations
 
@@ -177,12 +178,14 @@ def _run_arm(
     opt = ScheduleOptimizer()
     opt.chairs = chairs
     opt._fairness_mode = fairness_mode
-    # Back-compat mirror so legacy code paths reading this flag see
-    # the same enabled/disabled verdict.
-    opt._fairness_constraints_enabled = (fairness_mode != "none")
-    # Don't route to column generation — we want the monolithic CP-SAT
-    # path which is where the fairness penalties live.
-    opt._cg_enabled = False
+    # Back-compat mirror so legacy code paths reading the boolean flag
+    # see the same enabled/disabled verdict; also don't route to
+    # column generation — we want the monolithic CP-SAT path which is
+    # where the fairness penalties live.
+    opt.set_components(
+        fairness=(fairness_mode != "none"),
+        column_generation=False,
+    )
 
     t0 = time.perf_counter()
     result = opt.optimize(patients, time_limit_seconds=int(time_limit_s))

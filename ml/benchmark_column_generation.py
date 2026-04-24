@@ -115,7 +115,7 @@ def _build_chairs(n_chairs: int):
 
 def _solve(opt, patients, time_limit_s: float, *, use_cg: bool):
     """Run a single solve; return (wall_seconds, status, n_scheduled)."""
-    opt._cg_enabled = use_cg
+    opt.set_components(column_generation=use_cg)
     t0 = time.perf_counter()
     result = opt.optimize(patients, time_limit_seconds=int(time_limit_s))
     dt = time.perf_counter() - t0

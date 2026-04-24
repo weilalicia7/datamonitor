@@ -213,7 +213,7 @@ def _run_cpsat_pareto(
     for cfg in PARETO_WEIGHT_SETS:
         opt = ScheduleOptimizer()
         opt.chairs = chairs
-        opt._cg_enabled = False
+        opt.set_components(column_generation=False)
         weights = {k: v for k, v in cfg.items() if k != "name"}
         opt.set_weights(weights, normalise=False)
         t0 = time.perf_counter()

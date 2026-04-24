@@ -13,13 +13,13 @@ dissertation's §5.8 ablation table via ``dissertation_analysis.R``
 benchmark row.
 
 Scoped to components that flip via a single flag on
-``ScheduleOptimizer``:
+``ScheduleOptimizer`` through the public ``set_components()`` API:
 
-  * CG              — ``_cg_enabled``                 (column generation)
-  * GNN             — ``_gnn_enabled``                (feasibility pre-filter)
-  * Fairness        — ``_fairness_constraints_enabled`` (DRO-style parity)
+  * CG              — ``column_generation``           (column generation)
+  * GNN             — ``gnn``                         (feasibility pre-filter)
+  * Fairness        — ``fairness``                    (DRO-style parity)
   * Robustness      — ``weights['robustness'] = 0``   (slack post-spread)
-  * CVaR            — ``_use_cvar_objective``         (worst-case scenarios)
+  * CVaR            — ``cvar``                        (worst-case scenarios)
 
 The prediction-side components (DFL, IRL, TFT) have dedicated
 benchmarks and are intentionally out of scope here — ablating them
@@ -167,10 +167,12 @@ def _run_arm(
 
     opt = ScheduleOptimizer()
     opt.chairs = chairs
-    opt._cg_enabled = bool(cg_enabled)
-    opt._gnn_enabled = bool(gnn_enabled)
-    opt._fairness_constraints_enabled = bool(fairness_enabled)
-    opt._use_cvar_objective = bool(cvar_enabled)
+    opt.set_components(
+        column_generation=bool(cg_enabled),
+        gnn=bool(gnn_enabled),
+        fairness=bool(fairness_enabled),
+        cvar=bool(cvar_enabled),
+    )
 
     # Robustness knob — overrides the weight, leaving the other five
     # objective weights normalised around the missing mass so the
