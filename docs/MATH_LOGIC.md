@@ -4,7 +4,8 @@
 
 This document describes all mathematical formulas, algorithms, and optimization logic used in the SACT (Systemic Anti-Cancer Therapy) Scheduling System for Velindre Cancer Centre.
 
-**Version:** 5.0.3 (Updated April 2026)
+**Version:** 5.0.4 (Updated April 2026)
+**New in v5.0.4:** §2.12.11 Reproducible CG scalability benchmark — new `ml/benchmark_column_generation.py` runs both solvers against `patients.xlsx` and writes timed rows to `data_cache/cg_benchmark/results.jsonl`.  Dissertation §4.5.1 Table 4.4 reads this JSONL via `dissertation_analysis.R §16` (with the calibrated empirical model as fallback) and emits `\cgTimeoutSeconds` + `\cgSource` macros so the table caption cannot drift from the actual benchmark setup.  Two new structural invariants in `tests/test_column_generation.py` lock the speedup-vs-cells consistency and the timeout-flag-vs-measured-time consistency.  Regression for the original Table 4.4 inconsistency where the speedup column (4.6×) disagreed with the displayed CP-SAT cell ("timeout") because the two were computed from different hidden values.
 **New in v5.0.3:** §A.8.7 Counterfactual fairness audit — decision-threshold safety bounds.  `ScheduleabilityPredictor.fit()` previously set `_decision_threshold = y.mean()` on degenerate inputs, which collapsed to 0.0 when the audit was called against an all-rejected cohort and produced a vacuous PASS with `delta_prob = 0` for every patient (the §4.5.15 dissertation showed `Decision threshold 0.000`).  New `_clamp_threshold()` helper + `DECISION_THRESHOLD_{FLOOR,CEILING,NEUTRAL}` constants + a dedicated `degenerate_fallback` predictor method now guarantee the threshold is strictly inside `[0.05, 0.95]` on every code path, with an honest "vacuously PASS" narrative when the input is degenerate.  Locked by `tests/test_counterfactual_fairness.py::TestDecisionThresholdInvariants` (9 tests).
 **New in v5.0.2:** §A.7.6 Safety-guardrails verdict-narrative consistency — new `TestVerdictInvariants` regression class asserts the runtime invariant ($\textsc{reject} \iff n_{\textsc{C}} > 0$) and that the `narrative` string's leading verdict word matches `report.verdict`.  `dissertation_analysis.R §28` adds a defensive `stop()` before emitting `\safExample*` macros if any reports.jsonl row breaks the invariant, and a new `\safExample*` macro family sources the §4.5.14 example block from the most recent `critical_slack_floor` REJECT row so the example's verdict, violation counts, and rules tripped are guaranteed-consistent (regression for the dissertation rendering that mixed `\safLatestVerdict=ACCEPT` with a hardcoded `REJECT --- 1 total violations` narrative).
 **New in v5.0.1:** §2.12.6 Column-generation wall-clock guard — `ColumnGenerator(time_limit_s=...)` now honours the outer `time_limit_seconds` passed by `_optimize_column_generation`, breaking the master loop at iteration boundaries (and mid-pricing-pass) when the budget is exhausted and returning a feasible solution tagged `CG_TIME_LIMIT`. Without this guard the §A.9 auto-scaler's per-worker budgets were unenforceable on instances that routed to CG: a 2 s budget on a 202-patient cohort previously took $\approx 350$ s (175× overshoot). Regression-tested at `tests/test_column_generation.py::test_cg_respects_wall_clock_time_limit`. Pre-fix evidence preserved at `data_cache/auto_scaling/runs.pre_cg_time_limit_fix.jsonl.bak`.
@@ -921,7 +922,26 @@ After LP convergence, the solution may be fractional. We round via:
 
 Column generation activates automatically when `len(patients) > COLUMN_GEN_THRESHOLD` (default 50). The threshold is configurable in `config.py`.
 
-#### 2.12.11 API Monitoring
+#### 2.12.11 Reproducible scalability benchmark
+
+`ml/benchmark_column_generation.py` runs both solvers against
+`patients.xlsx` for a fixed sequence of cohort sizes and writes one
+timed row per (n, solver) pair to `data_cache/cg_benchmark/results.jsonl`.
+The dissertation §4.5.1 Table 4.4 reads this JSONL via `dissertation_analysis.R §16`; when the file is absent R falls back to a calibrated empirical model that scales the published constants.  Two structural invariants are locked by `tests/test_column_generation.py`:
+
+* **`test_benchmark_speedup_equals_ratio_of_cells`** — every row's recorded `speedup` equals `cpsat_time_s / cg_time_s` to within rounding.  Regression for the original Table 4.4 inconsistency where the speedup column (4.6×) disagreed with the displayed CP-SAT cell ("timeout") because the speedup was computed from a hidden 23 s CP-SAT time; the Python benchmark now computes the speedup at the measurement site so the dissertation table cells cannot drift.
+* **`test_benchmark_timeout_flag_consistent_with_measured_time`** — the `cpsat_timed_out` flag agrees with `cpsat_time_s ≥ time_limit_s − 0.5` (slop for OR-Tools' soft cap).  The dissertation Table 4.4 only renders "timeout (≥ X s)" when this flag is True.
+
+Run manually:
+
+```bash
+python -m ml.benchmark_column_generation \
+    --patient-counts 30,50,75,100,150 \
+    --time-limit-seconds 30 \
+    --chairs 45
+```
+
+#### 2.12.12 API Monitoring
 
 `GET /api/optimizer/colgen` returns:
 

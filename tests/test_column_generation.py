@@ -312,3 +312,104 @@ def test_cg_matches_cpsat_on_tiny_instance(today, chairs):
     cpsat_ids = {a.patient_id for a in res_cpsat.appointments}
     cg_ids = {a.patient_id for a in res_cg.appointments}
     assert cpsat_ids == cg_ids
+
+
+# ---------------------------------------------------------------------------
+# Benchmark JSONL invariants — regression for §4.5.1 Table 4.4
+# ---------------------------------------------------------------------------
+
+def _run_mini_benchmark(patient_counts, time_limit_s, n_chairs=10):
+    """In-memory benchmark used only by the structural tests below."""
+    import time as _time
+    from optimization.optimizer import ScheduleOptimizer, Patient, Chair
+    from datetime import datetime, timedelta
+    from config import OPERATING_HOURS
+
+    today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+    start_h, end_h = OPERATING_HOURS
+    chairs = [
+        Chair(
+            chair_id=f"BENCH-C{i:02d}",
+            site_code="WC",
+            is_recliner=i < 2,
+            available_from=today.replace(hour=start_h),
+            available_until=today.replace(hour=end_h),
+        )
+        for i in range(n_chairs)
+    ]
+    rows = []
+    for n in patient_counts:
+        patients = [
+            Patient(
+                patient_id=f"BP{i:03d}",
+                priority=(i % 4) + 1,
+                protocol="R-CHOP",
+                expected_duration=60 + 30 * (i % 3),
+                postcode="CF14",
+                earliest_time=today.replace(hour=start_h),
+                latest_time=today.replace(hour=end_h),
+                noshow_probability=0.10,
+            )
+            for i in range(n)
+        ]
+        opt_cpsat = ScheduleOptimizer(); opt_cpsat.chairs = chairs
+        opt_cpsat._cg_enabled = False
+        t0 = _time.perf_counter()
+        opt_cpsat.optimize(patients, time_limit_seconds=int(time_limit_s))
+        cpsat_dt = _time.perf_counter() - t0
+
+        opt_cg = ScheduleOptimizer(); opt_cg.chairs = chairs
+        opt_cg._cg_enabled = True
+        opt_cg._cg_threshold = 1   # force CG path even at small n
+        t0 = _time.perf_counter()
+        opt_cg.optimize(patients, time_limit_seconds=int(time_limit_s))
+        cg_dt = _time.perf_counter() - t0
+
+        rows.append({
+            "n_patients": n,
+            "cpsat_time_s": cpsat_dt,
+            "cg_time_s": cg_dt,
+            "speedup": cpsat_dt / max(cg_dt, 1e-6),
+            "time_limit_s": float(time_limit_s),
+            "cpsat_timed_out": cpsat_dt >= time_limit_s - 0.5,
+        })
+    return rows
+
+
+def test_benchmark_speedup_equals_ratio_of_cells():
+    """
+    Regression for the original Table 4.4 inconsistency: the dissertation
+    reported CP-SAT='timeout' / CG=5.1s / speedup=4.6x for n=100, but
+    60s_timeout / 5.1s ≈ 11.8x not 4.6x — the speedup column was computed
+    from a HIDDEN cpsat_time (~23s) that disagreed with the displayed
+    'timeout' cell.
+
+    Lock the invariant: in EVERY benchmark row, the recorded speedup
+    MUST equal cpsat_time_s / cg_time_s to within rounding.  No silent
+    decoupling between the cells and the ratio.
+    """
+    rows = _run_mini_benchmark(patient_counts=[5, 10], time_limit_s=10)
+    for r in rows:
+        expected = r["cpsat_time_s"] / max(r["cg_time_s"], 1e-6)
+        assert abs(r["speedup"] - expected) < 0.05, (
+            f"n={r['n_patients']}: speedup={r['speedup']:.3f} "
+            f"!= cpsat/cg = {expected:.3f}"
+        )
+
+
+def test_benchmark_timeout_flag_consistent_with_measured_time():
+    """
+    `cpsat_timed_out` must agree with `cpsat_time_s >= time_limit_s`
+    (with a 0.5 s slop for OR-Tools' soft cap).  Catches a future
+    regression where the benchmark might claim 'timeout' but report a
+    sub-budget time, or vice versa — exactly the cells-don't-match-flag
+    failure mode that produced the Table 4.4 contradiction.
+    """
+    rows = _run_mini_benchmark(patient_counts=[5, 10], time_limit_s=10)
+    for r in rows:
+        actually_timed_out = r["cpsat_time_s"] >= r["time_limit_s"] - 0.5
+        assert r["cpsat_timed_out"] == actually_timed_out, (
+            f"n={r['n_patients']}: timed_out flag={r['cpsat_timed_out']} "
+            f"but cpsat_time={r['cpsat_time_s']:.3f} vs limit "
+            f"{r['time_limit_s']:.3f}"
+        )
