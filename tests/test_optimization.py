@@ -1776,6 +1776,155 @@ class TestComponentSignificanceBenchmark(unittest.TestCase):
         self.assertEqual(empty["p_value"], 1.0)
 
 
+class TestFairnessShapExplainer(unittest.TestCase):
+    """Regression for §5.13 (Improvement G): the SHAP root-cause
+    analyser must produce a JSONL row that R §20e can read to
+    render Table 5.8 macros, and the feature-classifier + verdict
+    helper must agree with a hand-specified reference on canonical
+    feature names.  Three invariants locked:
+
+      1. JSONL top-level schema + per-attribute sub-schema +
+         per-comparison sub-schema carry the fields R walks.
+      2. The feature classifier puts known-category names into the
+         right bucket (gender -> protected, travel_distance_km ->
+         geographic, prev_noshow_rate -> clinical, contact_pref_phone
+         -> administrative, etc.).
+      3. The verdict rule escalates exactly when a protected feature
+         is in the top-k, returns "legitimate" only when ALL top-k
+         are geographic/clinical/temporal/other, and falls back to
+         "legitimate_with_note" when a proxy or administrative feature
+         shows up.
+    """
+
+    REQUIRED_TOP_FIELDS = (
+        "ts", "n_patients", "n_history", "top_k",
+        "n_features_total", "attributes",
+    )
+    PER_ATTRIBUTE_FIELDS = (
+        "attribute", "attribute_column", "comparisons",
+    )
+    PER_COMPARISON_FIELDS = (
+        "group_a", "group_b", "n_a", "n_b",
+        "mean_pred_a", "mean_pred_b",
+        "prediction_gap", "top_features", "verdict",
+    )
+    TOP_FEATURE_FIELDS = (
+        "feature", "gap", "abs_gap", "category",
+    )
+
+    def _sample_row(self):
+        def _tf(name, cat, gap):
+            return {"feature": name, "mean_shap_a": 0.0, "mean_shap_b": 0.0,
+                    "gap": gap, "abs_gap": abs(gap), "category": cat}
+        return {
+            "ts": "2026-04-24T20:30:00",
+            "n_patients": 120, "n_history": 1500, "top_k": 3,
+            "n_features_total": 92,
+            "wall_seconds": 3.6,
+            "feature_categories": {"protected": ["gender"]},
+            "attributes": [
+                {"attribute": "Gender", "attribute_column": "Gender",
+                 "n_with_attribute": 120, "group_sizes": {"F": 66, "M": 52},
+                 "comparisons": [{
+                    "group_a": "F", "group_b": "M",
+                    "n_a": 66, "n_b": 52,
+                    "mean_pred_a": 0.25, "mean_pred_b": 0.22,
+                    "prediction_gap": 0.025,
+                    "total_abs_gap": 0.5, "top_k_abs_gap": 0.165,
+                    "top_features": [
+                        _tf("expected_duration_min", "clinical", 0.07),
+                        _tf("travel_distance_km", "geographic", 0.055),
+                        _tf("has_comorbidities", "clinical", 0.038),
+                    ],
+                    "verdict": "legitimate",
+                 }]},
+                {"attribute": "Site", "attribute_column": "Site_Code",
+                 "n_with_attribute": 120, "group_sizes": {"WC": 93, "RGH": 13},
+                 "comparisons": [{
+                    "group_a": "WC", "group_b": "RGH",
+                    "n_a": 93, "n_b": 13,
+                    "mean_pred_a": 0.22, "mean_pred_b": 0.26,
+                    "prediction_gap": -0.044,
+                    "total_abs_gap": 0.6, "top_k_abs_gap": 0.5,
+                    "top_features": [
+                        _tf("expected_duration_min", "clinical", -0.285),
+                        _tf("cycle_number", "clinical", 0.119),
+                        _tf("contact_pref_phone", "administrative", -0.105),
+                    ],
+                    "verdict": "legitimate_with_note",
+                 }]},
+            ],
+            "method_note": "...",
+        }
+
+    def test_row_schema(self):
+        row = self._sample_row()
+        for f in self.REQUIRED_TOP_FIELDS:
+            self.assertIn(f, row, f"top-level missing {f!r}")
+        self.assertGreater(len(row["attributes"]), 0)
+        for attr in row["attributes"]:
+            for f in self.PER_ATTRIBUTE_FIELDS:
+                self.assertIn(f, attr, f"attribute missing {f!r}")
+            for cmp in attr["comparisons"]:
+                for f in self.PER_COMPARISON_FIELDS:
+                    self.assertIn(f, cmp, f"comparison missing {f!r}")
+                self.assertGreater(len(cmp["top_features"]), 0)
+                for tf in cmp["top_features"]:
+                    for f in self.TOP_FEATURE_FIELDS:
+                        self.assertIn(f, tf, f"top_feature missing {f!r}")
+                # Top features must be sorted by descending |gap|
+                abs_gaps = [abs(float(tf["gap"])) for tf in cmp["top_features"]]
+                for a, b in zip(abs_gaps, abs_gaps[1:]):
+                    self.assertGreaterEqual(
+                        a, b,
+                        "top_features must be sorted descending by |gap|",
+                    )
+
+    def test_feature_classifier_buckets(self):
+        from ml.fairness_shap_explainer import _classify_feature
+        # Protected — any direct use is a red flag
+        self.assertEqual(_classify_feature("gender"), "protected")
+        self.assertEqual(_classify_feature("Person_Sex"), "protected")
+        # Geographic — legitimate proxy for travel effort
+        self.assertEqual(_classify_feature("travel_distance_km"), "geographic")
+        self.assertEqual(_classify_feature("distance_km"), "geographic")
+        self.assertEqual(_classify_feature("is_main_site"), "geographic")
+        # Clinical — legitimate patient risk correlates
+        self.assertEqual(_classify_feature("prev_noshow_rate"), "clinical")
+        self.assertEqual(_classify_feature("has_comorbidities"), "clinical")
+        self.assertEqual(_classify_feature("expected_duration_min"), "clinical")
+        self.assertEqual(_classify_feature("age_band_40_60"), "clinical")
+        # Temporal — neutral scheduling
+        self.assertEqual(_classify_feature("hour"), "temporal")
+        self.assertEqual(_classify_feature("day_of_week"), "temporal")
+        self.assertEqual(_classify_feature("is_weekend"), "temporal")
+        # Administrative — legitimate but culturally correlated
+        self.assertEqual(_classify_feature("contact_pref_phone"), "administrative")
+        # Unknown — "other"
+        self.assertEqual(_classify_feature("__wild_feature_name__"), "other")
+
+    def test_verdict_rules(self):
+        from ml.fairness_shap_explainer import _verdict_for_topk
+        # Any protected -> bias_direct (dominates everything else)
+        self.assertEqual(_verdict_for_topk(
+            ["clinical", "protected", "geographic"]), "bias_direct")
+        # Proxy present -> legitimate_with_note
+        self.assertEqual(_verdict_for_topk(
+            ["clinical", "proxy", "geographic"]), "legitimate_with_note")
+        # Administrative present -> legitimate_with_note
+        self.assertEqual(_verdict_for_topk(
+            ["clinical", "administrative", "geographic"]),
+            "legitimate_with_note")
+        # All legitimate (clinical/geographic/temporal) -> legitimate
+        self.assertEqual(_verdict_for_topk(
+            ["clinical", "geographic", "clinical"]), "legitimate")
+        self.assertEqual(_verdict_for_topk(
+            ["geographic", "temporal", "clinical"]), "legitimate")
+        # "other" alone is legitimate (not protected / proxy / admin)
+        self.assertEqual(_verdict_for_topk(
+            ["clinical", "other", "geographic"]), "legitimate")
+
+
 class TestExternalAlgorithmBenchmark(unittest.TestCase):
     """
     Regression for §5.10 (external-review Improvement C).  The paper

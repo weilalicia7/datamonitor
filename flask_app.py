@@ -7848,6 +7848,44 @@ def api_tuning_status():
         return jsonify({'success': False, 'error': str(exc)}), 500
 
 
+@app.route('/api/metrics/fairness-shap/status', methods=['GET'])
+def api_fairness_shap_status():
+    """
+    Fairness-SHAP root-cause analyser (§5.13, Improvement G).
+    Read-only diagnostic — returns the LATEST JSONL row written by
+    ``ml/fairness_shap_explainer.py`` or
+    ``{"source": "not_run"}`` when the file is absent.  Never
+    triggers a run; the benchmark is CLI-only.  Invisible to the
+    live prediction pipeline by design.
+    """
+    try:
+        cache_path = Path(
+            "data_cache/fairness_shap/results.jsonl"
+        )
+        if not cache_path.exists():
+            return jsonify({"success": True, "source": "not_run"})
+        text = cache_path.read_text("utf-8")
+        lines = [l for l in text.splitlines() if l.strip()]
+        if not lines:
+            return jsonify({"success": True, "source": "not_run"})
+        row = json.loads(lines[-1])
+        summary = {
+            "source": "real_benchmark",
+            "ts": row.get("ts"),
+            "n_patients": row.get("n_patients"),
+            "n_history": row.get("n_history"),
+            "top_k": row.get("top_k"),
+            "n_features_total": row.get("n_features_total"),
+            "model": row.get("model"),
+            "attributes": row.get("attributes", []),
+            "wall_seconds": row.get("wall_seconds"),
+        }
+        return jsonify({"success": True, **summary})
+    except Exception as exc:
+        logger.error(f"fairness-shap status error: {exc}")
+        return jsonify({"success": False, "error": str(exc)}), 500
+
+
 @app.route('/api/metrics/component-significance/status', methods=['GET'])
 def api_component_significance_status():
     """
