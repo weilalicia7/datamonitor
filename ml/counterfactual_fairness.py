@@ -92,6 +92,18 @@ DEFAULT_MIN_EFFECT_SIZE: float = 0.05
 DEFAULT_FLIP_BUDGET: float = 0.10         # certified iff flip rate ≤ budget
 DEFAULT_TOP_FLIPS: int = 10
 DEFAULT_MIN_REJECTED: int = 5             # fewer than this ⇒ vacuous pass
+
+# Decision-threshold safety bounds.  The threshold MUST sit strictly between
+# 0 and 1 so the predictor's "flip" criterion (cf_prob ≥ threshold) is
+# meaningful: 0 means every patient trivially flips; 1 means none ever can.
+# Tightening to [0.05, 0.95] also keeps the heuristic predict_proba away
+# from sigmoid saturation when it falls back to the mean-ratio path.
+# Regression for §4.5.15: a degenerate y (all-rejected or all-scheduled
+# input cohort) used to push the threshold to y.mean() ∈ {0.0, 1.0},
+# which made every audit a vacuous PASS with delta_prob = 0 everywhere.
+DECISION_THRESHOLD_FLOOR: float = 0.05
+DECISION_THRESHOLD_CEILING: float = 0.95
+DECISION_THRESHOLD_NEUTRAL: float = 0.5   # used when the cohort gives no signal
 COUNTERFACTUAL_DIR: Path = DATA_CACHE_DIR / "counterfactual_fairness"
 COUNTERFACTUAL_LOG: Path = COUNTERFACTUAL_DIR / "audits.jsonl"
 
@@ -223,10 +235,23 @@ class ScheduleabilityPredictor:
     ) -> "ScheduleabilityPredictor":
         X, y = _build_xy(patients, scheduled_ids, postcode_deprivation, self.FEATURES)
         if X.shape[0] < 10 or y.sum() == 0 or (y == 0).sum() == 0:
-            # Degenerate: both classes not present, fall back to heuristic
-            self._method = "mean_ratio"
-            self._means = {f: float(X[:, k].mean()) for k, f in enumerate(self.FEATURES)}
-            self._decision_threshold = float(y.mean() if y.size else 0.5)
+            # Degenerate: at least one class missing.  Fall back to a
+            # neutral threshold (NOT y.mean(), which would be 0 or 1 here
+            # and make every audit a vacuous "PASS" with delta_prob = 0
+            # everywhere — see §4.5.15 regression test).  Log loudly so
+            # operators see why the audit will be vacuous.
+            logger.warning(
+                "ScheduleabilityPredictor.fit on degenerate input: "
+                f"n={X.shape[0]}, n_scheduled={int(y.sum())}, "
+                f"n_rejected={int((y == 0).sum())}; "
+                f"falling back to neutral threshold {DECISION_THRESHOLD_NEUTRAL} "
+                "(audit will report vacuously)."
+            )
+            self._method = "degenerate_fallback"
+            self._means = {
+                f: float(X[:, k].mean()) for k, f in enumerate(self.FEATURES)
+            } if X.size else {}
+            self._decision_threshold = DECISION_THRESHOLD_NEUTRAL
             return self
 
         # Standardise for numerical stability
@@ -244,14 +269,19 @@ class ScheduleabilityPredictor:
             self._coef = {f: float(coef[k]) for k, f in enumerate(self.FEATURES)}
             self._intercept = float(clf.intercept_[0])
             probs_all = clf.predict_proba(Xs)[:, 1]
-            self._decision_threshold = float(
-                np.median(probs_all[y == 1]) if (y == 1).any() else 0.5
+            raw_threshold = float(
+                np.median(probs_all[y == 1]) if (y == 1).any() else DECISION_THRESHOLD_NEUTRAL
             )
+            self._decision_threshold = _clamp_threshold(raw_threshold)
             self._method = "logistic_regression"
         except Exception as exc:
             logger.warning(f"sklearn LogReg unavailable ({exc}); using mean-ratio fallback")
             self._method = "mean_ratio"
-            self._decision_threshold = float(y.mean())
+            # Use the base rate as a starting point, then clamp to keep the
+            # threshold strictly inside (0, 1) — degenerate y.mean() values
+            # of 0.0 or 1.0 would otherwise saturate the predictor and zero
+            # out every delta_prob in the downstream audit.
+            self._decision_threshold = _clamp_threshold(float(y.mean()))
             # Tiny approximation: negative β on deprivation, negative β on distance
             # scaled to their inverse std — produces sensible flip signals.
             self._coef = {
@@ -264,8 +294,7 @@ class ScheduleabilityPredictor:
                 "no_show_rate": -0.5,
             }
             self._intercept = float(math.log(
-                max(self._decision_threshold, 1e-3)
-                / max(1 - self._decision_threshold, 1e-3)
+                self._decision_threshold / (1 - self._decision_threshold)
             ))
         return self
 
@@ -451,6 +480,7 @@ class CounterfactualFairnessAuditor:
             rate=rate, certified=certified,
             cf_postcode=cf_postcode, affluent_depr=cf_depr,
             min_effect=min_eff, top=top[0] if top else None,
+            predictor_method=predictor.method,
         )
 
         max_delta = max(deltas) if deltas else 0.0
@@ -570,6 +600,32 @@ class CounterfactualFairnessAuditor:
 # ---------------------------------------------------------------------------
 
 
+def _clamp_threshold(value: float) -> float:
+    """
+    Clamp a candidate decision threshold into the safe range
+    ``[DECISION_THRESHOLD_FLOOR, DECISION_THRESHOLD_CEILING]``.  If the
+    candidate is NaN or missing, return ``DECISION_THRESHOLD_NEUTRAL``.
+
+    The audit's "would_flip" check is ``cf_prob >= threshold``; a
+    threshold of 0 means every patient trivially flips and a threshold
+    of 1 means none ever can — both make the certificate vacuous.
+    Clamping at the source guarantees ``decision_threshold ∈ (0, 1)``
+    on every code path, which is exactly the §4.5.15 invariant the
+    dissertation table claims.
+    """
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return DECISION_THRESHOLD_NEUTRAL
+    if not math.isfinite(v):
+        return DECISION_THRESHOLD_NEUTRAL
+    if v < DECISION_THRESHOLD_FLOOR:
+        return DECISION_THRESHOLD_FLOOR
+    if v > DECISION_THRESHOLD_CEILING:
+        return DECISION_THRESHOLD_CEILING
+    return v
+
+
 def _pid(v: Any) -> Optional[str]:
     if v is None:
         return None
@@ -658,7 +714,16 @@ def _build_narrative(
     *, n_rejected: int, n_flipped: int, rate: float,
     certified: bool, cf_postcode: str, affluent_depr: float,
     min_effect: float, top: Optional[FlipCase],
+    predictor_method: str = "logistic_regression",
 ) -> str:
+    if predictor_method == "degenerate_fallback":
+        return (
+            f"Counterfactual audit: vacuously PASS -- predictor fitted on "
+            f"degenerate input (only one class present in the scheduling "
+            f"signal, so no Pr(scheduled) signal to compare against). "
+            f"Decision threshold defaulted to neutral; re-run once a real "
+            f"schedule has been computed."
+        )
     if n_rejected < DEFAULT_MIN_REJECTED:
         return (
             f"Counterfactual audit: vacuously PASS -- only {n_rejected} "

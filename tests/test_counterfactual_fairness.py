@@ -21,11 +21,15 @@ import pytest
 
 from ml.counterfactual_fairness import (
     AFFLUENT_CUTOFF,
+    DECISION_THRESHOLD_CEILING,
+    DECISION_THRESHOLD_FLOOR,
+    DECISION_THRESHOLD_NEUTRAL,
     DEFAULT_POSTCODE_DEPRIVATION,
     CounterfactualFairnessAuditor,
     CounterfactualFairnessCertificate,
     FlipCase,
     ScheduleabilityPredictor,
+    _clamp_threshold,
     _features,
     _pid,
     _postcode,
@@ -188,7 +192,11 @@ class TestPredictor:
         p = ScheduleabilityPredictor().fit(
             patients, scheduled, DEFAULT_POSTCODE_DEPRIVATION,
         )
-        assert p.method == "mean_ratio"
+        # Degenerate input (single class present) now takes the
+        # degenerate_fallback path with a clamped neutral threshold —
+        # see TestDecisionThresholdInvariants for the full §4.5.15
+        # regression suite.
+        assert p.method == "degenerate_fallback"
 
 
 # --------------------------------------------------------------------------- #
@@ -348,3 +356,134 @@ class TestSerialization:
         back = json.loads(json.dumps(cert.to_dict()))
         assert "certified" in back
         assert isinstance(back["top_flips"], list)
+
+
+# --------------------------------------------------------------------------- #
+# 7. Decision-threshold invariants — regression for §4.5.15
+# --------------------------------------------------------------------------- #
+
+
+class TestDecisionThresholdInvariants:
+    """
+    Regression for the §4.5.15 dissertation finding: the audit table
+    showed `Decision threshold 0.000`, which means every patient
+    trivially crosses the flip line and no proxy-discrimination signal
+    can ever surface.  Root cause: the predictor's degenerate-fallback
+    branch set `_decision_threshold = y.mean()` which collapses to
+    {0.0, 1.0} when the input cohort has only one class.
+
+    Lock the structural invariants so any future regression that lets
+    the threshold drift outside (0, 1) fails loudly here long before
+    it can re-appear in the dissertation:
+      - threshold ∈ [DECISION_THRESHOLD_FLOOR, DECISION_THRESHOLD_CEILING]
+        on every code path (logreg, mean_ratio, degenerate_fallback)
+      - degenerate input ⇒ predictor_method == "degenerate_fallback"
+        AND narrative says "vacuously PASS"
+      - clamp helper handles NaN / inf / out-of-range safely
+    """
+
+    def test_clamp_in_range_passes_through(self):
+        assert _clamp_threshold(0.5) == 0.5
+        assert _clamp_threshold(DECISION_THRESHOLD_FLOOR) == DECISION_THRESHOLD_FLOOR
+        assert _clamp_threshold(DECISION_THRESHOLD_CEILING) == DECISION_THRESHOLD_CEILING
+
+    def test_clamp_below_floor_lifts_to_floor(self):
+        # Original §4.5.15 bug: y.mean()=0 produced threshold=0.000
+        assert _clamp_threshold(0.0) == DECISION_THRESHOLD_FLOOR
+        assert _clamp_threshold(-1.0) == DECISION_THRESHOLD_FLOOR
+
+    def test_clamp_above_ceiling_drops_to_ceiling(self):
+        assert _clamp_threshold(1.0) == DECISION_THRESHOLD_CEILING
+        assert _clamp_threshold(2.5) == DECISION_THRESHOLD_CEILING
+
+    def test_clamp_nan_returns_neutral(self):
+        assert _clamp_threshold(float("nan")) == DECISION_THRESHOLD_NEUTRAL
+        assert _clamp_threshold(float("inf")) == DECISION_THRESHOLD_NEUTRAL
+        assert _clamp_threshold(float("-inf")) == DECISION_THRESHOLD_NEUTRAL
+
+    def test_predictor_threshold_in_range_on_logreg_path(self, biased_cohort):
+        """
+        Healthy two-class input — logreg path should produce a threshold
+        well inside (0, 1), specifically the median predicted prob of
+        scheduled patients which never saturates.
+        """
+        patients, scheduled = biased_cohort
+        pred = ScheduleabilityPredictor().fit(
+            patients, set(scheduled), DEFAULT_POSTCODE_DEPRIVATION,
+        )
+        assert pred.method == "logistic_regression"
+        assert DECISION_THRESHOLD_FLOOR <= pred.decision_threshold <= DECISION_THRESHOLD_CEILING, (
+            f"threshold={pred.decision_threshold} fell outside the safe range"
+        )
+
+    def test_predictor_threshold_in_range_on_all_rejected_input(self):
+        """
+        Original §4.5.15 trigger: all patients in the input are unscheduled
+        → y is all-zero → degenerate path → previously set threshold to
+        y.mean() = 0.0.  Must now fall back to the neutral threshold,
+        flag the predictor method, and stay strictly in (0, 1).
+        """
+        patients = [
+            {"Patient_ID": f"R{i:03d}", "Patient_Postcode": "CF44",
+             "Age": 50, "Priority": 3, "Planned_Duration": 60,
+             "Distance_km": 30, "Travel_Time_Min": 60,
+             "Patient_NoShow_Rate": 0.20}
+            for i in range(20)
+        ]
+        pred = ScheduleabilityPredictor().fit(
+            patients, set(), DEFAULT_POSTCODE_DEPRIVATION,
+        )
+        assert pred.method == "degenerate_fallback"
+        assert DECISION_THRESHOLD_FLOOR <= pred.decision_threshold <= DECISION_THRESHOLD_CEILING
+        assert pred.decision_threshold == DECISION_THRESHOLD_NEUTRAL
+
+    def test_predictor_threshold_in_range_on_all_scheduled_input(self):
+        """Mirror test: all scheduled (y all 1) was the other degenerate case."""
+        patients = [
+            {"Patient_ID": f"S{i:03d}", "Patient_Postcode": "CF14",
+             "Age": 50, "Priority": 3, "Planned_Duration": 60,
+             "Distance_km": 15, "Travel_Time_Min": 30,
+             "Patient_NoShow_Rate": 0.15}
+            for i in range(20)
+        ]
+        pred = ScheduleabilityPredictor().fit(
+            patients,
+            {f"S{i:03d}" for i in range(20)},   # everyone scheduled
+            DEFAULT_POSTCODE_DEPRIVATION,
+        )
+        assert pred.method == "degenerate_fallback"
+        assert DECISION_THRESHOLD_FLOOR <= pred.decision_threshold <= DECISION_THRESHOLD_CEILING
+
+    def test_certificate_threshold_in_range(self, auditor, biased_cohort):
+        """End-to-end: every certificate written to JSONL must carry a
+        threshold strictly inside (0, 1).  This is what the dissertation
+        §4.5.15 table reads from."""
+        patients, scheduled = biased_cohort
+        cert = auditor.audit(patients, scheduled)
+        assert DECISION_THRESHOLD_FLOOR <= cert.decision_threshold <= DECISION_THRESHOLD_CEILING, (
+            f"Certificate threshold {cert.decision_threshold} outside safe range — "
+            "the §4.5.15 audit table will display a degenerate value"
+        )
+
+    def test_degenerate_audit_narrative_admits_vacuity(self, auditor):
+        """
+        When fed an all-rejected cohort (the exact production-path
+        failure mode that produced the dissertation's threshold=0.000),
+        the certificate's narrative must say 'vacuously PASS' rather
+        than the misleading regular 'PASS' that previously fired.
+        """
+        patients = [
+            {"Patient_ID": f"D{i:03d}", "Patient_Postcode": "CF44",
+             "Age": 50, "Priority": 3, "Planned_Duration": 60,
+             "Distance_km": 30, "Travel_Time_Min": 60,
+             "Patient_NoShow_Rate": 0.20}
+            for i in range(20)
+        ]
+        cert = auditor.audit(patients, scheduled_ids=[])  # nothing scheduled
+        assert cert.predictor_method == "degenerate_fallback"
+        assert "vacuously PASS" in cert.narrative
+        assert (
+            DECISION_THRESHOLD_FLOOR
+            <= cert.decision_threshold
+            <= DECISION_THRESHOLD_CEILING
+        )
