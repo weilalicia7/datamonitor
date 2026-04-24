@@ -28,6 +28,7 @@ from ml.inverse_rl_preferences import (
     InverseRLPreferenceLearner,
     ObjectiveFeatures,
     compute_objective_features,
+    _heldout_agreement,
 )
 from optimization.optimizer import ScheduleOptimizer, Patient
 
@@ -269,6 +270,102 @@ class TestOptimizerIntegration(unittest.TestCase):
         fit = learner.fit(bootstrap_if_empty=True, min_real_overrides=20)
         opt.set_weights(fit.theta_weights)
         self.assertAlmostEqual(sum(opt.weights.values()), 1.0, places=5)
+
+
+class TestHeldoutCrossValidation(unittest.TestCase):
+    """
+    Regression for §4.5.3 dissertation finding: "achieves 100.0%
+    pairwise agreement over 22 training pairs" was computed on the
+    training set (same data used to fit θ), making the 100 % claim
+    trivially achievable by a 6-parameter softmax on 22 pairs.  The
+    honest generalisation number is the cross-validated agreement
+    returned by _heldout_agreement().
+
+    Lock four invariants so the §4.5.3 prose can never silently go
+    back to citing optimistic training-set numbers:
+
+      1. LOO is the method for N ≤ 30 (tiny samples get per-pair
+         held-out estimates; any smaller fold size would collapse).
+      2. 5-fold is the method for N > 30.
+      3. n_folds returned matches the method (= N for LOO,
+         = 5 for 5-fold).
+      4. held-out agreement is a valid probability [0, 1].
+    """
+
+    def _synth(self, n, seed=0):
+        """Linearly-separable synthetic deltas — the IRL problem's
+        natural regime on override data."""
+        rng = np.random.RandomState(seed)
+        true = BOOTSTRAP_PRIOR.copy()
+        deltas = rng.normal(0, 1, size=(n, 6))
+        # Shift most rows along the true-θ direction so y = sign(θ·Δ)
+        # is predominantly +1 (the observed clinician preference).
+        deltas += np.outer(np.abs(rng.normal(0.5, 0.3, n)), true)
+        return deltas
+
+    def test_loo_used_for_small_n(self):
+        deltas = self._synth(n=22, seed=42)
+        mean, folds, method = _heldout_agreement(deltas, lam=0.05)
+        self.assertEqual(method, "loo")
+        self.assertEqual(folds, 22)
+        self.assertIsNotNone(mean)
+        self.assertGreaterEqual(mean, 0.0)
+        self.assertLessEqual(mean, 1.0)
+
+    def test_kfold_used_for_larger_n(self):
+        deltas = self._synth(n=100, seed=7)
+        mean, folds, method = _heldout_agreement(deltas, lam=0.05)
+        self.assertEqual(method, "kfold-5")
+        self.assertEqual(folds, 5)
+        self.assertIsNotNone(mean)
+        self.assertGreaterEqual(mean, 0.0)
+        self.assertLessEqual(mean, 1.0)
+
+    def test_too_few_samples_returns_none(self):
+        """N < 5 ⇒ no CV attempted — the helper returns None so the R
+        pipeline emits `\irlAgreementHeldout = n/a` and the prose
+        admits the limitation rather than citing noise."""
+        deltas = self._synth(n=4, seed=0)
+        mean, folds, method = _heldout_agreement(deltas, lam=0.05)
+        self.assertIsNone(mean)
+        self.assertEqual(folds, 0)
+        self.assertEqual(method, "none")
+
+    def test_fit_records_heldout_fields(self):
+        """End-to-end: fit() must populate mean_agreement_heldout,
+        heldout_n_folds, heldout_method on the returned IRLFitResult,
+        and the JSONL row must carry them too."""
+        import json
+        learner = InverseRLPreferenceLearner(
+            override_log_path=Path(tempfile.gettempdir()) / 'irl_heldout.jsonl',
+            model_path=Path(tempfile.gettempdir()) / 'irl_heldout.pkl',
+            history_path=Path(tempfile.gettempdir()) / 'irl_heldout_hist.jsonl',
+        )
+        learner.clear_overrides()
+        # Wipe any previous history so our assertion reads OUR fit
+        if learner.history_path.exists():
+            learner.history_path.unlink()
+        fit = learner.fit(bootstrap_if_empty=True, min_real_overrides=20)
+        # Dataclass side
+        self.assertIsNotNone(fit.mean_agreement_heldout)
+        self.assertGreaterEqual(fit.mean_agreement_heldout, 0.0)
+        self.assertLessEqual(fit.mean_agreement_heldout, 1.0)
+        self.assertIn(fit.heldout_method, ("loo", "kfold-5"))
+        self.assertGreater(fit.heldout_n_folds, 0)
+        # Generalisation invariant: held-out cannot exceed training by
+        # more than floating-point slop.
+        self.assertLessEqual(
+            fit.mean_agreement_heldout,
+            fit.mean_agreement + 1e-6,
+            f"held-out {fit.mean_agreement_heldout} exceeds training "
+            f"{fit.mean_agreement} — impossible under correct CV",
+        )
+        # JSONL side
+        with learner.history_path.open() as fh:
+            row = json.loads(fh.readlines()[-1])
+        self.assertIn("mean_agreement_heldout", row)
+        self.assertIn("heldout_n_folds", row)
+        self.assertIn("heldout_method", row)
 
 
 if __name__ == '__main__':

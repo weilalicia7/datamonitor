@@ -166,13 +166,21 @@ class IRLFitResult:
     n_real: int
     n_synthetic: int
     log_likelihood: float
-    mean_agreement: float                  # P(θ·ΔZ > 0) on training data
+    mean_agreement: float                  # P(θ·ΔZ > 0) on training data (can be optimistic)
     converged: bool
     l2_lambda: float
     fit_ts: str
     feature_std: List[float]               # per-feature stddev used for scaling
     training_mode: str = 'bootstrap'       # 'bootstrap' | 'real_only' | 'mixed'
     channel_counts: Dict[str, int] = field(default_factory=dict)
+    # §4.5.3 regression — held-out agreement from leave-one-out (N ≤ 30)
+    # or 5-fold (N > 30) cross-validation.  The on-training mean_agreement
+    # above is trivially 1.00 when 6 free parameters fit a small N (22
+    # pairs in the original dissertation run), so the dissertation should
+    # cite mean_agreement_heldout as the honest generalisation number.
+    mean_agreement_heldout: Optional[float] = None   # CV mean agreement
+    heldout_n_folds: int = 0                         # 1 fold per sample if LOO
+    heldout_method: str = "none"                      # "loo" / "kfold-5" / "none"
 
 
 # ---------------------------------------------------------------------------
@@ -257,6 +265,106 @@ def _field(obj, key: str, default=None):
     if isinstance(obj, dict):
         return obj.get(key, default)
     return getattr(obj, key, default)
+
+
+# ---------------------------------------------------------------------------
+# Cross-validated agreement (§4.5.3 regression)
+# ---------------------------------------------------------------------------
+
+
+def _fit_theta_on_deltas(deltas: np.ndarray, lam: float) -> Optional[np.ndarray]:
+    """
+    Fit θ via L-BFGS-B on the pairwise-softmax NLL against *deltas* (not
+    pre-standardised).  Returns the θ in standardised feature space
+    (caller may divide by std to convert to objective space).  Kept
+    here (not as a method) so the CV driver can re-fit on each fold
+    without depending on learner state.
+    """
+    if not SCIPY_AVAILABLE or deltas.shape[0] < 2:
+        return None
+    std = deltas.std(axis=0)
+    std[std < 1e-9] = 1.0
+    dz = deltas / std
+
+    def neg_log_lik(theta: np.ndarray) -> float:
+        s = dz @ theta
+        nll = float(np.sum(np.logaddexp(0.0, -s)))
+        reg = lam * float(np.sum(theta ** 2))
+        return nll + reg
+
+    def grad(theta: np.ndarray) -> np.ndarray:
+        s = dz @ theta
+        sig = 1.0 / (1.0 + np.exp(-s))
+        g = -dz.T @ (1.0 - sig)
+        g += 2.0 * lam * theta
+        return g
+
+    theta0 = np.ones(deltas.shape[1])
+    bounds = [(0.0, None)] * deltas.shape[1]
+    try:
+        res = minimize(
+            neg_log_lik, theta0, jac=grad, method='L-BFGS-B',
+            bounds=bounds, options={'maxiter': 500, 'gtol': 1e-7},
+        )
+        return np.asarray(res.x, dtype=float), std
+    except Exception:
+        return None
+
+
+def _heldout_agreement(
+    deltas: np.ndarray, lam: float,
+) -> Tuple[Optional[float], int, str]:
+    """
+    Leave-one-out (N ≤ 30) or 5-fold CV of the pairwise-agreement metric.
+
+    For each fold:
+      1. Fit θ on the train rows (same standardisation, same L2)
+      2. Predict on the held-out rows using the TRAIN fold's std
+      3. Record (θ·Δ > 0) per held-out row
+
+    Returns (mean held-out agreement, n_folds actually used, method).
+    Returns (None, 0, "none") when SciPy is unavailable or the dataset
+    is too small for CV to be meaningful (N < 5).  The dissertation
+    §4.5.3 cites mean_agreement_heldout, with n_folds and method for
+    reproducibility.
+    """
+    n, _k = deltas.shape
+    if not SCIPY_AVAILABLE or n < 5:
+        return (None, 0, "none")
+
+    if n <= 30:
+        method = "loo"
+        fold_indices = [(np.delete(np.arange(n), i), np.array([i]))
+                        for i in range(n)]
+    else:
+        method = "kfold-5"
+        rng = np.random.RandomState(0)
+        perm = rng.permutation(n)
+        fold_size = n // 5
+        fold_indices = []
+        for k in range(5):
+            lo = k * fold_size
+            hi = (k + 1) * fold_size if k < 4 else n
+            test_idx = perm[lo:hi]
+            train_idx = np.array([i for i in perm if i not in set(test_idx)])
+            fold_indices.append((train_idx, test_idx))
+
+    correct = 0
+    total = 0
+    for tr, te in fold_indices:
+        if len(tr) < 2 or len(te) < 1:
+            continue
+        result = _fit_theta_on_deltas(deltas[tr], lam)
+        if result is None:
+            continue
+        theta_star, std_train = result
+        dz_test = deltas[te] / std_train
+        correct += int(np.sum((dz_test @ theta_star) > 0.0))
+        total += len(te)
+
+    if total == 0:
+        return (None, 0, "none")
+    return (float(correct) / float(total), len(fold_indices), method)
 
 
 # ---------------------------------------------------------------------------
@@ -507,6 +615,14 @@ class InverseRLPreferenceLearner:
         ll = -neg_log_lik(theta_star)
         agreement = float(np.mean((dz @ theta_star) > 0.0))
 
+        # §4.5.3 regression — compute held-out agreement so the dissertation
+        # can report the generalisation number, not the trivially-1.00
+        # training-set number on a small N.  LOO when N ≤ 30 (any smaller
+        # and variance dominates), 5-fold otherwise.
+        heldout_mean, heldout_folds, heldout_method = _heldout_agreement(
+            deltas, lam,
+        )
+
         self.theta_raw = theta_star
         self.feature_std = std
         n_real_train = sum(1 for r in records if r.source == 'real')
@@ -525,6 +641,9 @@ class InverseRLPreferenceLearner:
             feature_std=std.tolist(),
             training_mode=training_mode,
             channel_counts=channel_counts,
+            mean_agreement_heldout=heldout_mean,
+            heldout_n_folds=heldout_folds,
+            heldout_method=heldout_method,
         )
         self.last_fit = fit
         self._save_state()
@@ -533,7 +652,9 @@ class InverseRLPreferenceLearner:
             f"IRL fit [{training_mode}]: N={fit.n_samples} "
             f"({fit.n_real} real / {fit.n_synthetic} synth, "
             f"channels={channel_counts}) LL={fit.log_likelihood:.2f} "
-            f"agree={fit.mean_agreement:.3f} θ={fit.theta_weights}"
+            f"agree_train={fit.mean_agreement:.3f} "
+            f"agree_heldout={fit.mean_agreement_heldout} "
+            f"[{fit.heldout_method}]"
         )
         return fit
 
@@ -605,7 +726,10 @@ class InverseRLPreferenceLearner:
             'n_real': fit.n_real,
             'n_synthetic': fit.n_synthetic,
             'log_likelihood': fit.log_likelihood,
-            'mean_agreement': fit.mean_agreement,
+            'mean_agreement': fit.mean_agreement,                  # training set
+            'mean_agreement_heldout': fit.mean_agreement_heldout,  # CV (§4.5.3)
+            'heldout_n_folds': fit.heldout_n_folds,
+            'heldout_method': fit.heldout_method,
             'converged': fit.converged,
             'training_mode': fit.training_mode,
             **{f'ch_{k}': v for k, v in fit.channel_counts.items()},
