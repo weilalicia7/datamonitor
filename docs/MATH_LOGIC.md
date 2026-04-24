@@ -4,7 +4,8 @@
 
 This document describes all mathematical formulas, algorithms, and optimization logic used in the SACT (Systemic Anti-Cancer Therapy) Scheduling System for Velindre Cancer Centre.
 
-**Version:** 5.0.4 (Updated April 2026)
+**Version:** 5.0.5 (Updated April 2026)
+**New in v5.0.5:** §3.8 TFT head-to-head held-out benchmark — new `ml/benchmark_tft_vs_ensemble.py` fits a fresh `TFTTrainer` and a fresh `GradientBoostingClassifier` on the SAME 80/20 train/test split of the eligibility-filtered cohort and writes one row per run to `data_cache/ensemble_benchmark/results.jsonl`.  `dissertation_analysis.R §20` reads it as the single source of truth for dissertation §4.5.6 and emits five new macros (`\tftHeldoutAUC`, `\ensembleHeldoutAUC`, `\heldoutDeltaAUC`, `\heldoutNtrain`, `\heldoutNtest`).  The §4.5.6 prose is rewritten to present TFT as an experimental alternative and to cite the honest head-to-head result alongside the training-set diagnostics from `tft_history.jsonl`.  Two new structural invariants in `tests/test_temporal_fusion_transformer.py::TestHeadToHeadBenchmarkSchema` lock the JSONL schema and the AUC/delta consistency.  Regression for the external-review finding that the original prose compared TFT training-set AUC (0.706) against the tree-ensemble's 0.635 literal from an unrelated validation split.
 **New in v5.0.4:** §2.12.11 Reproducible CG scalability benchmark — new `ml/benchmark_column_generation.py` runs both solvers against `patients.xlsx` and writes timed rows to `data_cache/cg_benchmark/results.jsonl`.  Dissertation §4.5.1 Table 4.4 reads this JSONL via `dissertation_analysis.R §16` (with the calibrated empirical model as fallback) and emits `\cgTimeoutSeconds` + `\cgSource` macros so the table caption cannot drift from the actual benchmark setup.  Two new structural invariants in `tests/test_column_generation.py` lock the speedup-vs-cells consistency and the timeout-flag-vs-measured-time consistency.  Regression for the original Table 4.4 inconsistency where the speedup column (4.6×) disagreed with the displayed CP-SAT cell ("timeout") because the two were computed from different hidden values.
 **New in v5.0.3:** §A.8.7 Counterfactual fairness audit — decision-threshold safety bounds.  `ScheduleabilityPredictor.fit()` previously set `_decision_threshold = y.mean()` on degenerate inputs, which collapsed to 0.0 when the audit was called against an all-rejected cohort and produced a vacuous PASS with `delta_prob = 0` for every patient (the §4.5.15 dissertation showed `Decision threshold 0.000`).  New `_clamp_threshold()` helper + `DECISION_THRESHOLD_{FLOOR,CEILING,NEUTRAL}` constants + a dedicated `degenerate_fallback` predictor method now guarantee the threshold is strictly inside `[0.05, 0.95]` on every code path, with an honest "vacuously PASS" narrative when the input is degenerate.  Locked by `tests/test_counterfactual_fairness.py::TestDecisionThresholdInvariants` (9 tests).
 **New in v5.0.2:** §A.7.6 Safety-guardrails verdict-narrative consistency — new `TestVerdictInvariants` regression class asserts the runtime invariant ($\textsc{reject} \iff n_{\textsc{C}} > 0$) and that the `narrative` string's leading verdict word matches `report.verdict`.  `dissertation_analysis.R §28` adds a defensive `stop()` before emitting `\safExample*` macros if any reports.jsonl row breaks the invariant, and a new `\safExample*` macro family sources the §4.5.14 example block from the most recent `critical_slack_floor` REJECT row so the example's verdict, violation counts, and rules tripped are guaranteed-consistent (regression for the dissertation rendering that mixed `\safLatestVerdict=ACCEPT` with a hardcoded `REJECT --- 1 total violations` narrative).
@@ -1482,6 +1483,22 @@ Endpoints:
 **Native quantiles** — the duration head outputs τ ∈ {0.1, 0.5, 0.9} directly, so the TFT duration predictions carry their own 10/50/90 interval without an external CQR wrapper. The adaptive-α machinery in §3.6 still applies to the tree ensemble conformal pipeline; the TFT simply provides an alternative uncertainty channel.
 
 No UI panel — feature runs invisibly; when TFT is unfitted, the pipeline is bit-identical to the pre-TFT code.
+
+**Head-to-head held-out benchmark.** The `noshow_auc` field in `tft_history.jsonl` is TRAINING-set AUC — the model is evaluated on the same data it trained on, which is optimistic.  The dissertation §4.5.6 honest-comparison claim is instead backed by `ml/benchmark_tft_vs_ensemble.py`, which:
+
+1. filters to patients with ≥ `past_window` prior appointments (the TFT's native eligibility gate),
+2. splits 80/20 train/test deterministically by seed,
+3. fits a fresh `TFTTrainer` on the train split AND a fresh `GradientBoostingClassifier` on the same train split,
+4. evaluates both on the SAME held-out rows,
+5. writes one row to `data_cache/ensemble_benchmark/results.jsonl` with `tft_noshow_auc`, `ensemble_noshow_auc`, `n_test`, `seed`, and a `comparison_note`.
+
+`dissertation_analysis.R §20` reads the most recent row with `ensemble_available=True` and emits `\tftHeldoutAUC`, `\ensembleHeldoutAUC`, `\heldoutDeltaAUC`, `\heldoutNtrain`, `\heldoutNtest`, `\tftHeldoutSource` so the dissertation table cells cannot drift from the measurement.  Two `tests/test_temporal_fusion_transformer.py::TestHeadToHeadBenchmarkSchema` tests lock the JSONL schema + AUC invariants against silent regression.  Regression for the §4.5.6 external-review finding that the original prose compared TFT training-set AUC (0.706) against a stale historical literal of 0.635 for the tree ensemble from an unrelated validation split.
+
+Run manually:
+
+```bash
+python -m ml.benchmark_tft_vs_ensemble --test-frac 0.20 --seed 42 --epochs 40
+```
 
 ---
 

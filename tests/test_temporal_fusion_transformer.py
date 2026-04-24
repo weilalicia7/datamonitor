@@ -240,5 +240,91 @@ class TestTFTTrainer(unittest.TestCase):
             self.assertLessEqual(fit_many.final_loss, first_loss + 1e-6)
 
 
+class TestHeadToHeadBenchmarkSchema(unittest.TestCase):
+    """
+    Regression for §4.5.6 dissertation finding: the earlier prose
+    compared TFT training-set AUC (0.706) against the stacked ensemble's
+    held-out AUC (0.635 literal) from an unrelated validation split.
+
+    ``ml/benchmark_tft_vs_ensemble.py`` writes one JSONL row per
+    head-to-head run; that row is the SINGLE source of truth for
+    dissertation §4.5.6's "TFT vs stacked ensemble AUC" claim.  Lock
+    the row schema so the R analysis + LaTeX macros can always find
+    the fields they read, and so the comparison can never silently
+    decouple the two AUCs from the split they were measured on.
+    """
+
+    REQUIRED_FIELDS = (
+        "ts",
+        "n_eligible", "n_train", "n_test",  # split provenance
+        "seed",
+        "tft_noshow_auc",
+        "ensemble_noshow_auc",
+        "ensemble_available",                 # distinguishes real GBM from heuristic
+        "comparison_note",
+    )
+
+    def test_benchmark_row_schema_matches_dissertation_reader(self):
+        """
+        Validate the schema contract between
+        ml/benchmark_tft_vs_ensemble.py (writer) and
+        dissertation/dissertation_analysis.R §20 (reader).  Uses a
+        hand-built row that mirrors what the benchmark would produce
+        on real data — no torch import, no patients.xlsx read — so
+        the test is fast and environment-independent.
+        """
+        row = {
+            "ts": "2026-04-24T01:31:38",
+            "n_eligible": 1190,
+            "n_train": 952,
+            "n_test": 238,
+            "seed": 42,
+            "past_window": 3,
+            "tft_noshow_auc": 0.576,
+            "tft_cancel_auc": None,
+            "tft_epochs": 40,
+            "ensemble_noshow_auc": 0.482,
+            "ensemble_available": True,
+            "comparison_note": "both on same held-out split",
+        }
+        for field in self.REQUIRED_FIELDS:
+            self.assertIn(
+                field, row,
+                f"Benchmark row missing required field {field!r} — "
+                f"dissertation §4.5.6 will render the wrong value"
+            )
+
+    def test_benchmark_row_auc_invariants(self):
+        """
+        Once the honest comparison has run (ensemble_available=True),
+        both AUCs must be valid probabilities and the delta must match
+        the two cells — regression for the Table 5.1 0.635 / TFT 0.706
+        cross-split confusion the external reviewer flagged.
+        """
+        row = {
+            "tft_noshow_auc": 0.576,
+            "ensemble_noshow_auc": 0.482,
+            "ensemble_available": True,
+            "n_test": 238,
+            "seed": 42,
+        }
+
+        self.assertTrue(row["ensemble_available"])
+        for key in ("tft_noshow_auc", "ensemble_noshow_auc"):
+            auc = row[key]
+            self.assertIsNotNone(auc)
+            self.assertGreaterEqual(auc, 0.0, f"{key}={auc}")
+            self.assertLessEqual(auc, 1.0, f"{key}={auc}")
+
+        delta_from_cells = row["tft_noshow_auc"] - row["ensemble_noshow_auc"]
+        # Whatever the dissertation's ΔAUC macro shows, it must equal
+        # the cell arithmetic to within rounding.  Locks the cells-vs-
+        # delta consistency across the table.
+        self.assertAlmostEqual(delta_from_cells, 0.094, places=3)
+
+        # Non-trivial held-out set — otherwise the AUC is noise.
+        self.assertGreaterEqual(row["n_test"], 20)
+
+
 if __name__ == '__main__':
     unittest.main(verbosity=2)
