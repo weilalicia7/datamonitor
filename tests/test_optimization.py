@@ -1416,7 +1416,7 @@ class TestWeightSensitivityBenchmark(unittest.TestCase):
     """
     Regression for §5.11 (Improvement E): the weight-sensitivity sweep
     must produce a JSONL row that R can read to render the Pareto
-    frontiers.  Lock three invariants so the §5.11 figures/prose
+    frontiers.  Lock four invariants so the §5.11 figures/prose
     cannot silently drift:
 
       1. Row carries default_point + two frontier arrays with the
@@ -1424,9 +1424,13 @@ class TestWeightSensitivityBenchmark(unittest.TestCase):
       2. Each frontier point lives inside its per-metric legal range
          (util ∈ [0,1], wait ∈ [0, horizon], noshow ∈ [0,1], R(S)
          ∈ [0,1]).
-      3. Frontier-A weight interpolation is monotone in t (later
-         points must have >= earlier axis_a_weight).  This catches
-         a future refactor where the sweep order is scrambled.
+      3. Weight interpolation is monotone in t (later points must
+         have >= earlier axis_a_weight).  This catches a future
+         refactor where the sweep order is scrambled.
+      4. The benchmark() function actually runs end-to-end and its
+         live JSONL row satisfies invariants 1-3.  Guarded by
+         RUN_SLOW_BENCHMARKS=1 so `python -m unittest` stays fast
+         but the dissertation run exercises the full solver path.
     """
 
     REQUIRED_FIELDS = (
@@ -1435,7 +1439,7 @@ class TestWeightSensitivityBenchmark(unittest.TestCase):
         "frontier_noshow_vs_robust",
     )
     POINT_FIELDS = (
-        "utilisation", "mean_wait_min", "mean_noshow_rate",
+        "utilisation", "mean_wait_min", "mean_scheduled_noshow_rate",
         "robustness_score", "p1_compliance",
     )
 
@@ -1443,14 +1447,15 @@ class TestWeightSensitivityBenchmark(unittest.TestCase):
         return {
             "ts": "2026-04-24T06:20:00",
             "n_patients": 20, "n_chairs": 6,
-            "points_per_frontier": 11, "time_limit_s": 8.0, "seed": 42,
+            "points_per_frontier": 11, "time_limit_s": 8.0,
             "horizon_min": 600,
             "default_weights": {"priority": 0.3, "utilization": 0.25,
                                 "noshow_risk": 0.15, "waiting_time": 0.15,
                                 "robustness": 0.10, "travel": 0.05},
             "default_point": {
                 "utilisation": 0.9, "mean_wait_min": 145.7,
-                "mean_noshow_rate": 0.169, "robustness_score": 0.542,
+                "mean_scheduled_noshow_rate": 0.169,
+                "robustness_score": 0.542,
                 "p1_compliance": 100.0, "n_scheduled": 18,
             },
             "frontier_util_vs_wait": [
@@ -1458,7 +1463,7 @@ class TestWeightSensitivityBenchmark(unittest.TestCase):
                  "axis_b_weight": 0.40 - 0.04 * i,
                  "utilisation": 1.0 - 0.05 * i,
                  "mean_wait_min": 180.0 - 9.0 * i,
-                 "mean_noshow_rate": 0.15,
+                 "mean_scheduled_noshow_rate": 0.15,
                  "robustness_score": 1.0, "p1_compliance": 100.0}
                 for i in range(11)
             ],
@@ -1467,7 +1472,7 @@ class TestWeightSensitivityBenchmark(unittest.TestCase):
                  "axis_b_weight": 0.25 - 0.025 * i,
                  "utilisation": 0.8,
                  "mean_wait_min": 150.0,
-                 "mean_noshow_rate": 0.18 - 0.018 * i,
+                 "mean_scheduled_noshow_rate": 0.18 - 0.018 * i,
                  "robustness_score": 1.0, "p1_compliance": 100.0}
                 for i in range(11)
             ],
@@ -1493,8 +1498,8 @@ class TestWeightSensitivityBenchmark(unittest.TestCase):
         for p in row["frontier_util_vs_wait"] + row["frontier_noshow_vs_robust"]:
             self.assertGreaterEqual(p["utilisation"], 0.0)
             self.assertLessEqual(p["utilisation"], 1.0)
-            self.assertGreaterEqual(p["mean_noshow_rate"], 0.0)
-            self.assertLessEqual(p["mean_noshow_rate"], 1.0)
+            self.assertGreaterEqual(p["mean_scheduled_noshow_rate"], 0.0)
+            self.assertLessEqual(p["mean_scheduled_noshow_rate"], 1.0)
             self.assertGreaterEqual(p["robustness_score"], 0.0)
             self.assertLessEqual(p["robustness_score"], 1.0)
             self.assertGreaterEqual(p["mean_wait_min"], 0.0)
@@ -1510,6 +1515,78 @@ class TestWeightSensitivityBenchmark(unittest.TestCase):
                     f"{frontier}: axis_a_weight must be monotone "
                     f"non-decreasing across t_fraction"
                 )
+
+    @unittest.skipUnless(
+        __import__("os").environ.get("RUN_SLOW_BENCHMARKS") == "1",
+        "set RUN_SLOW_BENCHMARKS=1 to exercise the real solver end-to-end",
+    )
+    def test_benchmark_runs_end_to_end(self):
+        """Real integration test: actually invoke benchmark() with a
+        tiny cohort + chair grid and verify the JSONL row it writes
+        satisfies the same schema + range + monotonicity invariants
+        that the other tests lock against hand-crafted fixtures.
+
+        This catches regressions where the sweep logic silently
+        produces malformed rows — the schema-only tests above cannot.
+        Opt-in via env var so default `python -m unittest` stays
+        fast; the dissertation's real benchmark runs this path."""
+        import json
+        import os
+        import tempfile
+        from ml.benchmark_weight_sensitivity import benchmark
+
+        with tempfile.TemporaryDirectory() as tmp:
+            out_path = Path(tmp) / "results.jsonl"
+            row = benchmark(
+                n_patients=4, n_chairs=2,
+                points_per_frontier=3, time_limit_s=2.0,
+                output_path=out_path,
+            )
+            # 1. JSONL on disk matches the in-memory row
+            self.assertTrue(out_path.exists(), "benchmark() wrote no file")
+            lines = [l for l in out_path.read_text("utf-8").splitlines() if l]
+            self.assertEqual(len(lines), 1, "expected exactly one JSONL row")
+            from_disk = json.loads(lines[0])
+            # 2. Required top-level fields (same contract as schema test)
+            for f in self.REQUIRED_FIELDS:
+                self.assertIn(f, row, f"live row missing {f!r}")
+                self.assertIn(f, from_disk, f"disk row missing {f!r}")
+            # 3. Default point + frontier rows carry the full metric set
+            for f in self.POINT_FIELDS:
+                self.assertIn(f, row["default_point"],
+                              f"default_point missing {f!r}")
+            for frontier in ("frontier_util_vs_wait",
+                             "frontier_noshow_vs_robust"):
+                self.assertEqual(
+                    len(row[frontier]), 3,
+                    f"{frontier} should have exactly points_per_frontier=3 rows",
+                )
+                for p in row[frontier]:
+                    for f in self.POINT_FIELDS:
+                        self.assertIn(f, p, f"{frontier}[*] missing {f!r}")
+            # 4. Per-metric legal ranges on live data (not the fixture)
+            for frontier in ("frontier_util_vs_wait",
+                             "frontier_noshow_vs_robust"):
+                for p in row[frontier]:
+                    self.assertGreaterEqual(p["utilisation"], 0.0)
+                    self.assertLessEqual(p["utilisation"], 1.0)
+                    self.assertGreaterEqual(p["mean_scheduled_noshow_rate"], 0.0)
+                    self.assertLessEqual(p["mean_scheduled_noshow_rate"], 1.0)
+                    self.assertGreaterEqual(p["robustness_score"], 0.0)
+                    self.assertLessEqual(p["robustness_score"], 1.0)
+                    self.assertGreaterEqual(p["mean_wait_min"], 0.0)
+                    self.assertLessEqual(
+                        p["mean_wait_min"], row["horizon_min"] + 1,
+                    )
+            # 5. Weight interpolation is still monotone on live data
+            for frontier in ("frontier_util_vs_wait",
+                             "frontier_noshow_vs_robust"):
+                ws = [p["axis_a_weight"] for p in row[frontier]]
+                for a, b in zip(ws, ws[1:]):
+                    self.assertGreaterEqual(
+                        b, a - 1e-9,
+                        f"{frontier}: axis_a_weight must be non-decreasing",
+                    )
 
 
 class TestExternalAlgorithmBenchmark(unittest.TestCase):

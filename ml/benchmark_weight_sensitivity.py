@@ -14,11 +14,11 @@ defaults (``OPTIMIZATION_WEIGHTS`` from ``config.py``).  For each
 sweep point it runs the solver once and records six scalar
 measurements of the resulting schedule:
 
-    utilisation           (fraction of patients scheduled)
-    mean_wait_min         (mean minutes between earliest_time and start)
-    mean_noshow_rate      (mean no-show probability weighted by scheduled)
-    robustness_score      (= ml/benchmark_robustness.robustness_score)
-    p1_compliance         (fraction of priority-1 patients scheduled)
+    utilisation                 (fraction of patients scheduled)
+    mean_wait_min               (mean minutes between earliest_time and start)
+    mean_scheduled_noshow_rate  (mean no-show probability averaged over scheduled patients only)
+    robustness_score            (= ml/benchmark_robustness.robustness_score)
+    p1_compliance               (fraction of priority-1 patients scheduled)
     solve_time_s
 
 The R analysis (``dissertation_analysis.R §21c``) reads the JSONL,
@@ -45,7 +45,7 @@ already cover their individual contributions).
 CLI
 ---
     python -m ml.benchmark_weight_sensitivity --n-patients 20 --n-chairs 6 \
-        --points-per-frontier 11 --time-limit-seconds 8 --seed 42
+        --points-per-frontier 11 --time-limit-seconds 8
 """
 from __future__ import annotations
 
@@ -105,13 +105,13 @@ def _build_chairs(n_chairs: int):
     return chairs
 
 
-def _score_point(appts, patients, *, horizon_min: float) -> Dict:
+def _score_point(appts, patients) -> Dict:
     from ml.benchmark_robustness import robustness_score
 
     if not appts:
         return {
             "utilisation": 0.0, "mean_wait_min": 0.0,
-            "mean_noshow_rate": 0.0, "robustness_score": 1.0,
+            "mean_scheduled_noshow_rate": 0.0, "robustness_score": 1.0,
             "p1_compliance": 100.0, "n_scheduled": 0,
         }
     by_id = {p.patient_id: p for p in patients}
@@ -135,7 +135,7 @@ def _score_point(appts, patients, *, horizon_min: float) -> Dict:
     return {
         "utilisation": float(util),
         "mean_wait_min": float(mean_wait),
-        "mean_noshow_rate": float(mean_ns),
+        "mean_scheduled_noshow_rate": float(mean_ns),
         "robustness_score": float(rob),
         "p1_compliance": float(p1_pct),
         "n_scheduled": int(len(scheduled_ids)),
@@ -163,7 +163,7 @@ def _solve_with_weights(patients, chairs, weights, time_limit_s: float):
 def _sweep_frontier(
     patients, chairs, *,
     defaults: Dict, axis_a: str, axis_b: str,
-    n_points: int, time_limit_s: float, horizon_min: float,
+    n_points: int, time_limit_s: float,
 ) -> List[Dict]:
     """Interpolate the pair (axis_a, axis_b) across its combined mass
     while keeping the other 4 weights frozen at their defaults.  Each
@@ -185,7 +185,7 @@ def _sweep_frontier(
         if total > 0:
             w = {k: v / total for k, v in w.items()}
         res, dt = _solve_with_weights(patients, chairs, w, time_limit_s)
-        score = _score_point(res.appointments or [], patients, horizon_min=horizon_min)
+        score = _score_point(res.appointments or [], patients)
         score.update({
             "frontier": f"{axis_a}_vs_{axis_b}",
             "axis_a_weight": float(w[axis_a]),
@@ -199,7 +199,7 @@ def _sweep_frontier(
 
 def benchmark(
     *, n_patients: int, n_chairs: int, points_per_frontier: int,
-    time_limit_s: float, seed: int, output_path: Path,
+    time_limit_s: float, output_path: Path,
 ) -> Dict:
     from config import OPTIMIZATION_WEIGHTS, OPERATING_HOURS
 
@@ -216,19 +216,14 @@ def benchmark(
     )
     print(f"Default weights: {defaults}", flush=True)
 
-    # First: measure the default (production) point once so R can
-    # decide where to draw it on the Pareto plots.  Uses EXACTLY the
-    # same solver configuration as the sweep arms (DRO/CVaR/GNN/
-    # fairness all off) so the default marker is apples-to-apples
-    # comparable with the frontier traces.  A separate "production"
-    # point at the bottom of this function retains the
-    # fully-featured solver setting for reference.
+    # Measure the default (production) point once with the SAME solver
+    # configuration as the sweep arms (DRO/CVaR/GNN/fairness all off)
+    # so the default marker is apples-to-apples comparable with the
+    # frontier traces on fig27/fig28.
     res_def, dt_def = _solve_with_weights(
         patients, chairs, defaults, time_limit_s,
     )
-    default_score = _score_point(
-        res_def.appointments or [], patients, horizon_min=horizon_min,
-    )
+    default_score = _score_point(res_def.appointments or [], patients)
     default_score.update({
         "frontier": "default",
         "solve_time_s": float(dt_def),
@@ -237,7 +232,7 @@ def benchmark(
     print(
         f"  [DEFAULT] util={default_score['utilisation']:.3f}  "
         f"wait={default_score['mean_wait_min']:.1f}m  "
-        f"noshow={default_score['mean_noshow_rate']:.3f}  "
+        f"noshow={default_score['mean_scheduled_noshow_rate']:.3f}  "
         f"rob={default_score['robustness_score']:.3f}",
         flush=True,
     )
@@ -247,7 +242,6 @@ def benchmark(
         patients, chairs, defaults=defaults,
         axis_a="utilization", axis_b="waiting_time",
         n_points=points_per_frontier, time_limit_s=time_limit_s,
-        horizon_min=horizon_min,
     )
     for p in frontier_a:
         print(
@@ -262,13 +256,12 @@ def benchmark(
         patients, chairs, defaults=defaults,
         axis_a="noshow_risk", axis_b="robustness",
         n_points=points_per_frontier, time_limit_s=time_limit_s,
-        horizon_min=horizon_min,
     )
     for p in frontier_b:
         print(
             f"  t={p['t_fraction']:.2f}  w_noshow={p['axis_a_weight']:.3f}  "
             f"w_rob={p['axis_b_weight']:.3f}  "
-            f"noshow_exp={p['mean_noshow_rate']:.3f}  "
+            f"noshow_exp={p['mean_scheduled_noshow_rate']:.3f}  "
             f"R(S)={p['robustness_score']:.3f}",
             flush=True,
         )
@@ -279,7 +272,6 @@ def benchmark(
         "n_chairs": int(n_chairs),
         "points_per_frontier": int(points_per_frontier),
         "time_limit_s": float(time_limit_s),
-        "seed": int(seed),
         "horizon_min": int(horizon_min),
         "default_weights": defaults,
         "default_point": default_score,
@@ -308,7 +300,6 @@ def main():
     parser.add_argument("--n-chairs", type=int, default=6)
     parser.add_argument("--points-per-frontier", type=int, default=11)
     parser.add_argument("--time-limit-seconds", type=float, default=8.0)
-    parser.add_argument("--seed", type=int, default=42)
     parser.add_argument(
         "--output", default="data_cache/weight_sensitivity/results.jsonl",
     )
@@ -318,7 +309,6 @@ def main():
         n_chairs=args.n_chairs,
         points_per_frontier=args.points_per_frontier,
         time_limit_s=args.time_limit_seconds,
-        seed=args.seed,
         output_path=_REPO_ROOT / args.output,
     )
 
