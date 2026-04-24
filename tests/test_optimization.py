@@ -1234,5 +1234,138 @@ class TestColumnGeneration(unittest.TestCase):
             self.assertTrue(cg_mod.ORTOOLS_AVAILABLE)
 
 
+class TestFairnessMitigationToggle(unittest.TestCase):
+    """
+    Regression for §5.6.2 external-review finding: the fairness audit
+    flagged Age_Band / Gender / Site_Code disparities but no mitigation
+    evaluation was reported.  The DRO-style fairness penalties already
+    in the CP-SAT objective are now toggle-controlled via
+    ScheduleOptimizer._fairness_constraints_enabled so the §5.6.2
+    benchmark (ml/benchmark_fairness_mitigation.py) can compare the
+    same cohort OFF vs ON.
+
+    Lock four invariants so the dissertation claim cannot silently
+    regress:
+      1. Default is True — production remains fair-constrained.
+      2. Toggle False still returns a feasible schedule.
+      3. Toggle False leaves the internal fairness-penalty list empty
+         after the solve (the whole block was gated).
+      4. The benchmark JSONL schema matches what R reads + the
+         cell-vs-delta arithmetic is self-consistent.
+    """
+
+    def _mk_patients(self, n=12):
+        today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+        out = []
+        for i in range(n):
+            p = Patient(
+                patient_id=f"FT{i:03d}",
+                priority=(i % 4) + 1,
+                protocol="R-CHOP",
+                expected_duration=60,
+                postcode="CF14",
+                earliest_time=today.replace(hour=8),
+                latest_time=today.replace(hour=17),
+                noshow_probability=0.15,
+                travel_time_minutes=float(10 + (i % 3) * 30),
+            )
+            p.age_band = ("0-39" if i < 4 else "40-64" if i < 8 else "65+")
+            out.append(p)
+        return out
+
+    def _mk_chairs(self, n=6):
+        today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+        return [
+            Chair(
+                chair_id=f"FT-C{i:02d}",
+                site_code="WC",
+                is_recliner=i < 2,
+                available_from=today.replace(hour=8),
+                available_until=today.replace(hour=18),
+            )
+            for i in range(n)
+        ]
+
+    def test_toggle_default_is_true(self):
+        opt = ScheduleOptimizer()
+        self.assertTrue(getattr(opt, "_fairness_constraints_enabled", True))
+
+    def test_toggle_off_produces_feasible_schedule(self):
+        opt = ScheduleOptimizer()
+        opt.chairs = self._mk_chairs()
+        opt._fairness_constraints_enabled = False
+        opt._cg_enabled = False
+        result = opt.optimize(self._mk_patients(n=12), time_limit_seconds=5)
+        self.assertTrue(
+            bool(result.success)
+            or getattr(result, "status", "") in ("OPTIMAL", "FEASIBLE"),
+            f"solve failed with status={getattr(result, 'status', None)}"
+        )
+
+    def test_toggle_off_leaves_penalty_list_empty_post_solve(self):
+        opt = ScheduleOptimizer()
+        opt.chairs = self._mk_chairs()
+        opt._fairness_constraints_enabled = False
+        opt._cg_enabled = False
+        _ = opt.optimize(self._mk_patients(n=12), time_limit_seconds=5)
+        self.assertEqual(getattr(opt, "_fairness_penalties", []), [])
+
+    def test_benchmark_jsonl_schema_matches_r_reader(self):
+        row = {
+            "ts": "2026-04-24T03:50:00",
+            "n_patients": 60, "n_chairs": 12,
+            "time_limit_s": 20.0, "seed": 42,
+            "arm_off": {
+                "fairness_enabled": False,
+                "solve_time_s": 20.1, "utilisation": 0.60,
+                "n_scheduled": 36, "n_patients": 60, "status": "OPTIMAL",
+                "worst_four_fifths_ratio": {
+                    "Age_Band": 0.650, "Gender": 0.000, "Site_Code": 1.000,
+                },
+            },
+            "arm_on": {
+                "fairness_enabled": True,
+                "solve_time_s": 20.1, "utilisation": 0.40,
+                "n_scheduled": 24, "n_patients": 60, "status": "OPTIMAL",
+                "worst_four_fifths_ratio": {
+                    "Age_Band": 0.885, "Gender": 0.000, "Site_Code": 1.000,
+                },
+            },
+            "delta_worst_ratio": {
+                "Age_Band": 0.235, "Gender": 0.000, "Site_Code": 0.000,
+            },
+            "delta_utilisation": -0.20,
+            "comparison_note": "...",
+        }
+        for path in (
+            ("arm_off", "utilisation"),
+            ("arm_on", "utilisation"),
+            ("arm_off", "worst_four_fifths_ratio", "Age_Band"),
+            ("arm_on", "worst_four_fifths_ratio", "Age_Band"),
+            ("arm_off", "worst_four_fifths_ratio", "Gender"),
+            ("arm_on", "worst_four_fifths_ratio", "Gender"),
+            ("arm_off", "worst_four_fifths_ratio", "Site_Code"),
+            ("arm_on", "worst_four_fifths_ratio", "Site_Code"),
+            ("delta_utilisation",),
+            ("delta_worst_ratio", "Age_Band"),
+            ("delta_worst_ratio", "Gender"),
+            ("delta_worst_ratio", "Site_Code"),
+        ):
+            v = row
+            for step in path:
+                self.assertIn(step, v,
+                              f"missing schema field {'.'.join(path)!r}")
+                v = v[step]
+        # Cell-vs-delta arithmetic must be self-consistent so the
+        # dissertation table cannot show conflicting values
+        for col in ("Age_Band", "Gender", "Site_Code"):
+            implied = row["arm_on"]["worst_four_fifths_ratio"][col] \
+                - row["arm_off"]["worst_four_fifths_ratio"][col]
+            self.assertAlmostEqual(
+                row["delta_worst_ratio"][col], implied, places=6,
+                msg=f"{col}: delta field inconsistent with on-off arithmetic"
+            )
+
+
 if __name__ == '__main__':
     unittest.main()

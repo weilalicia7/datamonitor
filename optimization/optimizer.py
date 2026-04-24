@@ -555,8 +555,19 @@ class ScheduleOptimizer:
 
         # =====================================================================
         # FAIRNESS CONSTRAINTS
-        # Ensure scheduling does not systematically disadvantage groups
+        # Ensure scheduling does not systematically disadvantage groups.
+        # Toggle via self._fairness_constraints_enabled (default True).
+        # The §5.6.2 benchmark (ml/benchmark_fairness_mitigation.py) runs
+        # the optimiser twice — once with the flag False (raw baseline)
+        # and once with it True (DRO-style mitigation on) — so the
+        # dissertation can report the Four-Fifths ratio improvement
+        # attributable to these constraints.
         # =====================================================================
+
+        if getattr(self, '_fairness_constraints_enabled', True):
+            fairness_block_enabled = True
+        else:
+            fairness_block_enabled = False
 
         # Group patients by protected attributes
         age_groups = {}
@@ -591,7 +602,7 @@ class ScheduleOptimizer:
         fairness_tolerance = 0.15  # Allow 15% max difference in scheduling rates
 
         # For each pair of age groups, constrain scheduling rate difference
-        age_group_list = list(age_groups.items())
+        age_group_list = list(age_groups.items()) if fairness_block_enabled else []
         for i, (g1_name, g1_patients) in enumerate(age_group_list):
             for g2_name, g2_patients in age_group_list[i+1:]:
                 if len(g1_patients) < 3 or len(g2_patients) < 3:
@@ -624,7 +635,10 @@ class ScheduleOptimizer:
                 self._fairness_penalties = objective_terms_fairness
 
         # Distance-based equity: remote patients should not be disadvantaged
-        for dist_group_name, dist_patients in deprivation_groups.items():
+        _equity_groups = (
+            deprivation_groups.items() if fairness_block_enabled else []
+        )
+        for dist_group_name, dist_patients in _equity_groups:
             if dist_group_name == 'remote' and len(dist_patients) >= 2:
                 # Remote patients must have at least 80% scheduling rate of local
                 local_patients = deprivation_groups.get('local', [])
