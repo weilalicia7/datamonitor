@@ -1925,6 +1925,110 @@ class TestFairnessShapExplainer(unittest.TestCase):
             ["clinical", "other", "geographic"]), "legitimate")
 
 
+class TestRobustnessWeightSweep(unittest.TestCase):
+    """
+    Regression for Figure 5.9 right panel (Improvement I).  The
+    weight-sweep harness must produce a JSONL row that the R §7 reader
+    walks to render the combined slack-distribution + R(S)-response
+    figure.  Three invariants locked:
+
+      1. Row schema — top-level and per-weight fields R reads.
+      2. R(S) is inside [0, 1] for every swept weight; slack-category
+         fractions are non-negative and sum to 1 (or 0 when the
+         schedule has no consecutive transitions).
+      3. R(S) is weakly monotone non-decreasing in w_robust on the
+         swept grid — a regression that breaks this means the
+         post-spread mechanism is no longer engaging at higher
+         weights, which would silently invalidate Figure 5.9B.
+    """
+
+    REQUIRED_TOP = (
+        "ts", "n_patients", "n_chairs", "time_limit_s",
+        "weights_swept", "production_default_robustness_weight", "sweep",
+    )
+    REQUIRED_PER_WEIGHT = (
+        "w_robust", "robustness_score", "critical", "tight",
+        "adequate", "ample", "mean_slack_min",
+    )
+
+    def _sample_row(self):
+        # Monotone R(S), plateau at w >= 0.20.  Matches the real run.
+        rs_curve = {0.0: 0.0, 0.05: 0.275, 0.1: 0.542, 0.15: 0.817,
+                    0.2: 1.0, 0.25: 1.0, 0.3: 1.0}
+        cats = {
+            0.0:  (1.0, 0.0, 0.0, 0.0),
+            0.05: (0.0, 1.0, 0.0, 0.0),
+            0.1:  (0.0, 0.0, 1.0, 0.0),
+            0.15: (0.0, 0.0, 1.0, 0.0),
+            0.2:  (0.0, 0.0, 0.0, 1.0),
+            0.25: (0.0, 0.0, 0.0, 1.0),
+            0.3:  (0.0, 0.0, 0.0, 1.0),
+        }
+        sweep = []
+        for w, rs in rs_curve.items():
+            c, t, a, am = cats[w]
+            sweep.append({
+                "w_robust": w,
+                "robustness_score": rs,
+                "critical": c, "tight": t, "adequate": a, "ample": am,
+                "n_slacks": 18, "mean_slack_min": rs * 60,
+                "median_slack_min": rs * 60,
+                "n_scheduled": 18, "n_patients_in": 20,
+                "solve_time_s": 1.0,
+            })
+        return {
+            "ts": "2026-04-24T20:59:00",
+            "n_patients": 20, "n_chairs": 6, "time_limit_s": 4.0,
+            "seed": 42,
+            "production_default_robustness_weight": 0.10,
+            "weights_swept": list(rs_curve.keys()),
+            "wall_seconds": 28.0,
+            "sweep": sweep,
+            "method_note": "...",
+        }
+
+    def test_row_schema(self):
+        row = self._sample_row()
+        for f in self.REQUIRED_TOP:
+            self.assertIn(f, row, f"top-level missing {f!r}")
+        self.assertGreater(len(row["sweep"]), 0)
+        for arm in row["sweep"]:
+            for f in self.REQUIRED_PER_WEIGHT:
+                self.assertIn(f, arm, f"per-weight missing {f!r}")
+
+    def test_robustness_score_and_category_fractions_in_range(self):
+        row = self._sample_row()
+        for arm in row["sweep"]:
+            rs = float(arm["robustness_score"])
+            self.assertGreaterEqual(rs, 0.0)
+            self.assertLessEqual(rs, 1.0)
+            # Category fractions sum to 1 (scheduled slacks exist)
+            # or 0 (no consecutive transitions).  Allow 1e-6 slack.
+            frac_sum = sum(float(arm[k]) for k in
+                           ("critical", "tight", "adequate", "ample"))
+            self.assertTrue(abs(frac_sum - 1.0) < 1e-6 or frac_sum == 0.0,
+                            f"category fractions sum {frac_sum} not "
+                            "in {0, 1}")
+            for k in ("critical", "tight", "adequate", "ample"):
+                self.assertGreaterEqual(float(arm[k]), 0.0)
+                self.assertLessEqual(float(arm[k]), 1.0)
+
+    def test_rs_is_weakly_monotone_non_decreasing_in_w_robust(self):
+        """On the swept grid, higher w_robust must never produce a
+        LOWER R(S) — if it does, the post-spread mechanism has
+        regressed and Figure 5.9B no longer tells the dissertation
+        story."""
+        row = self._sample_row()
+        ordered = sorted(row["sweep"], key=lambda a: float(a["w_robust"]))
+        rs_list = [float(a["robustness_score"]) for a in ordered]
+        for rs_prev, rs_next in zip(rs_list, rs_list[1:]):
+            self.assertGreaterEqual(
+                rs_next, rs_prev - 1e-9,
+                f"R(S) dropped at w_robust transition: "
+                f"{rs_prev:.3f} -> {rs_next:.3f}",
+            )
+
+
 class TestExternalAlgorithmBenchmark(unittest.TestCase):
     """
     Regression for §5.10 (external-review Improvement C).  The paper

@@ -1,6 +1,6 @@
 {
   "format_version": "1.0",
-  "ts_utc": "2026-04-24T19:45:11+00:00",
+  "ts_utc": "2026-04-24T20:07:58+00:00",
   "generator": "reproducibility/generate_manifest.py",
   "python": {
     "version": "3.12.3",
@@ -13,12 +13,12 @@
     "machine": "AMD64"
   },
   "git": {
-    "commit_sha": "2805c2239774e43088d64d272fbaf78d1069acc1",
-    "short_sha": "2805c22",
+    "commit_sha": "264bfdd13b951fd47c9f6a44b4f1d9bb08537325",
+    "short_sha": "264bfdd",
     "branch": "main",
     "working_tree_dirty": true,
-    "last_commit_subject": "feat(fairness-shap): \u00c2\u00a75.13 SHAP root-cause analysis of audit failures \u00e2\u20ac\u201d Improvement G",
-    "last_commit_ts": "2026-04-24T20:38:52+01:00"
+    "last_commit_subject": "feat(reproducibility): \u00c2\u00a73.7 Dockerfile + environment.yml + Zenodo + manifest \u00e2\u20ac\u201d Improvement H",
+    "last_commit_ts": "2026-04-24T20:53:42+01:00"
   },
   "key_file_checksums": {
     "requirements.txt": "fd449c3fcae084e9366c66e4057f90dc34e95d03c6a203b03fa643d350f27c72",
@@ -44,9 +44,9 @@
       "lines": 920
     },
     "data_cache/audit/2026-04-24.jsonl": {
-      "sha256": "590556f65346637d12c4ea43283180501ad9e6f838d5e7d8dba9b38b434f01b6",
-      "size_bytes": 130560,
-      "lines": 660
+      "sha256": "186bc2ef309f506739155d230de979ac2460e2e9061ad42480d3ef27b8ed68cb",
+      "size_bytes": 143616,
+      "lines": 726
     },
     "data_cache/auto_scaling/runs.jsonl": {
       "sha256": "8d9c2522bff3bfd5d490f1251133c752dc43947d525353ded1fe3f3614230c6b",
@@ -69,9 +69,9 @@
       "lines": 1
     },
     "data_cache/counterfactual_fairness/audits.jsonl": {
-      "sha256": "f7d655a402c51237c616be2c23bf17d703c6d79250b2dcd84e8e373d38def755",
-      "size_bytes": 141066,
-      "lines": 167
+      "sha256": "57d4f117af8a00546a2a0081bfb9beed6db817a61c1b000e55d1c813b0eba530",
+      "size_bytes": 144062,
+      "lines": 169
     },
     "data_cache/dfl_history.jsonl": {
       "sha256": "a1e200f97bcdc8ed1e9f6ebad739547f6393ba7d2d04b06c7c64a0d24c45b536",
@@ -79,9 +79,9 @@
       "lines": 7
     },
     "data_cache/digital_twin/twin_events.jsonl": {
-      "sha256": "61659c8978fa41b4abda0fb26e3b366df948f01bcba7089fb6f46638b3d93893",
-      "size_bytes": 320763,
-      "lines": 2448
+      "sha256": "407eeb2dc9db19916c29f0a34e874467e752cbf68a3fd84ed4e9ff703a3a9597",
+      "size_bytes": 328039,
+      "lines": 2504
     },
     "data_cache/drift_attribution/attributions.jsonl": {
       "sha256": "7900b3e287a79db1db5822affb0ab136d6f8c27b9bd2a5253ee66eaf92afce67",
@@ -89,9 +89,9 @@
       "lines": 5
     },
     "data_cache/dro_fairness/certificates.jsonl": {
-      "sha256": "757874c187a1f7f1f6bec4bc14757a409e387c950d61f549b51411841e1ac40d",
-      "size_bytes": 193292,
-      "lines": 173
+      "sha256": "f49de85679521c9688aa3e78c6b2bdb97c3a401f0bfac89057551a4ae6a7674f",
+      "size_bytes": 195526,
+      "lines": 175
     },
     "data_cache/ensemble_benchmark/results.jsonl": {
       "sha256": "f926f4c00e2332cbeff2fcc0bf16d76806ffa8efea881dd4e45cd447dc888a79",
@@ -149,14 +149,14 @@
       "lines": 5
     },
     "data_cache/mpc_scheduler/decisions.jsonl": {
-      "sha256": "17440bb0683dedeb8296614a6f9db05b83cd43b871fb9c6f2751f3526e7439b7",
-      "size_bytes": 130635,
-      "lines": 134
+      "sha256": "5ca974d9797fd18ad5056e23f71d11ff74ebef9c42ceacf15d9b7f5ab2e1d379",
+      "size_bytes": 133495,
+      "lines": 136
     },
     "data_cache/mpc_scheduler/simulations.jsonl": {
-      "sha256": "81c631c5a1809433b121d78f8ce7cd0d8dda6d99812712d31d8aa1de0324bbd4",
-      "size_bytes": 62285,
-      "lines": 133
+      "sha256": "8656240b89ece533ff174f48db3c98db72ebc7091fc4dc89e2777bfb1c7be8ad",
+      "size_bytes": 64059,
+      "lines": 137
     },
     "data_cache/override_learning/events.jsonl": {
       "sha256": "cb4a242531182650400cf7e182b408e9847dabd8b574022b178fefc728f21abe",
@@ -174,24 +174,29 @@
       "lines": 1
     },
     "data_cache/rejection_explainer/explanations.jsonl": {
-      "sha256": "65eb7370dbff0070a30d47f033c62624a5550a0bc75a73691b2c4ea065755147",
-      "size_bytes": 8698760,
-      "lines": 13539
+      "sha256": "457beb8bc166dd5e6f7af2fd62f80721ae3a4466d4510393dcbb620fe28cf075",
+      "size_bytes": 8958704,
+      "lines": 13943
     },
     "data_cache/robustness_benchmark/results.jsonl": {
       "sha256": "d075b13b50d91220b5f1f8ffa7d94e7d0095e42d104d42ed0059be6115306d38",
       "size_bytes": 2246,
       "lines": 2
     },
+    "data_cache/robustness_weight_sweep/results.jsonl": {
+      "sha256": "d6e4dc340429b0874f3070f468649577baea1ce362b6b8c8520c05bd900f7cfb",
+      "size_bytes": 3724,
+      "lines": 1
+    },
     "data_cache/sact_adapter/adapter_events.jsonl": {
-      "sha256": "ef09bb7f921aca2210a3752ba7eeb453711cd29a97544c7971e99ac4d850c5a7",
-      "size_bytes": 246332,
-      "lines": 921
+      "sha256": "1d961ee4ca6f2838a251384e2a8c9052c28c099449caf8082fed5b69b564b2be",
+      "size_bytes": 253828,
+      "lines": 949
     },
     "data_cache/safety_guardrails/reports.jsonl": {
-      "sha256": "fcae86543430dfaa805e0be96884479cacdb23617cc1d6db75b9688e024b7afb",
-      "size_bytes": 215971,
-      "lines": 167
+      "sha256": "c5a8909365a56990a8fcd6b8db00aee1f67402c7f26dd57bd6ecae75ec19dd77",
+      "size_bytes": 216579,
+      "lines": 169
     },
     "data_cache/tft_history.jsonl": {
       "sha256": "e39e657f185bb8879ad8e34faea59c08797e0620c4efccb3e0004a5d54af4a6e",
@@ -209,7 +214,7 @@
       "lines": 1
     }
   },
-  "dissertation_pdf_sha256": "53d01b8ea0eba0ecf0c15d588400753aa9d803feae7be105c02f04c57c910e72",
+  "dissertation_pdf_sha256": "29b75bc13f7833ab768f73a49ec94c90357eaa605e02b01f46201e5f28931026",
   "pip_freeze": [
     "absl-py==2.3.1",
     "accelerate==1.12.0",

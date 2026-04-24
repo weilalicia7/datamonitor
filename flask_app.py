@@ -7848,6 +7848,45 @@ def api_tuning_status():
         return jsonify({'success': False, 'error': str(exc)}), 500
 
 
+@app.route('/api/metrics/robustness-weight-sweep/status', methods=['GET'])
+def api_robustness_weight_sweep_status():
+    """
+    Robustness-weight sweep (Figure 5.9 right panel / Improvement I).
+    Read-only diagnostic — returns the LATEST JSONL row written by
+    ``ml/benchmark_robustness_weight_sweep.py`` or
+    ``{"source": "not_run"}``.  Never triggers a run.  The benchmark
+    is CLI-only and writes exclusively to
+    ``data_cache/robustness_weight_sweep/``.
+    """
+    try:
+        cache_path = Path(
+            "data_cache/robustness_weight_sweep/results.jsonl"
+        )
+        if not cache_path.exists():
+            return jsonify({"success": True, "source": "not_run"})
+        text = cache_path.read_text("utf-8")
+        lines = [l for l in text.splitlines() if l.strip()]
+        if not lines:
+            return jsonify({"success": True, "source": "not_run"})
+        row = json.loads(lines[-1])
+        summary = {
+            "source": "real_benchmark",
+            "ts": row.get("ts"),
+            "n_patients": row.get("n_patients"),
+            "n_chairs": row.get("n_chairs"),
+            "time_limit_s": row.get("time_limit_s"),
+            "production_default_robustness_weight":
+                row.get("production_default_robustness_weight"),
+            "weights_swept": row.get("weights_swept", []),
+            "wall_seconds": row.get("wall_seconds"),
+            "sweep": row.get("sweep", []),
+        }
+        return jsonify({"success": True, **summary})
+    except Exception as exc:
+        logger.error(f"robustness-weight-sweep status error: {exc}")
+        return jsonify({"success": False, "error": str(exc)}), 500
+
+
 @app.route('/api/reproducibility/status', methods=['GET'])
 def api_reproducibility_status():
     """
