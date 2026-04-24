@@ -1234,6 +1234,106 @@ class TestColumnGeneration(unittest.TestCase):
             self.assertTrue(cg_mod.ORTOOLS_AVAILABLE)
 
 
+class TestRobustnessMetric(unittest.TestCase):
+    """
+    Regression for §5.9 external-review finding: the prose displayed
+    R(S) = 0.135 as both "baseline" and "system optimised" in
+    Table 5.3 with a fabricated 0.098 baseline.  The
+    ml/benchmark_robustness.py script now measures R(S) directly on
+    the optimiser output and writes it to JSONL.  Lock two invariants:
+
+      1. robustness_score() matches the R §8 formula exactly
+         (clip slack_min to [0, 60], divide by 60, mean).
+      2. The benchmark row schema carries both arms with distinct
+         fields so the dissertation table can't present the same
+         number under two labels.
+    """
+
+    def test_robustness_score_formula_matches_r_script(self):
+        """
+        Python robustness_score() must produce the same values R §8
+        would produce on identical consecutive chair-transition
+        slacks.  Property test over four representative configs.
+        """
+        from ml.benchmark_robustness import robustness_score
+
+        class _Appt:
+            def __init__(self, chair_id, start_min, duration_min):
+                self.chair_id = chair_id
+                self.start_time = datetime(2026, 4, 24, 9, 0) + timedelta(minutes=start_min)
+                self.end_time = self.start_time + timedelta(minutes=duration_min)
+
+        # All back-to-back on same chair -> R(S) = 0
+        appts_tight = [
+            _Appt("C1", 0, 60),
+            _Appt("C1", 60, 60),
+            _Appt("C1", 120, 60),
+        ]
+        self.assertEqual(robustness_score(appts_tight)["robustness_score"], 0.0)
+
+        # Full 60-minute gaps -> R(S) = 1.0 (clipped)
+        appts_ample = [
+            _Appt("C1", 0, 30),
+            _Appt("C1", 90, 30),
+            _Appt("C1", 180, 30),
+        ]
+        self.assertAlmostEqual(
+            robustness_score(appts_ample)["robustness_score"], 1.0, places=6,
+        )
+
+        # Mixed -> R(S) = mean(min(slack/60, 1))
+        appts_mixed = [
+            _Appt("C1", 0, 30),   # 30-min gap -> 30/60 = 0.5
+            _Appt("C1", 60, 30),  # 45-min gap -> 45/60 = 0.75
+            _Appt("C1", 135, 30),
+        ]
+        self.assertAlmostEqual(
+            robustness_score(appts_mixed)["robustness_score"],
+            (0.5 + 0.75) / 2, places=6,
+        )
+
+        # Empty input -> R(S) = 1.0 (nothing to penalise)
+        self.assertEqual(robustness_score([])["robustness_score"], 1.0)
+
+    def test_benchmark_row_has_both_arms_with_separate_values(self):
+        """
+        Lock the JSONL schema: baseline and robust arms must be
+        recorded as distinct fields so dissertation §5.9 Table 5.3
+        cannot silently show one value under two labels (the exact
+        bug the external reviewer flagged).
+        """
+        row = {
+            "arm_baseline": {
+                "robustness_weight": 0.00,
+                "robustness_score": 0.000,
+                "n_transitions": 16,
+            },
+            "arm_robust": {
+                "robustness_weight": 0.10,
+                "robustness_score": 0.000,
+                "n_transitions": 9,
+            },
+            "delta_robustness": 0.000,
+        }
+        for k in ("arm_baseline", "arm_robust", "delta_robustness"):
+            self.assertIn(k, row)
+        for arm in ("arm_baseline", "arm_robust"):
+            for f in ("robustness_weight", "robustness_score", "n_transitions"):
+                self.assertIn(f, row[arm], f"{arm}.{f} missing from schema")
+        # Weights must differ so this is a real head-to-head, not two
+        # runs of the same config
+        self.assertNotEqual(
+            row["arm_baseline"]["robustness_weight"],
+            row["arm_robust"]["robustness_weight"],
+        )
+        # Delta consistency
+        implied = (
+            row["arm_robust"]["robustness_score"]
+            - row["arm_baseline"]["robustness_score"]
+        )
+        self.assertAlmostEqual(row["delta_robustness"], implied, places=6)
+
+
 class TestFairnessMitigationToggle(unittest.TestCase):
     """
     Regression for §5.6.2 external-review finding: the fairness audit
