@@ -1041,6 +1041,41 @@ class ScheduleOptimizer:
             unscheduled = [p.patient_id for p in patients]
             status_str = 'INFEASIBLE' if status == cp_model.INFEASIBLE else 'UNKNOWN'
 
+        # =====================================================================
+        # POST-SOLVE SLACK REDISTRIBUTION (§5.9 / R(S) regression)
+        #
+        # The CP-SAT objective's `robustness` weight previously only
+        # penalised long treatments — it did not target chair-gap slack
+        # directly, so the §5.9 head-to-head benchmark showed Δ R(S) = 0
+        # between weight 0.00 and 0.10.
+        #
+        # When the robustness weight is non-zero we now post-process the
+        # CP-SAT solution: for each chair, redistribute the start_times
+        # of its appointments evenly within the (operating-hours,
+        # per-patient earliest/latest) window so slack is spread.  No
+        # appointment is moved outside its window; the chair assignment
+        # and patient-to-chair mapping the CP-SAT solver chose are
+        # preserved.  Only the within-chair time-axis layout changes.
+        #
+        # Effect: turns the previously-no-op robustness weight into a
+        # real driver of R(S), making §5.9 Table 5.3 honest about the
+        # mechanism producing the delta.
+        # =====================================================================
+        try:
+            w_robustness_active = float(self.weights.get('robustness', 0.0))
+        except Exception:
+            w_robustness_active = 0.0
+        if (
+            success
+            and w_robustness_active > 1e-6
+            and getattr(self, '_robustness_post_spread', True)
+            and appointments
+        ):
+            appointments = self._redistribute_for_robustness(
+                appointments, patients, date,
+                intensity=min(1.0, w_robustness_active * 5.0),
+            )
+
         # Calculate metrics
         metrics = self._calculate_metrics(appointments, patients, date)
 
@@ -1271,6 +1306,131 @@ class ScheduleOptimizer:
             solve_time=solve_time,
             status='GREEDY_SOLUTION'
         )
+
+    def _redistribute_for_robustness(
+        self,
+        appointments: List['ScheduledAppointment'],
+        patients: List['Patient'],
+        date: datetime,
+        intensity: float = 1.0,
+    ) -> List['ScheduledAppointment']:
+        """
+        Spread per-chair appointments across each patient's window so
+        consecutive chair transitions carry meaningful slack.
+
+        Algorithm (per chair):
+          1. Sort the chair's appointments by current start_time
+             (CP-SAT's preferred ordering — preserved).
+          2. Compute each appointment's per-patient feasible interval
+             ``[max(operating_start, p.earliest_time),
+                min(operating_end - duration, p.latest_time - duration)]``.
+          3. Walk forwards: each appointment's start = max(
+                its own earliest,
+                prev.end + ideal_gap)
+             where ideal_gap = leftover slack / (n + 1) * intensity.
+          4. Walk backwards: each appointment's start = min(
+                its own latest,
+                next.start - duration - ideal_gap)
+             — keeps the schedule feasible if the forward pass produced
+             an over-tight tail.
+
+        ``intensity`` ∈ (0, 1] scales how aggressively the optimiser
+        spreads.  Production weight = 0.10 maps to intensity = 0.5;
+        weight = 0.20 maps to intensity = 1.0 (full spread).  The chair
+        assignments and patient-to-chair mapping that CP-SAT chose are
+        never altered.
+
+        See §5.9 of the dissertation + ``ml/benchmark_robustness.py`` for
+        the head-to-head R(S) measurement that this method drives.
+        """
+        if not appointments:
+            return appointments
+        intensity = max(0.0, min(1.0, float(intensity)))
+
+        from collections import defaultdict
+        start_h, end_h = OPERATING_HOURS
+        day_start = date.replace(hour=start_h, minute=0, second=0, microsecond=0)
+        op_start_min = 0                                 # relative to day_start
+        op_end_min = (end_h - start_h) * 60
+
+        patient_by_id = {p.patient_id: p for p in patients}
+
+        def _to_min(t):
+            """Minutes-from-day-start for a datetime."""
+            delta = t - day_start
+            return int(delta.total_seconds() // 60)
+
+        by_chair = defaultdict(list)
+        for a in appointments:
+            by_chair[a.chair_id].append(a)
+
+        rebuilt: List['ScheduledAppointment'] = []
+        for chair_id, items in by_chair.items():
+            items = sorted(items, key=lambda a: a.start_time)
+            n = len(items)
+
+            # Per-appointment feasible window in minutes-from-day-start
+            windows = []
+            for a in items:
+                p = patient_by_id.get(a.patient_id)
+                dur = a.duration
+                p_earliest = _to_min(p.earliest_time) if p else op_start_min
+                p_latest_end = _to_min(p.latest_time) if p else op_end_min
+                lo = max(op_start_min, p_earliest)
+                hi = min(op_end_min, p_latest_end) - dur
+                # Hi must be >= lo — fall back to the CP-SAT start if the
+                # window collapses (rare; defensive).
+                if hi < lo:
+                    hi = lo = _to_min(a.start_time)
+                windows.append((lo, hi, dur))
+
+            total_dur = sum(dur for _, _, dur in windows)
+            day_window = (
+                max(w[1] + w[2] for w in windows) - min(w[0] for w in windows)
+            )
+            slack = max(0, day_window - total_dur)
+            ideal_gap = (slack / (n + 1)) * intensity
+
+            # Forward pass: respect own_lo + accumulated end + ideal_gap
+            new_starts = [0] * n
+            prev_end = -1.0
+            for i, (lo, hi, dur) in enumerate(windows):
+                preferred = max(lo, prev_end + ideal_gap if prev_end >= 0 else lo)
+                preferred = min(preferred, hi)
+                new_starts[i] = preferred
+                prev_end = preferred + dur
+
+            # Backward pass: don't overshoot the right edge
+            next_start = float('inf')
+            for i in range(n - 1, -1, -1):
+                lo, hi, dur = windows[i]
+                upper_bound = min(
+                    hi,
+                    (next_start - dur - ideal_gap) if next_start != float('inf') else hi,
+                )
+                # If forward pass already produced a smaller value, keep it
+                new_starts[i] = max(lo, min(new_starts[i], upper_bound))
+                next_start = new_starts[i]
+
+            for i, a in enumerate(items):
+                start_min_new = int(round(new_starts[i]))
+                start_time = day_start + timedelta(minutes=start_min_new)
+                end_time = start_time + timedelta(minutes=a.duration)
+                rebuilt.append(ScheduledAppointment(
+                    patient_id=a.patient_id,
+                    chair_id=a.chair_id,
+                    site_code=a.site_code,
+                    start_time=start_time,
+                    end_time=end_time,
+                    duration=a.duration,
+                    priority=a.priority,
+                    travel_time=a.travel_time,
+                ))
+
+        # Preserve original ordering by patient (helpful for log diffs)
+        original_order = [a.patient_id for a in appointments]
+        rebuilt.sort(key=lambda a: original_order.index(a.patient_id))
+        return rebuilt
 
     def _estimate_travel_time(self, postcode: str, site_code: str) -> int:
         """Estimate travel time in minutes"""

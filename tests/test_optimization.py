@@ -1295,6 +1295,84 @@ class TestRobustnessMetric(unittest.TestCase):
         # Empty input -> R(S) = 1.0 (nothing to penalise)
         self.assertEqual(robustness_score([])["robustness_score"], 1.0)
 
+    def _mk_patients_robust(self, n=12):
+        today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+        out = []
+        for i in range(n):
+            out.append(Patient(
+                patient_id=f"RB{i:03d}",
+                priority=(i % 4) + 1,
+                protocol="R-CHOP",
+                expected_duration=60,
+                postcode="CF14",
+                earliest_time=today.replace(hour=8),
+                latest_time=today.replace(hour=17),
+                noshow_probability=0.15,
+                travel_time_minutes=20.0,
+            ))
+        return out
+
+    def _mk_chairs_robust(self, n=4):
+        today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+        return [
+            Chair(
+                chair_id=f"RB-C{i:02d}",
+                site_code="WC",
+                is_recliner=i < 1,
+                available_from=today.replace(hour=8),
+                available_until=today.replace(hour=18),
+            )
+            for i in range(n)
+        ]
+
+    def test_slack_redistribution_increases_rs(self):
+        """
+        Regression for §5.9: with the new
+        ScheduleOptimizer._redistribute_for_robustness post-process,
+        running the optimiser with robustness weight > 0 must produce
+        a STRICTLY HIGHER R(S) than running with weight = 0 on the
+        same cohort.
+
+        This is the structural test that lets the dissertation drop
+        the "the optimiser's robustness weight doesn't change R(S)"
+        future-work caveat: if a future commit silently removes the
+        post-spread, R(S)_10 collapses back to R(S)_0 and this test
+        fails.
+        """
+        from optimization.optimizer import ScheduleOptimizer
+        from ml.benchmark_robustness import robustness_score
+
+        opt0 = ScheduleOptimizer()
+        opt0.chairs = self._mk_chairs_robust(n=4)
+        opt0._cg_enabled = False
+        opt0._fairness_constraints_enabled = True
+        w = dict(opt0.weights); w.pop("robustness", 0.0)
+        total = sum(w.values())
+        for k in w:
+            w[k] = w[k] / total
+        w["robustness"] = 0.0
+        opt0.set_weights(w, normalise=False)
+        result0 = opt0.optimize(self._mk_patients_robust(n=12), time_limit_seconds=5)
+        rs0 = robustness_score(result0.appointments or [])["robustness_score"]
+
+        opt10 = ScheduleOptimizer()
+        opt10.chairs = self._mk_chairs_robust(n=4)
+        opt10._cg_enabled = False
+        opt10._fairness_constraints_enabled = True
+        result10 = opt10.optimize(self._mk_patients_robust(n=12), time_limit_seconds=5)
+        rs10 = robustness_score(result10.appointments or [])["robustness_score"]
+
+        # The post-spread must produce STRICTLY MORE R(S) than no-spread
+        # on this 12-patient / 4-chair cohort.  If equal, the spread
+        # mechanism is no longer wired and the dissertation §5.9 prose
+        # has to revert its "no future-work needed" claim.
+        self.assertGreater(
+            rs10, rs0 + 0.05,
+            f"Robustness weight has no effect on R(S): "
+            f"weight=0 -> R(S)={rs0:.3f}, weight=0.10 -> R(S)={rs10:.3f}. "
+            "Has _redistribute_for_robustness been disabled?"
+        )
+
     def test_benchmark_row_has_both_arms_with_separate_values(self):
         """
         Lock the JSONL schema: baseline and robust arms must be
