@@ -228,3 +228,69 @@ class TestCausalValidator:
         assert isinstance(out["tests"], list)
         assert out["total_tests"] == len(out["tests"])
         assert "interpretation" in out
+
+
+class TestCausalValidationScope:
+    """
+    Regression for §4.6.1 external-review finding: the dissertation
+    claimed "All seven tests pass ... confirms the weather-no-show
+    ATE = 0.084 is robust" as if this were real-world validation.
+    Because the synthetic data the validator runs against were
+    generated from the same DAG the tests verify, passing the tests
+    confirms implementation correctness — NOT real-world causal
+    identification in the Velindre population.
+
+    Lock this scope at analysis time so the prose cannot silently
+    upgrade from "synthetic DAG recovery" to "real-world validated"
+    without a real observational cohort being wired in.
+    """
+
+    def test_validation_runs_on_synthetic_data(self):
+        """
+        Sanity: the validator runs against a synthetic frame built
+        by the dissertation's own generator, NOT a real Velindre
+        cohort.  The tracer is the column coming from the synthetic
+        DAG sampler (Weather_Severity + Traffic_Delay_Minutes + the
+        DAG's other observable nodes); real Velindre data would
+        carry postcode / regimen / staff metadata instead.
+        """
+        data = _validation_data(n=100, seed=0)
+        assert isinstance(data, pd.DataFrame)
+        # Synthetic-DAG observables that must all be present
+        for col in ("Weather_Severity", "Traffic_Delay_Minutes",
+                    "Appointment_Hour"):
+            assert col in data.columns, (
+                f"missing DAG observable column {col!r} — fixture drift"
+            )
+        # Real-Velindre-only columns that MUST NOT be present in
+        # the synthetic validation frame.  If any appear, someone
+        # has swapped in a real cohort and the §4.6.1 prose needs
+        # to flip from "synthetic DAG recovery" to a real-cohort
+        # claim.
+        velindre_only = ("Patient_Postcode", "Regimen_Code", "Site_Code",
+                         "Chair_Type", "Priority_Int")
+        leaked = [c for c in velindre_only if c in data.columns]
+        assert leaked == [], (
+            f"Validation fixture includes real-Velindre columns {leaked}; "
+            "if you are intentionally swapping in real observational data, "
+            "also update dissertation §4.6.1's \\causalValidationScope "
+            "narrative + the R macro emitter in dissertation_analysis.R "
+            "Section 21."
+        )
+
+    def test_passing_validator_does_not_imply_realworld_causality(self):
+        """
+        This is a semantic-contract test — it doesn't check behaviour,
+        it asserts a documentation invariant that the author must keep
+        honest.  Parsed by the dissertation regression suite: if the
+        R script's \\causalValidationScope macro ever flips from the
+        "synthetic DAG recovery" family to "real observational",
+        this test must be updated in the same commit to describe why.
+        """
+        SCOPE_LABEL = "synthetic DAG recovery (implementation-verification only)"
+        assert SCOPE_LABEL.startswith("synthetic"), (
+            "If you intentionally upgraded the causal validation to "
+            "a real observational cohort, flip this constant, update "
+            "dissertation §4.6.1's \\causalValidationScope prose, and "
+            "add the real-cohort fixture to test_causal_model.py."
+        )

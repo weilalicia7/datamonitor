@@ -245,5 +245,76 @@ class TestPersistence(unittest.TestCase):
             self.assertIn('patient_30d_stats', payload['views'])
 
 
+class TestTrainingIntegrationScope(unittest.TestCase):
+    """
+    Regression for the §4.5.8 external-review clarification: the prose
+    previously described point-in-time correctness as a training-time
+    contract, but the actual training pipeline
+    (ml/noshow_model.py::NoShowModel.train) does not call
+    feature_store.as_of() — the feature store is wired into the online
+    serving path only.
+
+    Lock this scope explicitly so future refactors either (a) keep
+    training batch-only AND keep the dissertation's "Scope of this
+    feature store" paragraph honest, or (b) wire training through
+    as_of() and update the prose accordingly.  Either way the
+    contract between docs and code is auditable at test time.
+    """
+
+    def test_training_pipeline_does_not_call_feature_store(self):
+        """
+        Current scope: NoShowModel.train() must NOT import or call
+        feature_store.as_of() / get_online_features() / get_store().
+        If this changes, the §4.5.8 "Scope of this feature store"
+        paragraph must be updated to describe the new training wiring.
+        """
+        import re as _re
+        src_path = (
+            Path(__file__).resolve().parent.parent / "ml" / "noshow_model.py"
+        )
+        source = src_path.read_text(encoding="utf-8", errors="replace")
+
+        forbidden = (
+            r"from\s+ml\.feature_store\b",
+            r"from\s+\.feature_store\b",
+            r"\bfeature_store\.as_of\b",
+            r"\bfeature_store\.get_online_features\b",
+            r"\bget_feature_store\s*\(",
+            r"\bfeature_store\.get_store\b",
+        )
+        hits = [p for p in forbidden if _re.search(p, source)]
+        self.assertEqual(
+            hits, [],
+            "NoShowModel training now references the online feature "
+            f"store ({hits}); update dissertation §4.5.8 'Scope of "
+            "this feature store in the current pipeline' to describe "
+            "the new training path, then remove the offending patterns "
+            "from this test's forbidden list."
+        )
+
+    def test_feature_store_online_hook_still_wired(self):
+        """
+        Companion invariant: the ONLINE path (flask_app) MUST still
+        call the feature store.  If someone accidentally unwires the
+        hook while refactoring, the dissertation's §4.5.8 'Invisible
+        integration' paragraph becomes false.
+        """
+        import re as _re
+        flask_path = (
+            Path(__file__).resolve().parent.parent / "flask_app.py"
+        )
+        source = flask_path.read_text(encoding="utf-8", errors="replace")
+        expected_any = (
+            r"_enrich_with_feature_store",
+            r"get_online_features",
+        )
+        hits = [p for p in expected_any if _re.search(p, source)]
+        self.assertTrue(
+            hits,
+            "No feature-store hook found in flask_app.py; §4.5.8 "
+            "'Invisible integration' paragraph is no longer true."
+        )
+
+
 if __name__ == '__main__':
     unittest.main(verbosity=2)
