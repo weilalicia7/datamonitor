@@ -213,6 +213,72 @@ class TestReproducibilityArtefacts(unittest.TestCase):
                       "sec:fairness-mitigation label missing — §5.6.5 "
                       "prose cannot self-reference its own subsection")
 
+    def test_bibliography_is_alphabetically_sorted(self):
+        """Regression for the reviewer's critique that entries like
+        Walonoski, Gonzales, Grieves, Taskesen, Desaulniers were
+        'missing' from the bibliography — they were physically
+        present but orphaned out of alphabetical order at the end,
+        so a visual scan of their expected section found nothing.
+
+        Walks every `\\bibitem[label]{key}` in main.tex, extracts the
+        first-author surname from the label, and asserts the surnames
+        are in case-insensitive sorted order.  Prevents the
+        orphaned-entry failure mode from recurring.
+        """
+        import re
+
+        tex_path = _REPO_ROOT.parent / "dissertation" / "main.tex"
+        if not tex_path.exists():
+            self.skipTest("dissertation/main.tex not present (outside repo)")
+        text = tex_path.read_text(encoding="utf-8")
+
+        pattern = re.compile(r"\\bibitem(?:\[([^\]]*)\])?\{([^}]+)\}")
+        entries = []
+        for m in pattern.finditer(text):
+            label = m.group(1) or m.group(2)
+            key = m.group(2)
+            # First-author surname: everything up to the first
+            # comma / ampersand / open-paren / backslash
+            first_word = re.split(r"[,(&\\]", label)[0].strip()
+            entries.append((first_word, key))
+
+        self.assertGreater(len(entries), 0,
+                           "no \\bibitem entries found in main.tex")
+
+        prev_name = None
+        prev_key = None
+        out_of_order = []
+        for surname, key in entries:
+            name = surname.lower()
+            if prev_name is not None and name < prev_name:
+                out_of_order.append((surname, key, prev_key))
+            prev_name = name
+            prev_key = key
+
+        self.assertFalse(
+            out_of_order,
+            f"{len(out_of_order)} \\bibitem(s) out of alphabetical order "
+            f"(reviewer would say 'missing' if their T section scan "
+            f"misses them): "
+            f"{[(s, k) for s, k, _ in out_of_order[:5]]}",
+        )
+
+        # Sanity: the entries the external review specifically flagged
+        # must all be visually findable — i.e., in alphabetical
+        # position in their expected section.
+        defined_keys = {k for _, k in entries}
+        required = {
+            "walonoski2018synthea", "gonzales2023synthetic",
+            "grieves2017digital", "taskesen2021aistats",
+            "taskesen2021statistical", "desaulniers2005column",
+            "hernan2020causal",
+        }
+        missing = required - defined_keys
+        self.assertFalse(
+            missing,
+            f"reviewer-cited keys missing from bibliography: {sorted(missing)}",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
