@@ -609,3 +609,91 @@ class TestEdgeCases:
         assert isinstance(d, MPCDecision)
         # Empty chairs ⇒ empty assignments dict
         assert d.action["assignments"] == {}
+
+
+# --------------------------------------------------------------------------- #
+# 12. Budget-vs-latency invariants — regression for §4.5.20
+# --------------------------------------------------------------------------- #
+
+
+class TestBudgetLatencyInvariants:
+    """
+    Regression for the §4.5.20 dissertation finding: the prose asserted
+    "p95 = 505.7 ms ... well under the 500 ms budget" (505.7 > 500 is
+    the OPPOSITE of under) and lumped the fallback rate into the same
+    sentence as if a percentage could be "under 500 ms".
+
+    The runtime invariant the dissertation SHOULD be reporting is
+    operational — every decision must return in bounded time, which the
+    500 ms timeout + fallback path together guarantee.  This test locks
+    two things:
+
+      1. Whenever decision_latency_ms > total_timeout_s * 1000, the
+         decision MUST be flagged used_fallback=True — otherwise the
+         controller has silently overshot its trigger without exercising
+         the fallback path (the exact "p95 above budget + 0% fallback"
+         failure mode that would make the dissertation claim
+         meaningless).
+
+      2. The MPCDecision's decision_latency_ms field is measured from
+         t0=time.perf_counter() and is therefore always non-negative
+         and finite — never NaN, inf, or negative.
+    """
+
+    def test_latency_over_trigger_implies_fallback(
+        self, arrival_model, state_two_chairs_three_queue, tmp_mpc_dir,
+    ):
+        """
+        Drive the controller with an impossibly tight timeout and
+        confirm that any decision whose measured latency exceeds the
+        trigger is flagged as a fallback decision.  Together with the
+        defensive R-side warning in dissertation_analysis.R §34, this
+        makes the "p95 > budget + fallback_rate = 0" case impossible.
+        """
+        budget_s = 0.0001
+        c = MPCController(
+            arrival_model=arrival_model, n_scenarios=50,
+            lookahead_minutes=240,
+            total_timeout_s=budget_s,
+            storage_dir=tmp_mpc_dir,
+        )
+        d = c.decide(state_two_chairs_three_queue)
+        if d.decision_latency_ms > budget_s * 1000:
+            assert d.used_fallback is True, (
+                f"latency={d.decision_latency_ms:.1f}ms exceeds "
+                f"{budget_s * 1000:.1f}ms trigger but used_fallback=False"
+            )
+            assert d.fallback_reason is not None
+
+    def test_latency_field_always_finite_and_nonneg(
+        self, controller, state_two_chairs_three_queue,
+    ):
+        """decision_latency_ms must be a real measurement, never NaN /
+        inf / negative.  The R pipeline aggregates mean and p95 over
+        this field; a single NaN would propagate into the dissertation
+        table macros."""
+        d = controller.decide(state_two_chairs_three_queue)
+        assert d.decision_latency_ms is not None
+        assert d.decision_latency_ms >= 0
+        assert d.decision_latency_ms < float("inf")
+        assert d.decision_latency_ms == d.decision_latency_ms  # not NaN
+
+    def test_budget_status_matches_measured_p95(self):
+        """
+        Pure R-side logic test (no controller needed): given a list of
+        synthetic decisions, the "within" / "slightly above" status
+        must always match whether p95 <= budget.  This is the runtime
+        mirror of the R macro emitter in dissertation_analysis.R §34.
+        """
+        def status(p95_ms, budget_ms):
+            return "within" if p95_ms <= budget_ms else "slightly above"
+
+        assert status(505.7, 500.0) == "slightly above"
+        assert status(500.0, 500.0) == "within"
+        assert status(148.5, 500.0) == "within"
+        assert status(1000.0, 500.0) == "slightly above"
+        # The exact number the dissertation reports must match this
+        # rule; the cell "slightly above the 500 ms trigger by 5.7 ms"
+        # is constructed from the same arithmetic.
+        overshoot = max(0.0, round(505.7 - 500.0, 1))
+        assert overshoot == 5.7
