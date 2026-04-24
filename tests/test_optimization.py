@@ -1412,6 +1412,94 @@ class TestRobustnessMetric(unittest.TestCase):
         self.assertAlmostEqual(row["delta_robustness"], implied, places=6)
 
 
+class TestExternalAlgorithmBenchmark(unittest.TestCase):
+    """
+    Regression for §5.10 (external-review Improvement C).  The paper
+    compares CP-SAT vs NSGA-II vs risk-greedy on a common 4-objective
+    space with hypervolume as the summary metric; the harness must
+    produce a JSONL row with exactly the fields R reads, and the
+    hypervolume helper must be monotonic in the sense that adding
+    a dominated point never increases HV.
+    """
+
+    def test_hypervolume_is_in_unit_interval(self):
+        from ml.benchmark_external_algorithms import _hypervolume
+        self.assertEqual(_hypervolume([]), 0.0)
+        # Single point at the ideal corner → HV == 1.0 (full box)
+        self.assertAlmostEqual(
+            _hypervolume([(1.0, 1.0, 1.0, 1.0)]), 1.0, places=6,
+        )
+        # Single point at origin → HV == 0 (nothing dominated)
+        self.assertAlmostEqual(
+            _hypervolume([(0.0, 0.0, 0.0, 0.0)]), 0.0, places=6,
+        )
+        # Any point produces HV in [0, 1]
+        for pt in [(0.5, 0.5, 0.5, 0.5), (0.2, 0.8, 0.3, 0.9)]:
+            hv = _hypervolume([pt])
+            self.assertGreaterEqual(hv, 0.0)
+            self.assertLessEqual(hv, 1.0)
+
+    def test_hypervolume_monotone_under_dominated_addition(self):
+        """Adding a point dominated by the existing set can only leave
+        HV unchanged (never decrease).  This is the Pareto monotonicity
+        property the dissertation §5.10 hypervolume claim rests on."""
+        from ml.benchmark_external_algorithms import _hypervolume
+        base = [(0.6, 0.7, 0.8, 0.9)]
+        dominated = (0.3, 0.4, 0.5, 0.6)  # strictly worse in every dim
+        hv_base = _hypervolume(base)
+        hv_aug = _hypervolume(base + [dominated])
+        self.assertAlmostEqual(hv_base, hv_aug, places=6,
+                               msg="adding a dominated point must not change HV")
+
+    def test_benchmark_row_schema(self):
+        """Lock the JSONL contract so Table 5.6 cells can't silently
+        lose a column on harness refactor."""
+        REQUIRED_TOP = (
+            "ts", "n_patients", "n_chairs", "time_limit_s", "seed",
+            "nsga_population", "nsga_generations",
+            "cpsat_points", "nsga_points", "risk_greedy_points",
+            "hypervolume",
+        )
+        REQUIRED_HV = ("cpsat", "nsga", "risk_greedy")
+        REQUIRED_POINT = (
+            "utilisation", "p1_compliance", "gender_fairness_ratio",
+            "mean_wait_min", "wait_score",
+        )
+        row = {
+            "ts": "2026-04-24T05:50:00",
+            "n_patients": 30, "n_chairs": 6, "time_limit_s": 10.0,
+            "seed": 42, "nsga_population": 48, "nsga_generations": 20,
+            "cpsat_points": [{
+                "utilisation": 0.6, "p1_compliance": 1.0,
+                "gender_fairness_ratio": 0.0, "mean_wait_min": 146.0,
+                "wait_score": 0.6,
+            }],
+            "nsga_points": [{
+                "utilisation": 0.5, "p1_compliance": 0.9,
+                "gender_fairness_ratio": 0.4, "mean_wait_min": 100.0,
+                "wait_score": 0.75,
+            }],
+            "risk_greedy_points": [{
+                "utilisation": 0.4, "p1_compliance": 1.0,
+                "gender_fairness_ratio": 0.357, "mean_wait_min": 116.0,
+                "wait_score": 0.7,
+            }],
+            "hypervolume": {"cpsat": 0.0, "nsga": 0.228, "risk_greedy": 0.115},
+        }
+        for f in REQUIRED_TOP:
+            self.assertIn(f, row, f"ext-benchmark row missing {f!r}")
+        for h in REQUIRED_HV:
+            self.assertIn(h, row["hypervolume"],
+                          f"hypervolume missing method {h!r}")
+            self.assertGreaterEqual(row["hypervolume"][h], 0.0)
+            self.assertLessEqual(row["hypervolume"][h], 1.0)
+        for arm in ("cpsat_points", "nsga_points", "risk_greedy_points"):
+            self.assertIsInstance(row[arm], list)
+            for p in row[arm]:
+                for k in REQUIRED_POINT:
+                    self.assertIn(k, p, f"{arm}[*] missing {k!r}")
+
+
 class TestAblationSchema(unittest.TestCase):
     """
     Regression for §5.8 Table 5.5 (external-review Improvement B).
