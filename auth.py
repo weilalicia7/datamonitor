@@ -29,8 +29,9 @@ The user store is in-memory and seeded from environment variables:
 * ``AUTH_ADMIN_API_KEY`` / ``AUTH_OPERATOR_API_KEY`` / ``AUTH_VIEWER_API_KEY``
 
 All passwords are stored as PBKDF2-HMAC-SHA256 hashes; API keys are stored
-verbatim (rotate often).  See ``docs/PRODUCTION_READINESS_PLAN.md`` T4.7 for
-how this will be superseded by a real secrets backend.
+verbatim (rotate often).  In production, a managed secrets backend
+(e.g. AWS Secrets Manager / HashiCorp Vault) should supersede the
+environment-variable bootstrap.
 """
 
 from __future__ import annotations

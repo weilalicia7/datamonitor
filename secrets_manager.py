@@ -24,8 +24,9 @@ Fail-fast: :func:`assert_required_secrets_set` raises at startup if any
 secret marked ``required=True`` cannot be resolved.  Catches "deployed
 without FLASK_SECRET_KEY" misconfigurations before the first request.
 
-Rotation semantics + operator runbook live in
-``docs/SECRETS_ROTATION.md`` (linked from SECURITY.md).
+Rotation: rotate the value via the chosen ``SECRETS_BACKEND`` (e.g.
+AWS Secrets Manager / Vault) and restart workers; sessions backed by
+the secret are invalidated on rotation.
 """
 
 from __future__ import annotations
@@ -185,7 +186,8 @@ def get_secret(
     if required:
         raise MissingSecretError(
             f"Required secret '{name}' not set in env, .env, or backend "
-            f"{backend!r}.  See docs/SECRETS_ROTATION.md."
+            f"{backend!r}.  Set it via .env (see .env.example) or the "
+            f"configured SECRETS_BACKEND."
         )
     return default
 
@@ -202,7 +204,8 @@ def assert_required_secrets_set(names: Iterable[str]) -> None:
             missing.append(n)
     if missing:
         raise MissingSecretError(
-            f"Missing required secrets: {missing}.  See docs/SECRETS_ROTATION.md."
+            f"Missing required secrets: {missing}.  Set them via .env "
+            f"(see .env.example) or the configured SECRETS_BACKEND."
         )
 
 

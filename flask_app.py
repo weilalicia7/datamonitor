@@ -143,7 +143,7 @@ else:
     if _is_production_like():
         raise _MissingSecretError(
             "FLASK_SECRET_KEY is required in production environments. "
-            "See docs/SECRETS_ROTATION.md."
+            "Generate one with: python -c \"import secrets; print(secrets.token_hex(32))\""
         )
     app.secret_key = os.urandom(32).hex()
     logger.warning(
@@ -13155,10 +13155,9 @@ def api_data_source():
 
     Note: Channel 3 (NHS open data) is always-on in the background for
     recalibration and is not a valid primary channel — see the auto-learning
-    scheduler and `docs/THREE_CHANNEL_DATA_STRATEGY.md`.  Runtime promotion
-    from Ch1 to Ch2 also happens automatically when files are dropped into
-    `datasets/real_data/` (handled by the `ch2-watcher` daemon; no manual
-    POST required).
+    scheduler.  Runtime promotion from Ch1 to Ch2 also happens automatically
+    when files are dropped into `datasets/real_data/` (handled by the
+    `ch2-watcher` daemon; no manual POST required).
     """
     if request.method == 'GET':
         # Check which channels have data
