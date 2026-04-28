@@ -88,9 +88,11 @@ logger = get_logger(__name__)
 # ---------------------------------------------------------------------------
 SAFETY_DIR: Path = DATA_CACHE_DIR / "safety_guardrails"
 SAFETY_LOG: Path = SAFETY_DIR / "reports.jsonl"
-VERDICT_ACCEPT = "accept"
-VERDICT_WARN = "warn"
-VERDICT_REJECT = "reject"
+VERDICT_ACCEPT             = "accept"
+VERDICT_WARN               = "warn"
+VERDICT_REJECT             = "reject"
+VERDICT_REJECT_ESCALATED   = "reject_escalated"      # multi-HIGH escalation
+VERDICT_ACCEPTED_OVERRIDE  = "accepted_with_override"  # emergency override
 
 SEVERITY_CRITICAL = "CRITICAL"
 SEVERITY_HIGH = "HIGH"
@@ -107,6 +109,13 @@ DEFAULT_MAX_WAIT_MIN: int = 180
 DEFAULT_HIGH_NOSHOW_THRESHOLD: float = 0.40
 DEFAULT_HIGH_NOSHOW_RUN: int = 3
 DEFAULT_MAX_DOUBLE_BOOK_PER_CHAIR_HOUR: int = 1
+
+# Compound-risk escalation: when this many distinct HIGH-severity rules
+# fire on the same schedule, the verdict promotes from WARN to
+# REJECT_ESCALATED.  The clinical reasoning: each HIGH rule alone is
+# tolerable with operational mitigation, but multiple simultaneous HIGH
+# trips signal compound risk that warrants a hard hold.
+DEFAULT_HIGH_ESCALATE_THRESHOLD: int = 3
 
 
 # ---------------------------------------------------------------------------
@@ -138,7 +147,7 @@ class SafetyRuleConfig:
 @dataclass
 class SafetyReport:
     computed_ts: str
-    verdict: str                          # accept / warn / reject
+    verdict: str                          # accept / warn / reject / reject_escalated / accepted_with_override
     n_appointments: int
     n_violations: int
     n_critical: int
@@ -149,6 +158,16 @@ class SafetyReport:
     rules_tripped: List[str]
     narrative: str
     enforce_as_hard_gate: bool
+    # Compound-risk + deadlock + override metadata (added for the
+    # main-body §4.X failure-mode analysis)
+    high_escalate_threshold: int = DEFAULT_HIGH_ESCALATE_THRESHOLD
+    distinct_high_rules: int = 0          # n distinct HIGH rules tripped
+    deadlock_appointments: List[str] = field(default_factory=list)  # patient ids with conflicting HIGH rules
+    override_active: bool = False
+    override_justification: Optional[str] = None
+    override_requester: Optional[str] = None
+    override_ts: Optional[str] = None
+    report_id: Optional[str] = None
     violations: List[SafetyViolation] = field(default_factory=list)
 
     def to_dict(self) -> Dict[str, Any]:
@@ -174,11 +193,14 @@ class SafetyGuardrailsMonitor:
         *,
         enforce_as_hard_gate: bool = True,
         storage_dir: Path = SAFETY_DIR,
+        high_escalate_threshold: int = DEFAULT_HIGH_ESCALATE_THRESHOLD,
     ):
         self.enforce_as_hard_gate = bool(enforce_as_hard_gate)
         self.storage_dir = Path(storage_dir)
         self.storage_dir.mkdir(parents=True, exist_ok=True)
         self.reports_log = self.storage_dir / "reports.jsonl"
+        self.override_log = self.storage_dir / "overrides.jsonl"
+        self._high_escalate_threshold = int(high_escalate_threshold)
 
         self._lock = threading.Lock()
         self._rules: Dict[str, Tuple[RuleFn, SafetyRuleConfig]] = {}
@@ -257,9 +279,39 @@ class SafetyGuardrailsMonitor:
         n_m = sum(1 for v in violations if v.severity == SEVERITY_MODERATE)
         n_l = sum(1 for v in violations if v.severity == SEVERITY_LOW)
 
-        # Verdict rule: any CRITICAL → reject; any HIGH or MODERATE → warn; else accept
+        # Compound-risk escalation: count distinct HIGH-severity rules
+        # that fired (not just total HIGH violations - one rule may trip
+        # multiple times on different appointments).
+        distinct_high_rules = len({
+            v.rule_name for v in violations if v.severity == SEVERITY_HIGH
+        })
+        escalate_threshold = self._high_escalate_threshold
+
+        # Deadlock detection: identify patients whose appointment is
+        # simultaneously violating two or more HIGH rules.  These are
+        # the irreducible-conflict cases - no single remediation can
+        # satisfy all the failed rules, so the schedule must either be
+        # re-solved with relaxed constraints or override-accepted.
+        from collections import Counter
+        high_per_patient: Counter = Counter()
+        rules_per_patient: Dict[str, set] = {}
+        for v in violations:
+            if v.severity == SEVERITY_HIGH and v.patient_id:
+                high_per_patient[v.patient_id] += 1
+                rules_per_patient.setdefault(v.patient_id, set()).add(v.rule_name)
+        deadlock_patient_ids = sorted(
+            pid for pid, rules in rules_per_patient.items() if len(rules) >= 2
+        )
+
+        # Verdict rule:
+        #   any CRITICAL → reject
+        #   distinct HIGH ≥ escalate_threshold OR deadlock → reject_escalated
+        #   any HIGH or MODERATE → warn
+        #   else → accept
         if n_c > 0:
             verdict = VERDICT_REJECT
+        elif distinct_high_rules >= escalate_threshold or deadlock_patient_ids:
+            verdict = VERDICT_REJECT_ESCALATED
         elif n_h > 0 or n_m > 0:
             verdict = VERDICT_WARN
         else:
@@ -271,6 +323,17 @@ class SafetyGuardrailsMonitor:
             n_c=n_c, n_h=n_h, n_m=n_m, n_l=n_l,
             rules_tripped=rules_tripped,
             top=violations[0] if violations else None,
+        )
+        if verdict == VERDICT_REJECT_ESCALATED:
+            narrative += (
+                f"  Compound risk: {distinct_high_rules} distinct HIGH "
+                f"rules tripped (threshold {escalate_threshold}); "
+                f"deadlocks on {len(deadlock_patient_ids)} patient(s)."
+            )
+
+        report_id = (
+            f"safety-{datetime.utcnow().strftime('%Y%m%dT%H%M%S')}-"
+            f"{self._n_runs:06d}"
         )
 
         report = SafetyReport(
@@ -286,6 +349,10 @@ class SafetyGuardrailsMonitor:
             rules_tripped=rules_tripped,
             narrative=narrative,
             enforce_as_hard_gate=self.enforce_as_hard_gate,
+            high_escalate_threshold=escalate_threshold,
+            distinct_high_rules=distinct_high_rules,
+            deadlock_appointments=deadlock_patient_ids,
+            report_id=report_id,
             violations=violations,
         )
         with self._lock:
@@ -297,6 +364,84 @@ class SafetyGuardrailsMonitor:
     def last(self) -> Optional[SafetyReport]:
         with self._lock:
             return self._last
+
+    def request_emergency_override(
+        self,
+        *,
+        report_id: str,
+        justification: str,
+        requester: str,
+    ) -> Dict[str, Any]:
+        """
+        Flip a REJECT or REJECT_ESCALATED verdict to ACCEPTED_WITH_OVERRIDE.
+
+        Two-person rule: the caller MUST supply both a free-text
+        clinical justification (>= 20 chars) and a requester ID
+        (typically the on-call clinical safety officer's NHS ID).
+        Both fields are appended to ``overrides.jsonl`` together
+        with the original verdict and the violation list, providing
+        an immutable audit trail for retrospective Caldicott review.
+
+        The override mutates the in-memory ``_last`` report in
+        place and returns the audit record.  Use sparingly: the
+        clinical-safety policy assumes overrides are exceptional
+        events triggered only when a P1 referral arrives outside
+        the regular booking window or when a chair / nurse failure
+        forces a same-day re-shuffle.
+        """
+        if not isinstance(justification, str) or len(justification.strip()) < 20:
+            raise ValueError(
+                "justification must be a non-empty clinical free-text "
+                "of at least 20 characters."
+            )
+        if not isinstance(requester, str) or not requester.strip():
+            raise ValueError("requester must be a non-empty operator ID.")
+
+        with self._lock:
+            if self._last is None or self._last.report_id != report_id:
+                raise LookupError(
+                    f"No current report with id={report_id!r}; the "
+                    "override target may have been superseded by a "
+                    "fresher safety run."
+                )
+            if self._last.verdict not in (
+                VERDICT_REJECT, VERDICT_REJECT_ESCALATED,
+            ):
+                raise ValueError(
+                    f"Override only applies to a rejected verdict; "
+                    f"current verdict is {self._last.verdict!r}."
+                )
+            original_verdict = self._last.verdict
+            now_ts = datetime.utcnow().isoformat(timespec="seconds")
+            self._last.verdict = VERDICT_ACCEPTED_OVERRIDE
+            self._last.override_active = True
+            self._last.override_justification = justification.strip()
+            self._last.override_requester = requester.strip()
+            self._last.override_ts = now_ts
+            self._last.narrative += (
+                f"  Emergency override by {requester.strip()!r} at {now_ts}: "
+                f"verdict {original_verdict!r} → {VERDICT_ACCEPTED_OVERRIDE!r}. "
+                f"Justification: {justification.strip()[:160]}"
+            )
+            audit = {
+                "ts":                now_ts,
+                "report_id":         report_id,
+                "original_verdict":  original_verdict,
+                "new_verdict":       VERDICT_ACCEPTED_OVERRIDE,
+                "requester":         requester.strip(),
+                "justification":     justification.strip(),
+                "n_violations":      self._last.n_violations,
+                "n_critical":        self._last.n_critical,
+                "n_high":            self._last.n_high,
+                "deadlock_appts":    list(self._last.deadlock_appointments),
+                "rules_tripped":     list(self._last.rules_tripped),
+            }
+        try:
+            with self.override_log.open("a", encoding="utf-8") as fh:
+                fh.write(json.dumps(audit) + "\n")
+        except Exception as exc:                                  # pragma: no cover
+            logger.warning(f"Override audit write failed: {exc}")
+        return audit
 
     def status(self) -> Dict[str, Any]:
         last = self.last()

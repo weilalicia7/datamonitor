@@ -170,6 +170,64 @@ def _arm_metrics(df, *, seed: int, test_frac: float) -> Dict:
     }
 
 
+def _discriminator_auc(syn_df, real_df, *, seed: int) -> Dict:
+    """
+    Privacy / fidelity metric: train a classifier to distinguish
+    synthetic rows (label 0) from real rows (label 1) on the matched
+    feature vector and report ROC-AUC on a held-out 20% split.
+
+    AUC interpretation:
+      ~0.50  - synthetic and real are statistically indistinguishable
+               on these features (best-case fidelity, lowest re-id risk)
+      ~1.00  - the classifier separates them perfectly (worst case;
+               synthetic data does not reproduce the real marginals)
+
+    Returns ``None`` when the real arm is dormant (cannot discriminate
+    against a non-existent cohort).
+    """
+    if real_df is None or len(real_df) < 20 or len(syn_df) < 20:
+        return None
+
+    import numpy as np
+    from sklearn.ensemble import GradientBoostingClassifier
+    from sklearn.metrics import roc_auc_score
+    from sklearn.model_selection import train_test_split
+
+    X_syn,  _, _ = _extract_xy(syn_df)
+    X_real, _, _ = _extract_xy(real_df)
+    X = np.vstack([X_syn, X_real])
+    y = np.concatenate([np.zeros(len(X_syn)), np.ones(len(X_real))])
+
+    try:
+        X_tr, X_te, y_tr, y_te = train_test_split(
+            X, y, test_size=0.20, random_state=seed, stratify=y,
+        )
+        if y_tr.min() == y_tr.max() or y_te.min() == y_te.max():
+            return None
+        clf = GradientBoostingClassifier(
+            n_estimators=120, max_depth=3, random_state=seed,
+        )
+        clf.fit(X_tr, y_tr)
+        p = clf.predict_proba(X_te)[:, 1]
+        auc = float(roc_auc_score(y_te, p))
+    except Exception:
+        return None
+
+    return {
+        "auc": auc,
+        "interpretation": (
+            "Privacy / fidelity: 0.50 = synthetic and real "
+            "indistinguishable on the matched feature vector; 1.00 = "
+            "perfectly separable.  This is NOT the no-show predictive "
+            "AUC reported in the synthetic_arm / real_arm blocks above."
+        ),
+        "n_synthetic": int(len(X_syn)),
+        "n_real":      int(len(X_real)),
+        "method":      "GradientBoostingClassifier (n_estimators=120, "
+                       "max_depth=3) on stratified 80/20 split.",
+    }
+
+
 def benchmark(
     *, n_patients: int, test_frac: float, seed: int,
     output_path: Path,
@@ -183,6 +241,12 @@ def benchmark(
     real = None
     if real_df is not None:
         real = _arm_metrics(real_df, seed=seed, test_frac=test_frac)
+
+    # Privacy / fidelity discriminator AUC (synthetic vs real).
+    # Null when the real arm is dormant — there is no real cohort to
+    # discriminate against and reporting any number would be
+    # misleading.
+    discriminator = _discriminator_auc(syn_df, real_df, seed=seed)
 
     delta_auc = None
     delta_mae = None
@@ -229,6 +293,14 @@ def benchmark(
             flush=True,
         )
 
+    if discriminator is not None:
+        print(
+            f"  discriminator (synthetic-vs-real privacy/fidelity) AUC = "
+            f"{discriminator['auc']:.3f} "
+            f"(0.50 = indistinguishable, 1.00 = fully separable)",
+            flush=True,
+        )
+
     row = {
         "ts": datetime.utcnow().isoformat(timespec="seconds"),
         "channel": status.channel,
@@ -241,12 +313,19 @@ def benchmark(
         "delta_auc": delta_auc,
         "delta_mae_minutes": delta_mae,
         "delta_no_show_rate": delta_noshow,
+        "discriminator": discriminator,
         "comparison_note": (
-            "Both arms trained on matched feature columns with the "
-            "same seed + split.  When real_arm is null, the real-data "
-            "channel is dormant — the benchmark is structural-only "
-            "and the dissertation §4.7 macros render as 'n/a' until "
-            "the cohort is dropped in."
+            "synthetic_arm.auc and real_arm.auc are PREDICTIVE no-show "
+            "AUCs from a small benchmark GradientBoosting head trained "
+            "on n=n_patients rows with a held-out test_frac split — they "
+            "are structural-only validation of the comparison plumbing, "
+            "NOT the production stacked-ensemble's AUC.  The "
+            "discriminator block is the privacy / fidelity metric: "
+            "AUC near 0.50 means a classifier cannot tell synthetic "
+            "from real on the matched features.  When real_arm is "
+            "null, the real-data channel is dormant; both delta_* "
+            "and discriminator render as null until a DPIA-cleared "
+            "cohort is uploaded."
         ),
     }
 

@@ -378,6 +378,11 @@ class MicroBatchOptimizer:
                 'change_type': change_type,
                 'latency_ms': round(latency_ms, 3),
                 'success': bool(success),
+                # Live calls are tagged so dissertation analysis can
+                # cleanly separate them from steady-state benchmark rows
+                # (which carry phase='steady', source='benchmark').
+                'phase': 'production',
+                'source': 'live',
             }
             if error:
                 row['error'] = error

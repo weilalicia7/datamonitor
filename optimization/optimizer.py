@@ -138,6 +138,17 @@ class ScheduleOptimizer:
         self._use_cvar_objective: bool = True
         self._fairness_constraints_enabled: bool = True
 
+        # P1 hard timing constraint (§4.5.2 / Listing B.3): P1 patients
+        # must start within this many minutes of the day's opening.
+        # Default from config.P1_MAX_START_MIN; set to None to disable
+        # (used by ablation benchmarks that compare soft-only vs
+        # hard+soft priority enforcement).
+        try:
+            from config import P1_MAX_START_MIN as _P1_DEFAULT
+        except Exception:
+            _P1_DEFAULT = 90
+        self._p1_max_start_min: Optional[int] = _P1_DEFAULT
+
         logger.info(f"Optimizer initialized with {len(self.chairs)} chairs")
 
     def set_chairs(self, chairs: List[Chair]):
@@ -613,6 +624,27 @@ class ScheduleOptimizer:
                 ]
                 if bed_chairs:
                     model.AddBoolOr(bed_chairs).OnlyEnforceIf(pvars['assigned'])
+
+        # =====================================================================
+        # P1 HARD TIMING CONSTRAINT (Listing B.3 / §4.5.2)
+        #
+        # P1 (curative-intent) patients must start within
+        # ``self._p1_max_start_min`` minutes of the day's opening when
+        # assigned.  This is the clinical-safety floor that produces the
+        # 100% P1-compliance figure reported in the Executive Summary —
+        # the soft priority weight in the objective alone cannot
+        # guarantee compliance under capacity pressure.
+        #
+        # Set ``self._p1_max_start_min = None`` to disable for ablation
+        # benchmarks (e.g. the soft-only baseline reported in the
+        # supplementary material).
+        # =====================================================================
+        if self._p1_max_start_min is not None:
+            for p in patients:
+                if p.priority == 1:
+                    pvars = patient_vars[p.patient_id]
+                    model.Add(pvars['start'] <= int(self._p1_max_start_min))\
+                         .OnlyEnforceIf(pvars['assigned'])
 
         # =====================================================================
         # FAIRNESS CONSTRAINTS

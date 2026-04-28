@@ -411,7 +411,7 @@ The channel badge **auto-refreshes every 30 seconds** by polling `GET /api/data/
 The main scheduling view — a Gantt chart showing all appointments for a selected site and date.
 
 **Controls:**
-- **Site selector** — WC (Whitchurch), PCH (Prince Charles), RGH (Royal Gwent), POW (Princess of Wales), CWM (Cwmbran Mobile)
+- **Site selector** — WC (Whitchurch), PCH (Prince Charles), RGH (Royal Glamorgan), POW (Princess of Wales), CWM (Cwmbran Mobile)
 - **Date picker** — select any date in the schedule
 - **Refresh** — reload from current data
 

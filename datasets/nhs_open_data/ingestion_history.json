@@ -214,5 +214,61 @@
     "records": 0,
     "is_new": false,
     "hash": null
+  },
+  {
+    "source": "cancer_waiting_times",
+    "timestamp": "2026-04-24T03:54:56.480611",
+    "success": true,
+    "records": 26895,
+    "is_new": true,
+    "hash": "1b3484122a14513d"
+  },
+  {
+    "source": "sact_activity",
+    "timestamp": "2026-04-24T03:54:56.947497",
+    "success": true,
+    "records": 1,
+    "is_new": true,
+    "hash": "8e8fc891d7a952cf"
+  },
+  {
+    "source": "ndrs_cancer_data_hub",
+    "timestamp": "2026-04-24T03:54:56.950495",
+    "success": true,
+    "records": 0,
+    "is_new": false,
+    "hash": null
+  },
+  {
+    "source": "nhsbsa_prescribing",
+    "timestamp": "2026-04-24T03:54:57.633101",
+    "success": true,
+    "records": 59,
+    "is_new": true,
+    "hash": "5b51ffc007ca9a8d"
+  },
+  {
+    "source": "sact_v4_patient_data",
+    "timestamp": "2026-04-24T03:54:58.094110",
+    "success": true,
+    "records": 0,
+    "is_new": false,
+    "hash": null
+  },
+  {
+    "source": "sact_v4_patient_data",
+    "timestamp": "2026-04-25T03:56:23.715429",
+    "success": true,
+    "records": 0,
+    "is_new": false,
+    "hash": null
+  },
+  {
+    "source": "sact_v4_patient_data",
+    "timestamp": "2026-04-26T08:20:42.856708",
+    "success": true,
+    "records": 0,
+    "is_new": false,
+    "hash": null
   }
 ]

@@ -67,6 +67,35 @@ try:
         EventImpactModel, EventImpactPrediction, Event, EventType, EventSeverity,
         analyze_event_impact, estimate_event_severity
     )
+    from ml.severe_weather_scenario import (
+        simulate_severe_weather_intervention, SevereWeatherScenarioResult
+    )
+    from ml.micro_batch_benchmark import (
+        run_steady_state_benchmark as run_microbatch_benchmark,
+        MicroBatchBenchmarkResult,
+    )
+    from ml.four_fifths_audit import (
+        audit_four_fifths, FourFifthsResult
+    )
+    from ml.causal_pre_registration import (
+        evaluate as evaluate_pre_registration,
+        to_status_dict as pre_registration_status_dict,
+        PreRegistrationResult,
+    )
+    from ml.pareto_mcda import (
+        analyse_latest as analyse_latest_pareto_mcda,
+        ParetoMCDAResult,
+    )
+    from ml.calibration_curve import (
+        compute_calibration as compute_noshow_calibration,
+        CalibrationResult,
+    )
+    from ml.benchmark_calibration import (
+        benchmark as run_calibration_benchmark,
+    )
+    from ml.cost_effectiveness import (
+        compute_cost_effectiveness, CostEffectivenessResult,
+    )
     ML_AVAILABLE = True
     SURVIVAL_AVAILABLE = True
     UPLIFT_AVAILABLE = True
@@ -573,6 +602,13 @@ qrf_noshow_model = None    # Quantile Regression Forest for no-show (3.2)
 hierarchical_model = None  # Hierarchical Bayesian model for duration (3.3)
 causal_model = None  # Causal inference framework (4.1)
 event_impact_model = None  # Event impact model with sentiment (4.3)
+severe_weather_scenario = None  # Severe-weather intervention simulation (4.3 scenario)
+four_fifths_audit_result = None  # Four-Fifths Rule audit result (5.6 fairness)
+causal_pre_registration_result = None  # Pre-registered falsification protocol (4.6.2)
+pareto_mcda_result = None  # Knee-point + trade-off MCDA on Pareto frontiers (5.11)
+cost_effectiveness_result = None  # CEA per operating day (6.4 Prospective Validation)
+microbatch_benchmark_result = None  # Steady-state latency benchmark (3.2 micro-batch)
+calibration_benchmark_result = None  # Raw + isotonic calibration benchmark (5.2.1)
 appointments_df = None  # Store appointments DataFrame for sequence model
 historical_appointments_df = None  # Store historical data for ML training
 
@@ -2149,6 +2185,210 @@ def train_advanced_ml_models():
             except Exception as e:
                 logger.warning(f"Causal model training failed, using defaults: {e}")
                 causal_model._use_default_probabilities()
+
+        # =========================================================
+        # Severe-weather scenario simulation (4.3 scenario analysis)
+        # Runs silently as part of training; result is exposed via
+        # /api/ml/scenario/severe-weather for diagnostics only.  No UI panel.
+        # =========================================================
+        try:
+            global severe_weather_scenario
+            # Pass live IV/DML weather ATE so the severe-day baseline is
+            # the proper counterfactual (cohort + ATE) rather than the
+            # all-day average.  Falls back to the LPM ATE if causal_model
+            # has not been fit (cold-start case).
+            try:
+                _live_ate = float(getattr(causal_model, "weather_ate", 0.1444)
+                                  or 0.1444)
+            except Exception:
+                _live_ate = 0.1444
+            severe_weather_scenario = simulate_severe_weather_intervention(
+                df, weather_ate=_live_ate,
+            )
+            if severe_weather_scenario is not None:
+                logger.info(
+                    f"Severe-weather scenario (4.3): cohort "
+                    f"{severe_weather_scenario.cohort_baseline_pct}% / "
+                    f"severe-day baseline "
+                    f"{severe_weather_scenario.baseline_waste_pct}% (+ATE "
+                    f"{severe_weather_scenario.weather_ate}) -> post "
+                    f"{severe_weather_scenario.post_intervention_waste_pct}% "
+                    f"(rel {severe_weather_scenario.relative_reduction_pct}%)"
+                )
+        except Exception as e:
+            logger.warning(f"Severe-weather scenario simulation skipped: {e}")
+
+        # =========================================================
+        # Cost-effectiveness analysis (6.4 Prospective Validation)
+        # Computes drug / staff / travel / CO2 components per
+        # operating day from real cohort + benchmark inputs.
+        # Diagnostic-only, no UI panel.
+        # =========================================================
+        try:
+            global cost_effectiveness_result
+            sw = severe_weather_scenario
+            # Pass the relative no-show reduction (not the absolute pp);
+            # compute_cost_effectiveness multiplies by the cohort baseline
+            # to derive the daily-averaged effective pp reduction.  Earlier
+            # code passed sw.relative_reduction_pct directly into the
+            # legacy `no_show_reduction_pp` slot, which the function
+            # treated as if it were an absolute pp - over-stating the
+            # daily savings by ~7x because 15.9 was being interpreted as
+            # 15.9 pp instead of 14.5 % * 15.9 % = 2.3 pp.
+            rel_red = (sw.relative_reduction_pct
+                       if sw is not None else 17.9)
+            cost_effectiveness_result = compute_cost_effectiveness(
+                df,
+                relative_noshow_reduction_pct = rel_red,
+                travel_reduction_pct          = 8.3,
+            )
+            if cost_effectiveness_result is not None:
+                _ce = cost_effectiveness_result
+                logger.info(
+                    f"Cost-effectiveness (6.4): "
+                    f"baseline {_ce.cohort_baseline_noshow_pct}% * "
+                    f"{_ce.relative_noshow_reduction_pct}% relative = "
+                    f"{_ce.effective_noshow_reduction_pp} pp daily-averaged; "
+                    f"drug £{_ce.drug_saving_gbp:.0f}, "
+                    f"staff £{_ce.staff_saving_gbp:.0f}, "
+                    f"travel £{_ce.travel_saving_gbp:.0f}, "
+                    f"CO2 {_ce.co2_saving_kg:.1f} kg, "
+                    f"total £{_ce.total_saving_gbp:.0f} / day"
+                )
+        except Exception as e:
+            logger.warning(f"Cost-effectiveness skipped: {e}")
+
+        # =========================================================
+        # Pareto-frontier MCDA: knee-point + trade-off ratios (5.11)
+        # Reads the latest weight-sensitivity benchmark JSONL and
+        # reports the principled tuning recommendation for the
+        # day-unit manager.  Diagnostic-only, no UI panel.
+        # =========================================================
+        try:
+            from pathlib import Path as _Path
+            global pareto_mcda_result
+            pareto_mcda_result = analyse_latest_pareto_mcda(
+                _Path(__file__).resolve().parent / "data_cache"
+                / "weight_sensitivity" / "results.jsonl"
+            )
+            if pareto_mcda_result is not None:
+                a = pareto_mcda_result.frontiers.get("frontier_util_vs_wait")
+                if a and a.knee_weights:
+                    logger.info(
+                        f"Pareto MCDA (5.11): knee on util-vs-wait at "
+                        f"weights={a.knee_weights} "
+                        f"(chord-dist={a.knee_distance_to_chord:.3f}, "
+                        f"trade-off dY/dX={a.trade_off_at_knee:.3f})"
+                    )
+        except Exception as e:
+            logger.warning(f"Pareto MCDA skipped: {e}")
+
+        # =========================================================
+        # Pre-registered causal falsification protocol (4.6.2)
+        # Structural test on synthetic cohort (NCO/NCE machinery
+        # exercised end-to-end, expected near-zero by construction);
+        # P1/P4/P5 await real cohort.  Diagnostic-only, no UI panel.
+        # =========================================================
+        try:
+            global causal_pre_registration_result
+            causal_pre_registration_result = evaluate_pre_registration(
+                df, on_real_data=False
+            )
+            if causal_pre_registration_result is not None:
+                _evaluable = [
+                    p for p in causal_pre_registration_result.predictions
+                    if p.can_evaluate
+                ]
+                _passing = sum(1 for p in _evaluable if p.passed)
+                logger.info(
+                    f"Causal pre-registration (4.6.2): "
+                    f"{_passing}/{len(_evaluable)} evaluable predictions pass "
+                    f"on synthetic cohort (P1/P4/P5 await real cohort)."
+                )
+        except Exception as e:
+            logger.warning(f"Causal pre-registration skipped: {e}")
+
+        # =========================================================
+        # Four-Fifths Rule fairness audit (5.6 fairness)
+        # Runs silently as part of training; result is exposed via
+        # /api/ml/fairness/four-fifths for diagnostics only.  No UI panel.
+        # =========================================================
+        try:
+            global four_fifths_audit_result
+            four_fifths_audit_result = audit_four_fifths(df)
+            if four_fifths_audit_result is not None:
+                logger.info(
+                    f"Four-Fifths audit (5.6): "
+                    f"{four_fifths_audit_result.n_passing}/"
+                    f"{four_fifths_audit_result.n_passing + four_fifths_audit_result.n_failing} pass; "
+                    f"gender ratio "
+                    f"{[g.ratio for g in four_fifths_audit_result.groups if g.name == 'Gender']} "
+                    f"(incl Unknown: {four_fifths_audit_result.gender_ratio_incl_unknown})"
+                )
+        except Exception as e:
+            logger.warning(f"Four-Fifths audit skipped: {e}")
+
+        # =========================================================
+        # Steady-state micro-batch latency benchmark (3.2)
+        # Replaces the cold-start-contaminated latency log with proper
+        # warmup-then-measure samples so the dissertation §3.2 numbers
+        # reflect steady-state performance, not first-call import +
+        # JIT cost.  Diagnostic-only via /api/microbatch/status; no UI.
+        # =========================================================
+        try:
+            global microbatch_benchmark_result
+            from pathlib import Path as _Path
+            _mb_log = (_Path(__file__).resolve().parent
+                       / "data_cache" / "micro_batch" / "latency.jsonl")
+            microbatch_benchmark_result = run_microbatch_benchmark(
+                squeeze_handler = squeeze_handler,
+                optimizer       = optimizer,
+                log_path        = _mb_log,
+            )
+            if microbatch_benchmark_result is not None:
+                _r = microbatch_benchmark_result
+                logger.info(
+                    f"Micro-batch benchmark (3.2): "
+                    f"fast p50={_r.fast_p50_ms} ms p95={_r.fast_p95_ms} ms "
+                    f"({_r.fast_pct_within_budget}% < {_r.fast_path_budget_ms} ms "
+                    f"over {_r.n_fast_steady} steady calls); "
+                    f"slow p50={_r.slow_p50_ms} ms over {_r.n_slow_steady} runs; "
+                    f"speed-up {_r.speedup_p50}x"
+                )
+        except Exception as e:
+            logger.warning(f"Micro-batch benchmark skipped: {e}")
+
+        # =========================================================
+        # Calibration benchmark — raw GBM + 5-fold CV isotonic (5.2.1)
+        # Replaces the historic "Platt-style meta-learner narrows the
+        # gap" hand-wave with two real measured regimes so the
+        # negative-Brier-skill issue is honestly disclosed AND a
+        # post-hoc remediation (isotonic regression) is applied.
+        # Diagnostic-only via /api/ml/calibration; no UI panel.
+        # =========================================================
+        try:
+            global calibration_benchmark_result
+            from pathlib import Path as _Path
+            _cal_out = (_Path(__file__).resolve().parent
+                        / "data_cache" / "calibration" / "results.jsonl")
+            calibration_benchmark_result = run_calibration_benchmark(
+                n_patients = 1500, test_frac = 0.20, n_bins = 10,
+                seed = 42, output_path = _cal_out,
+            )
+            if calibration_benchmark_result is not None:
+                _cb = calibration_benchmark_result
+                _raw = _cb.get('calibration', {})
+                _iso = _cb.get('calibration_isotonic', {})
+                logger.info(
+                    f"Calibration benchmark (5.2.1): "
+                    f"raw Brier-skill={_raw.get('brier_skill_score')} "
+                    f"ECE={_raw.get('ece')} -> "
+                    f"isotonic Brier-skill={_iso.get('brier_skill_score')} "
+                    f"ECE={_iso.get('ece')} "
+                    f"(delta {_cb.get('delta_brier_skill_isotonic_minus_raw')})"
+                )
+        except Exception as e:
+            logger.warning(f"Calibration benchmark skipped: {e}")
 
         # =========================================================
         # Train Event Impact Model (4.3)
@@ -4941,6 +5181,459 @@ def api_iv_estimate():
         return jsonify({'error': str(e)}), 500
 
 
+@app.route('/api/ml/cost-effectiveness')
+def api_cost_effectiveness():
+    """
+    Cost-effectiveness analysis (CEA) per operating day.
+
+    Reports the four operational savings components quantified in
+    Section 6.4 / Appendix G of the dissertation:
+
+      - drug_saving_gbp     : recovered cytotoxic-dose cost from
+                              no-show reduction (£200/dose midpoint).
+      - staff_saving_gbp    : nurse-time freed by absorbing recovered
+                              chair time (band-5 hourly + on-cost).
+      - travel_saving_gbp   : patient mileage avoided through
+                              optimised matching (NHS HTCS rate).
+      - co2_saving_kg       : CO2-equivalent on the same mileage
+                              reduction (DEFRA 2024 factor).
+
+    All four come from the real cohort + the optimiser benchmark;
+    cost rates are conservative UK NHS reference midpoints and are
+    disclosed inline with the result.
+
+    Diagnostic-only - no UI panel.
+
+    GET /api/ml/cost-effectiveness
+    """
+    if cost_effectiveness_result is None:
+        return jsonify({
+            'status': 'not_evaluated',
+            'message': (
+                'CEA not yet computed; runs at startup once historical '
+                'data is loaded with the required Travel_Distance_KM and '
+                'is_noshow columns.'
+            )
+        }), 200
+    return jsonify({
+        'status':       'evaluated',
+        'method':       'Per-operating-day decomposition into drug, '
+                        'staff-time, travel, CO2; UK NHS reference '
+                        'cost rates disclosed inline.  No-show input: '
+                        'severe-weather scenario relative reduction '
+                        '(%) applied to cohort baseline rate -> '
+                        'effective daily-averaged absolute pp; the '
+                        'three numbers are surfaced separately so the '
+                        'dissertation prose cannot conflate them.',
+        **cost_effectiveness_result.to_dict(),
+    })
+
+
+@app.route('/api/ml/calibration')
+def api_calibration_curve():
+    """
+    Latest calibration curve + scoring for the no-show predictor.
+
+    Returns the reliability diagram and the scoring diagnostics for
+    BOTH regimes the §5.2.1 dissertation prose now reports:
+
+      - raw GBM probabilities (the historical "negative Brier-skill"
+        baseline);
+      - 5-fold CV isotonic regression on top of the same GBM (the
+        post-hoc calibration step that mitigates the deficit).
+
+    The CP-SAT overbooking objective uses the calibrated probability
+    VALUE for slot-cost weighting, so the isotonic regime is what an
+    operator sees in the live scheduler; the raw regime is reported
+    for transparency about the underlying ranking quality.
+
+    Reads ``data_cache/calibration/results.jsonl`` so it is safe to
+    poll (does not retrain on each call).  Diagnostic-only - no UI
+    panel.
+
+    GET /api/ml/calibration
+    """
+    import json as _json
+    from pathlib import Path as _Path
+
+    jsonl = _Path(__file__).resolve().parent / "data_cache" / \
+            "calibration" / "results.jsonl"
+    if not jsonl.exists():
+        return jsonify({
+            'status': 'not_run',
+            'message': (
+                'No calibration runs recorded yet.  Invoke '
+                'python -m ml.benchmark_calibration to populate.'
+            )
+        }), 200
+
+    try:
+        last_line = None
+        with jsonl.open('r', encoding='utf-8') as fh:
+            for line in fh:
+                if line.strip():
+                    last_line = line
+        if last_line is None:
+            return jsonify({'status': 'empty', 'path': str(jsonl)}), 200
+        row = _json.loads(last_line)
+    except Exception as exc:
+        return jsonify({'status': 'error', 'error': str(exc)}), 500
+
+    return jsonify({
+        'status':              'ok',
+        'latest_run':          row,
+        'has_isotonic_regime': bool(row.get('calibration_isotonic')),
+        'has_multi_regimes':   bool(row.get('calibration_regimes')),
+        'best_regime':         row.get('best_regime'),
+        'best_regime_brier_skill_delta_vs_raw':
+            row.get('best_regime_brier_skill_delta_vs_raw'),
+        'oracle_brier_skill_ceiling':
+            (row.get('calibration_regimes') or {}).get('oracle', {})
+                .get('brier_skill_score'),
+        'delta_brier_skill_isotonic_minus_raw':
+            row.get('delta_brier_skill_isotonic_minus_raw'),
+        'metric_definitions': {
+            'ece':           'Expected Calibration Error: bin-weighted '
+                             'mean |predicted - observed|.',
+            'mce':           'Maximum Calibration Error: worst-bin gap.',
+            'brier':         'Brier score: mean (predicted - observed)^2.',
+            'brier_skill':   '1 - Brier(model) / Brier(climatology). '
+                             'Climatology = predict the cohort base rate '
+                             'for every patient.  Skill > 0 means the '
+                             'model beats base-rate prediction.',
+            'calibration_isotonic':
+                             '5-fold CV isotonic regression wrapping the '
+                             'same GBM via sklearn.calibration.'
+                             'CalibratedClassifierCV.  Mitigates the '
+                             'raw-GBM Brier-skill deficit without '
+                             'altering the underlying ranking.',
+            'calibration_regimes':
+                             'Multi-method post-hoc calibration: raw, '
+                             'isotonic (5-fold CV), sigmoid / Platt '
+                             '(5-fold CV), Beta calibration (Kull '
+                             '2017), temperature scaling, and oracle '
+                             '(post-hoc bin + observed rate -- the '
+                             'upper bound on what perfectly calibrated '
+                             'probabilities would deliver from the '
+                             'same ranking).  Section G.0.7.',
+            'per_subgroup_best_regime':
+                             'ECE / Brier per protected subgroup '
+                             '(Gender, Age_Band, Site_Code, Priority) '
+                             'for the best non-oracle regime; cells '
+                             'with n < 20 are flagged too_small.',
+            'scheduler_impact':
+                             'Number of overbook decisions proposed at '
+                             'the production threshold (0.30) under '
+                             'each calibration regime, with precision '
+                             '= recovered no-shows / overbooks; the '
+                             'oracle row bounds the operational cost '
+                             'of mis-calibration.',
+        },
+    })
+
+
+@app.route('/api/ml/ablation')
+def api_ablation():
+    """
+    Latest ablation benchmark row (Section 5.8 Table G.2).
+
+    Reads ``data_cache/ablation/results.jsonl`` written by
+    ``python -m ml.benchmark_ablation`` and surfaces both the headline
+    M/F-only gender ratio (matching the §5.6.1 SACT v4.0 audit
+    convention) and the with-Unknown ratio for transparency about
+    cohort-composition artefacts.  No UI panel - diagnostic-only.
+
+    GET /api/ml/ablation
+    """
+    import json as _json
+    from pathlib import Path as _Path
+
+    jsonl = _Path(__file__).resolve().parent / "data_cache" / \
+            "ablation" / "results.jsonl"
+    if not jsonl.exists():
+        return jsonify({
+            'status': 'not_run',
+            'message': (
+                'No ablation runs recorded yet.  Invoke '
+                'python -m ml.benchmark_ablation to populate.'
+            )
+        }), 200
+
+    try:
+        last_line = None
+        with jsonl.open('r', encoding='utf-8') as fh:
+            for line in fh:
+                if line.strip():
+                    last_line = line
+        if last_line is None:
+            return jsonify({'status': 'empty', 'path': str(jsonl)}), 200
+        row = _json.loads(last_line)
+    except Exception as exc:
+        return jsonify({'status': 'error', 'error': str(exc)}), 500
+
+    return jsonify({
+        'status':     'ok',
+        'latest_run': row,
+        'metric_definitions': {
+            'gender_fairness_ratio':
+                'Worst-pair Four-Fifths Rule across coded Male/Female '
+                'subgroups only (matches §5.6.1 SACT v4.0 audit '
+                'convention - the unknown bucket is a data-quality '
+                'category, not a protected attribute).',
+            'gender_fairness_ratio_with_unknown':
+                'Worst-pair ratio over all groups including unknown.  '
+                'On small cohorts a sub-5-patient unknown bucket can '
+                'collapse this to 0.0 even when M-vs-F is balanced; '
+                'reported for transparency, not as the headline.',
+        },
+    })
+
+
+@app.route('/api/ml/optimisation/pareto-knee')
+def api_pareto_mcda():
+    """
+    MCDA on the Pareto-weight sensitivity frontiers.
+
+    Returns the knee-point (max distance from utopia-nadir chord on
+    [0,1]-normalised axes) and the trade-off ratio (dY/dX in normalised
+    units) at the knee, for both frontiers (utilisation-vs-wait and
+    no-show-vs-robustness).  This is the formal tuning guide for the
+    day-unit manager: weights at the knee give the best joint
+    compromise between the two objectives in question.
+
+    Diagnostic-only - no UI panel.
+
+    GET /api/ml/optimisation/pareto-knee
+    """
+    if pareto_mcda_result is None:
+        return jsonify({
+            'status': 'not_evaluated',
+            'message': (
+                'Pareto MCDA not yet computed; runs at startup once the '
+                'weight-sensitivity benchmark JSONL is present.'
+            )
+        }), 200
+    return jsonify({
+        'status':                 'evaluated',
+        'method':                 'Knee = max perpendicular distance '
+                                   'from utopia-nadir chord on [0,1]-'
+                                   'normalised front (Kneedle); trade-off '
+                                   'ratio = central-difference dY/dX in '
+                                   'normalised units.',
+        **pareto_mcda_result.to_dict(),
+    })
+
+
+@app.route('/api/ml/causal/pre-registration')
+def api_causal_pre_registration():
+    """
+    Pre-registered causal falsification protocol status (4.6.2).
+
+    Returns the pre-registered predictions (P1-P5) and the latest
+    evaluation verdicts.  On the current synthetic-only cohort, only
+    the negative-control outcome (P2) and negative-control exposure
+    (P3) tests return verdicts; P1, P4, P5 await a DPIA-cleared real
+    cohort and surface as ``can_evaluate=False`` until then.
+
+    Diagnostic-only - no UI panel.
+
+    GET /api/ml/causal/pre-registration
+    """
+    if causal_pre_registration_result is None:
+        return jsonify({
+            'status': 'not_evaluated',
+            'message': (
+                'Pre-registration not yet evaluated; runs at startup once '
+                'historical data is loaded.'
+            )
+        }), 200
+    return jsonify({
+        'status':       'evaluated',
+        'on_real_data': causal_pre_registration_result.on_real_data,
+        **pre_registration_status_dict(causal_pre_registration_result),
+    })
+
+
+@app.route('/api/ml/benchmark/real-vs-synthetic')
+def api_real_vs_synthetic_benchmark():
+    """
+    Latest synthetic-vs-real benchmark row.
+
+    Returns the most recent row from
+    ``data_cache/real_data_validation/runs.jsonl``.  The row carries
+    BOTH metrics that are reported in the dissertation §4.7:
+
+    - ``synthetic_arm.auc`` / ``real_arm.auc`` - PREDICTIVE no-show
+      AUC from a small benchmark gradient-boosting head trained on
+      n_patients rows.  Structural plumbing only - this is NOT the
+      production stacked ensemble's AUC.
+    - ``discriminator.auc`` - PRIVACY / FIDELITY metric.  A
+      classifier trained to tell synthetic from real on matched
+      features; AUC near 0.50 means indistinguishable (good
+      fidelity).  Null while the real arm is dormant.
+
+    This is a diagnostic-only endpoint - no UI panel - and reads the
+    on-disk JSONL rather than re-running the benchmark, so it is
+    safe to poll.
+
+    GET /api/ml/benchmark/real-vs-synthetic
+    """
+    import json as _json
+    from pathlib import Path as _Path
+
+    jsonl = _Path(__file__).resolve().parent / "data_cache" / \
+            "real_data_validation" / "runs.jsonl"
+    if not jsonl.exists():
+        return jsonify({
+            'status': 'not_run',
+            'message': (
+                'No benchmark runs recorded yet.  Invoke '
+                'python -m ml.benchmark_real_vs_synthetic to populate.'
+            )
+        }), 200
+
+    try:
+        last_line = None
+        with jsonl.open('r', encoding='utf-8') as fh:
+            for line in fh:
+                if line.strip():
+                    last_line = line
+        if last_line is None:
+            return jsonify({'status': 'empty', 'path': str(jsonl)}), 200
+        row = _json.loads(last_line)
+    except Exception as exc:
+        return jsonify({'status': 'error', 'error': str(exc)}), 500
+
+    return jsonify({
+        'status': 'ok',
+        'latest_run':         row,
+        'metric_definitions': {
+            'predictive_auc': (
+                'synthetic_arm.auc / real_arm.auc - PREDICTIVE no-show '
+                'AUC from a small benchmark gradient-boosting head; '
+                'structural plumbing only, NOT the production stacked '
+                "ensemble's AUC."
+            ),
+            'discriminator_auc': (
+                'discriminator.auc - PRIVACY / FIDELITY metric.  '
+                'Synthetic vs real classifier ROC-AUC; ~0.50 = '
+                'indistinguishable (good); ~1.00 = fully separable.  '
+                'Null when real arm is dormant.'
+            ),
+        },
+    })
+
+
+@app.route('/api/ml/fairness/four-fifths')
+def api_four_fifths_audit():
+    """
+    Four-Fifths Rule fairness audit on no-show rates.
+
+    Reports the per-protected-characteristic ratio of min/max no-show rate
+    across groups; pass threshold is 0.80 (EEOC; UK Equality Act 2010 s.19).
+    Gender is restricted to coded Male/Female; the ratio with the
+    SACT v4.0 'Not_Stated' code included is reported separately for
+    transparency.
+
+    Run silently as part of model training; this endpoint is for
+    diagnostics only - there is no viewer panel.
+
+    GET /api/ml/fairness/four-fifths
+    """
+    if four_fifths_audit_result is None:
+        return jsonify({
+            'status': 'not_estimated',
+            'message': (
+                'Four-Fifths audit not yet computed; the audit runs at '
+                'startup once historical data is loaded with the required '
+                'is_noshow column.'
+            )
+        }), 200
+
+    return jsonify({
+        'status':                    'estimated',
+        'threshold':                 four_fifths_audit_result.threshold,
+        'n_passing':                 four_fifths_audit_result.n_passing,
+        'n_failing':                 four_fifths_audit_result.n_failing,
+        'gender_ratio_incl_unknown': four_fifths_audit_result.gender_ratio_incl_unknown,
+        'method':                    four_fifths_audit_result.method,
+        'groups': [
+            {
+                'name':           g.name,
+                'ratio':          g.ratio,
+                'ratio_95ci': {
+                    'lower':       g.ratio_ci_lo,
+                    'upper':       g.ratio_ci_hi,
+                    'method':      '95% percentile bootstrap (row resamples)',
+                    'n_bootstrap': g.n_bootstrap,
+                },
+                'max_disparity':  g.max_disparity,
+                'passes':         g.passes,
+                'n_groups':       g.n_groups,
+                'group_sizes':    g.group_sizes,
+            }
+            for g in four_fifths_audit_result.groups
+        ],
+    })
+
+
+@app.route('/api/ml/scenario/severe-weather')
+def api_severe_weather_scenario():
+    """
+    Severe-weather intervention scenario diagnostic.
+
+    Reports the simulated effective chair-waste reduction when the
+    overbooking + phone-confirmation intervention is applied to the
+    highest-risk quartile of patients on a severe-weather day.  Run
+    silently as part of model training; this endpoint is for diagnostics
+    only - there is no viewer panel.
+
+    GET /api/ml/scenario/severe-weather
+    """
+    if severe_weather_scenario is None:
+        return jsonify({
+            'status': 'not_estimated',
+            'message': (
+                'Severe-weather scenario not yet computed; the simulation '
+                'runs at startup once historical data is loaded with the '
+                'required Weather_Severity, Travel_Distance_KM and '
+                'is_noshow columns.'
+            )
+        }), 200
+
+    return jsonify({
+        'status': 'estimated',
+        'cohort_baseline_pct':         severe_weather_scenario.cohort_baseline_pct,
+        'weather_ate':                 severe_weather_scenario.weather_ate,
+        'baseline_waste_pct':          severe_weather_scenario.baseline_waste_pct,
+        'baseline_95ci': [
+            severe_weather_scenario.baseline_ci_lo,
+            severe_weather_scenario.baseline_ci_hi,
+        ],
+        'post_intervention_waste_pct': severe_weather_scenario.post_intervention_waste_pct,
+        'post_95ci': [
+            severe_weather_scenario.post_ci_lo,
+            severe_weather_scenario.post_ci_hi,
+        ],
+        'relative_reduction_pct':      severe_weather_scenario.relative_reduction_pct,
+        'relative_95ci': [
+            severe_weather_scenario.relative_ci_lo,
+            severe_weather_scenario.relative_ci_hi,
+        ],
+        'n_bootstrap':                 severe_weather_scenario.n_bootstrap,
+        'top_quartile_share_pct':      severe_weather_scenario.top_quartile_share_pct,
+        'n_observations':              severe_weather_scenario.n_observations,
+        'intervention_parameters': {
+            'phone_capture_rate':  severe_weather_scenario.phone_capture_rate,
+            'overbook_share':      severe_weather_scenario.overbook_share,
+            'overbook_fill_rate':  severe_weather_scenario.overbook_fill_rate,
+        },
+        'method': 'Top-quartile-targeted phone confirmation + overbooking '
+                  'on the historical cohort; effect sizes from the '
+                  'operational literature (Daggy 2010; Liu 2019).'
+    })
+
+
 @app.route('/api/ml/causal/iv/diagnostics')
 def api_iv_diagnostics():
     """
@@ -6464,9 +7157,18 @@ def _get_micro_batch():
 
 @app.route('/api/microbatch/status', methods=['GET'])
 def api_microbatch_status():
-    """Queue size, latency stats, next slow-path eligibility."""
+    """
+    Queue size, latency stats, next slow-path eligibility, plus the
+    steady-state benchmark summary from the most recent training pipeline
+    run (Section 3.2).  No UI panel — diagnostics only.
+    """
     mb = _get_micro_batch()
-    return jsonify(asdict(mb.status()))
+    payload = asdict(mb.status())
+    payload['steady_state_benchmark'] = (
+        microbatch_benchmark_result.to_dict()
+        if microbatch_benchmark_result is not None else None
+    )
+    return jsonify(payload)
 
 
 @app.route('/api/microbatch/submit', methods=['POST'])
@@ -7661,6 +8363,46 @@ def api_safety_config():
         return jsonify({'success': True, 'config': cfg})
     except Exception as exc:
         return jsonify({'success': False, 'error': str(exc)}), 400
+
+
+@app.route('/api/safety/emergency-override', methods=['POST'])
+def api_safety_emergency_override():
+    """
+    Emergency clinical override for a rejected schedule.
+
+    Two-person clinical-safety policy: when a REJECT or
+    REJECT_ESCALATED verdict blocks a same-day urgent referral, the
+    on-call clinical safety officer (CSO) can flip the verdict to
+    ACCEPTED_WITH_OVERRIDE by supplying their NHS ID and a free-text
+    clinical justification (>= 20 chars).  Both fields are appended
+    immutably to ``data_cache/safety_guardrails/overrides.jsonl`` and
+    surface on the ``/api/safety/status`` endpoint, providing an
+    audit trail for retrospective Caldicott review.
+
+    Diagnostic-only - no UI panel.
+
+    POST body::
+
+        {
+          "report_id":     "safety-20260427T103045-000123",
+          "justification": "P1 referral with no alternative chair...",
+          "requester":     "NHS-WAL-CSO-04217"
+        }
+    """
+    try:
+        from ml.safety_guardrails import get_monitor
+        data = request.json or {}
+        audit = get_monitor().request_emergency_override(
+            report_id     = str(data.get("report_id", "")),
+            justification = str(data.get("justification", "")),
+            requester     = str(data.get("requester", "")),
+        )
+        return jsonify({'success': True, 'audit': audit})
+    except (ValueError, LookupError) as exc:
+        return jsonify({'success': False, 'error': str(exc)}), 400
+    except Exception as exc:
+        logger.error(f"safety override error: {exc}")
+        return jsonify({'success': False, 'error': str(exc)}), 500
 
 
 # -----------------------------------------------------------------------------

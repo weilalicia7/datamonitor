@@ -1,10 +1,10 @@
 {
   "package": "secondary-care-medicines-data-indicative-price",
   "description": "NHS hospital secondary care prescribing with indicative prices (replaces retired SCMD dataset, June 2022 onwards)",
-  "total_resources": 58,
-  "latest_resource": "SCMD_PROVISIONAL_202601",
-  "latest_url": "https://opendata.nhsbsa.net/dataset/74f3e468-095b-44c0-b957-f3766a92514e/resource/098edebd-eeac-42c5-ae41-a23ad49d26aa/download/scmd_provisional_202601.csv",
-  "fetched_at": "2026-04-19T20:56:56.123896",
+  "total_resources": 59,
+  "latest_resource": "SCMD_PROVISIONAL_202602",
+  "latest_url": "https://opendata.nhsbsa.net/dataset/74f3e468-095b-44c0-b957-f3766a92514e/resource/61dc451f-6cb6-4bc6-b811-52d02dcb33a7/download/scmd_provisional_202602.csv",
+  "fetched_at": "2026-04-24T03:54:57.629053",
   "resources": [
     {
       "name": "SCMD_PROVISIONAL_202104",
@@ -411,6 +411,13 @@
       "format": "CSV",
       "created": "2026-03-21T07:30:40.077939",
       "id": "098edebd-eeac-42c5-ae41-a23ad49d26aa"
+    },
+    {
+      "name": "SCMD_PROVISIONAL_202602",
+      "url": "https://opendata.nhsbsa.net/dataset/74f3e468-095b-44c0-b957-f3766a92514e/resource/61dc451f-6cb6-4bc6-b811-52d02dcb33a7/download/scmd_provisional_202602.csv",
+      "format": "CSV",
+      "created": "2026-04-22T06:29:15.436719",
+      "id": "61dc451f-6cb6-4bc6-b811-52d02dcb33a7"
     }
   ]
 }

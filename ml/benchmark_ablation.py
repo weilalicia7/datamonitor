@@ -132,15 +132,53 @@ def _build_chairs(n_chairs: int):
 def _gender_fairness_ratio(audit_rows, scheduled_ids):
     """
     Worst pairwise Four-Fifths Rule ratio across Gender groups.
-    Mirrors ml/benchmark_fairness_mitigation.py so ablation-table
-    cells + §5.6.2 cells come from identical arithmetic.
+
+    Returns a dict with two ratios so the dissertation §5.8 prose can
+    report both transparently:
+
+      - ``coded_only``: ratio computed over Male/Female only.  This is
+        the SACT v4.0 audit convention used by Section~5.6.1 — the
+        ``unknown`` (Person_Stated_Gender_Code = 9 / missing) bucket is
+        a *data-quality* category, not a protected attribute, so the
+        headline ratio excludes it.
+      - ``with_unknown``: ratio over all groups including ``unknown``.
+        On a small cohort this often collapses to 0.0 because the
+        2-patient ``unknown`` bucket is too small for the optimiser to
+        schedule reliably; reporting it transparently lets a reader
+        see why the historical "all-arms = 0.000" headline arose.
+
+    Also returns per-group counts so the prose can cite the cohort
+    composition without re-deriving it.
     """
     from ml.fairness_audit import FairnessAuditor
     auditor = FairnessAuditor()
-    report = auditor.audit_schedule(audit_rows, scheduled_ids,
-                                    group_column="Gender")
-    ratios = [m.ratio for m in report.metrics if m.ratio is not None]
-    return min(ratios) if ratios else 1.0
+    full = auditor.audit_schedule(audit_rows, scheduled_ids,
+                                  group_column="Gender")
+    full_ratios = [m.ratio for m in full.metrics if m.ratio is not None]
+    full_min = min(full_ratios) if full_ratios else 1.0
+
+    coded_rows = [r for r in audit_rows
+                  if r.get("Gender") in ("M", "F")]
+    coded = auditor.audit_schedule(coded_rows, scheduled_ids,
+                                   group_column="Gender")
+    coded_ratios = [m.ratio for m in coded.metrics if m.ratio is not None]
+    coded_min = min(coded_ratios) if coded_ratios else 1.0
+
+    counts = {"M": 0, "F": 0, "unknown": 0}
+    sched_per_group = {"M": 0, "F": 0, "unknown": 0}
+    for r in audit_rows:
+        g = r.get("Gender", "unknown")
+        if g not in counts:
+            counts[g] = 0; sched_per_group[g] = 0
+        counts[g] += 1
+        if r.get("Patient_ID") in scheduled_ids:
+            sched_per_group[g] += 1
+    return {
+        "coded_only":   round(float(coded_min), 4),
+        "with_unknown": round(float(full_min),  4),
+        "group_counts":          dict(counts),
+        "group_scheduled":       dict(sched_per_group),
+    }
 
 
 def _p1_compliance_pct(patients, appointments) -> float:
@@ -193,11 +231,13 @@ def _run_arm(
     scheduled_ids = {a.patient_id for a in (result.appointments or [])}
     util = len(scheduled_ids) / max(len(patients), 1)
     p1 = _p1_compliance_pct(patients, result.appointments or [])
-    gender_ratio = _gender_fairness_ratio(audit_rows, scheduled_ids)
+    gender = _gender_fairness_ratio(audit_rows, scheduled_ids)
 
     print(
         f"  [{arm_name:<22s}] util={util:.3f}  "
-        f"solve={dt:.2f}s  p1={p1:.1f}%  gender_ratio={gender_ratio:.3f}",
+        f"solve={dt:.2f}s  p1={p1:.1f}%  "
+        f"gender_ratio_M_F={gender['coded_only']:.3f}  "
+        f"gender_ratio_full={gender['with_unknown']:.3f}",
         flush=True,
     )
     return {
@@ -205,7 +245,14 @@ def _run_arm(
         "utilisation": float(util),
         "solve_time_s": float(dt),
         "p1_compliance_pct": float(p1),
-        "gender_fairness_ratio": float(gender_ratio),
+        # Headline = M/F-only (matches §5.6.1 SACT v4.0 audit convention).
+        "gender_fairness_ratio": float(gender["coded_only"]),
+        # With-unknown disclosed for transparency.  The 2-patient
+        # "unknown" bucket on this n=40 cohort often collapses the
+        # full-pool ratio to 0.0 even when M-vs-F is well balanced.
+        "gender_fairness_ratio_with_unknown": float(gender["with_unknown"]),
+        "gender_group_counts":    gender["group_counts"],
+        "gender_group_scheduled": gender["group_scheduled"],
         "n_scheduled": int(len(scheduled_ids)),
         "n_patients": int(len(patients)),
         "status": str(getattr(result, "status", "UNKNOWN")),

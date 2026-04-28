@@ -2,7 +2,7 @@
   "source": "SACT Dataset Page",
   "url": "https://digital.nhs.uk/ndrs/data/data-sets/sact",
   "title": "Systemic Anti-Cancer Therapy (SACT) data set - NDRS",
-  "fetched_at": "2026-04-19T20:56:55.069505",
+  "fetched_at": "2026-04-24T03:54:56.944486",
   "page_size": 505182,
   "status": "v4.0 collection commenced 1 April 2026 (3-month rollout period)",
   "dashboard_url": "https://nhsd-ndrs.shinyapps.io/sact_activity/",

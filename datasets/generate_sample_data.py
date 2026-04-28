@@ -465,7 +465,7 @@ POSTCODE_WEIGHTS = {
 SITES = [
     {'code': 'WC', 'name': 'Velindre Whitchurch (Day Unit)', 'chairs': 19, 'hours': '08:30-18:00', 'recliners': 4, 'nurses_am': 10, 'nurses_pm': 8, 'lat': 51.5200, 'lon': -3.2100},
     {'code': 'PCH', 'name': 'Prince Charles Hospital (Macmillan Unit)', 'chairs': 11, 'hours': '09:00-17:00', 'recliners': 2, 'nurses_am': 4, 'nurses_pm': 3, 'lat': 51.7490, 'lon': -3.3780},
-    {'code': 'RGH', 'name': 'Royal Gwent Hospital (Outreach)', 'chairs': 6, 'hours': '09:00-17:00', 'recliners': 1, 'nurses_am': 3, 'nurses_pm': 2, 'lat': 51.5880, 'lon': -2.9990},
+    {'code': 'RGH', 'name': 'Royal Glamorgan Hospital (Outreach)', 'chairs': 6, 'hours': '09:00-17:00', 'recliners': 1, 'nurses_am': 3, 'nurses_pm': 2, 'lat': 51.5728, 'lon': -3.3868},
     {'code': 'POW', 'name': 'Princess of Wales Hospital (Outreach)', 'chairs': 6, 'hours': '09:00-17:00', 'recliners': 1, 'nurses_am': 3, 'nurses_pm': 2, 'lat': 51.5040, 'lon': -3.5760},
     {'code': 'CWM', 'name': 'Cwmbran Mobile Unit (Tenovus)', 'chairs': 3, 'hours': '09:00-16:00', 'recliners': 0, 'nurses_am': 2, 'nurses_pm': 1, 'lat': 51.6530, 'lon': -3.0210},
 ]
@@ -675,7 +675,7 @@ def generate_patients(n_patients=250):
         # Site preference based on postcode
         # Site preference based on postcode — real Velindre outreach locations
         if postcode.startswith('NP'):
-            site_pref = random.choice(['WC', 'RGH', 'RGH'])  # Royal Gwent, Newport
+            site_pref = random.choice(['WC', 'RGH', 'RGH'])  # Royal Glamorgan (Llantrisant) outreach
         elif postcode in ['NP44', 'CF81', 'CF82']:
             site_pref = random.choice(['WC', 'CWM'])  # Cwmbran mobile unit
         elif postcode in ['CF31', 'CF32']:

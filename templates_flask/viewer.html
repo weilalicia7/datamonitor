@@ -184,7 +184,9 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-
     <div class="tab" data-tab="staff">Staff</div>
     <div class="tab" data-tab="events">Events</div>
     <div class="tab" data-tab="ml">ML Models</div>
+    <!-- IRL Preferences tab hidden to align with dissertation scope; backend /api/irl routes remain active.
     <div class="tab" data-tab="irl">IRL Preferences</div>
+    -->
 </div>
 
 <div class="content">
@@ -572,9 +574,12 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-
                     <button onclick="loadSequenceModel()" style="padding:5px 10px;background:#888;color:white;border:none;border-radius:4px;cursor:pointer;font-size:0.75em;">Sequence Model</button>
                     <button onclick="loadOnlineLearning()" style="padding:5px 10px;background:#10b981;color:white;border:none;border-radius:4px;cursor:pointer;font-size:0.75em;">Online Learning</button>
                     <button onclick="testOnlineUpdate()" style="padding:5px 10px;background:#3b82f6;color:white;border:none;border-radius:4px;cursor:pointer;font-size:0.75em;">Test SGD Update</button>
+                    <!-- RL Agent / MARL Chairs / RL Recommend buttons hidden to align with dissertation scope; backend /api/ml/rl-scheduler and /api/ml/marl-scheduler routes remain active.
                     <button onclick="loadRLAgent()" style="padding:5px 10px;background:#7c3aed;color:white;border:none;border-radius:4px;cursor:pointer;font-size:0.75em;">RL Agent</button>
                     <button onclick="loadMARLAgent()" style="padding:5px 10px;background:#6d28d9;color:white;border:none;border-radius:4px;cursor:pointer;font-size:0.75em;">MARL Chairs</button>
                     <button onclick="rlRecommend()" style="padding:5px 10px;background:#6d28d9;color:white;border:none;border-radius:4px;cursor:pointer;font-size:0.75em;">RL Recommend</button>
+                    -->
+
                     <button onclick="loadRobustness()" style="padding:5px 10px;background:#059669;color:white;border:none;border-radius:4px;cursor:pointer;font-size:0.75em;">Robustness</button>
                     <button onclick="runCausalValidation()" style="padding:5px 10px;background:#b91c1c;color:white;border:none;border-radius:4px;cursor:pointer;font-size:0.75em;">Causal Validation</button>
                     <button onclick="runSensitivityLocal()" style="padding:5px 10px;background:#0e7490;color:white;border:none;border-radius:4px;cursor:pointer;font-size:0.75em;">Sensitivity (Local)</button>
@@ -635,7 +640,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-
         </div>
     </div>
 
-    <!-- TAB: IRL PREFERENCES (Dissertation §1.4) -->
+    <!-- TAB: IRL PREFERENCES — entire tab hidden to align with dissertation scope; backend /api/irl routes remain active.
     <div id="tab-irl" class="tab-content hidden">
         <div style="background:white;border-radius:10px;padding:20px 24px;box-shadow:0 1px 3px rgba(0,0,0,0.08);margin-bottom:16px;">
             <h2 style="font-size:1.1em;color:#1a1a2e;margin-bottom:6px;">Inverse RL &mdash; Learned Pareto Preferences</h2>
@@ -699,6 +704,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-
             <div id="irl-overrides-list" style="font-size:0.8em;color:#555;max-height:320px;overflow-y:auto;">Loading&hellip;</div>
         </div>
     </div>
+    -->
 </div>
 
 <div class="tooltip" id="tooltip"></div>

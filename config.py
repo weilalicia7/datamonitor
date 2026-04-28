@@ -133,6 +133,14 @@ PRIORITY_MAX_DELAY = {
     PatientPriority.P4_DEFERRABLE: 30
 }
 
+# Hard CP-SAT constraint: P1 (curative-intent, life-threatening) patients must
+# start within this many minutes of the day's opening when assigned.  Acts as a
+# clinical-safety floor enforced at the solver level rather than as a soft
+# preference; the soft priority weight in the objective continues to incentivise
+# the broader P2-P4 ordering.  90 min = 1.5 h matches NHS-Wales same-morning
+# practice for P1 SACT bookings.  Set to None to disable for ablation studies.
+P1_MAX_START_MIN = 90
+
 # =============================================================================
 # ML MODEL SETTINGS
 # =============================================================================
@@ -370,12 +378,12 @@ DEFAULT_SITES = [
     },
     {
         'code': 'RGH',
-        'name': 'Royal Gwent Hospital (Outreach)',
+        'name': 'Royal Glamorgan Hospital (Outreach)',
         'chairs': 6,
         'recliners': 1,
         'operating_hours': '09:00-17:00',
-        'lat': 51.5880,
-        'lon': -2.9990,
+        'lat': 51.5728,
+        'lon': -3.3868,
         'nurses_am': 3,
         'nurses_pm': 2,
         'type': 'satellite'

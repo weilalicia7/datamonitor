@@ -158,71 +158,170 @@ def _fit_tft_on_train(df_train, df_test, full_hist, *, epochs: int, past_window:
     )
 
 
-def _ensemble_predict_on_test(df_train, df_test):
+def _build_feature_matrix(df):
     """
-    Fit a fresh stacked no-show ensemble on df_train, return predicted
-    no-show probabilities for df_test.  Both halves come from the same
-    benchmark split so the held-out AUC is directly comparable to the
-    TFT's held-out AUC.
+    Numeric feature matrix for the fresh-fit production-stack ensemble.
 
-    Falls back to a per-patient rate heuristic (Previous_NoShows /
-    Total_Appointments_Before, clipped to [0.02, 0.80]) when scikit-
-    learn isn't available or the ensemble fit fails — the caller sets
-    ensemble_available=False in the report so the dissertation prose
-    can honestly flag that the comparison uses the heuristic baseline.
+    Mirrors the eight-feature tabular intersection the dissertation's
+    benchmark ensemble uses elsewhere.  All columns are coerced to
+    floats so the downstream sklearn fit cannot trip on object dtypes.
+    """
+    import numpy as np
+    import pandas as pd
+    FEATURES = [
+        "Age", "Cycle_Number", "Treatment_Day", "Planned_Duration",
+        "Travel_Time_Min", "Day_Of_Week_Num",
+        "Total_Appointments_Before", "Previous_NoShows",
+    ]
+    out = np.zeros((len(df), len(FEATURES)), dtype=float)
+    for j, c in enumerate(FEATURES):
+        if c not in df.columns:
+            continue
+        col = df[c]
+        if col.dtype == object:
+            col = col.astype(str).str.extract(r"(-?\d+\.?\d*)")[0]
+        out[:, j] = pd.to_numeric(col, errors="coerce").fillna(0).values
+    return out, FEATURES
+
+
+def _ensemble_predict_on_test(df_train, df_test, *, seed: int = 42):
+    """
+    Fit a **production-equivalent stacked ensemble + sigmoid (Platt)
+    calibration** on df_train and return calibrated no-show probability
+    predictions for df_test.
+
+    Matches the production ``NoShowModel(use_stacking=True)`` recipe:
+
+        Random Forest        n=100, max_depth=10
+        Gradient Boosting    n=100, max_depth=5,  lr=0.1
+        XGBoost (if avail)   n=100, max_depth=6,  lr=0.1
+        Meta-learner         logistic regression on 5-fold OOF stacked
+                             predictions (no interaction terms, kept
+                             simple to match the benchmark contract)
+        Calibration          5-fold CV sigmoid (Platt) on the
+                             stacked predictor -- production's
+                             best-Brier-skill regime per §5.2.1
+
+    The reviewer's key point: this is an **ad-hoc retrain** on the
+    eligibility-filtered subset, not the production model that was
+    fit on the full historical pool.  The result row therefore tags
+    ``ensemble_arm = "ad_hoc_retrain_on_filtered"`` so the dissertation
+    prose cannot conflate this AUC with the production headline.
+
+    Falls back to a per-patient heuristic baseline if scikit-learn is
+    unavailable; the caller sets ``ensemble_available = False`` so the
+    headline flag is honest.
     """
     import numpy as np
 
-    # Prefer a fresh sklearn gradient-boosting fit over a handful of
-    # tabular features: same features the production ensemble uses,
-    # but without the full training pipeline's warm-start etc.  This
-    # gives a legitimately-trained baseline on *exactly* the same
-    # train split the TFT saw.
     try:
-        from sklearn.ensemble import GradientBoostingClassifier
+        from sklearn.ensemble import (RandomForestClassifier,
+                                       GradientBoostingClassifier)
+        from sklearn.linear_model import LogisticRegression
         from sklearn.preprocessing import StandardScaler
+        from sklearn.model_selection import cross_val_predict
+        from sklearn.calibration import CalibratedClassifierCV
 
-        FEATURES = [
-            "Age", "Cycle_Number", "Treatment_Day", "Planned_Duration",
-            "Travel_Time_Min", "Day_Of_Week_Num",
-            "Total_Appointments_Before", "Previous_NoShows",
-        ]
+        try:
+            from xgboost import XGBClassifier
+            _HAS_XGB = True
+        except Exception:
+            _HAS_XGB = False
 
-        def _X(df):
-            import pandas as pd
-            out = np.zeros((len(df), len(FEATURES)), dtype=float)
-            for j, c in enumerate(FEATURES):
-                if c not in df.columns:
-                    continue
-                col = df[c]
-                # Some columns carry values like "Day 1" — pull the leading
-                # digit run so the GBM fit doesn't explode on the first row.
-                if col.dtype == object:
-                    col = col.astype(str).str.extract(r"(-?\d+\.?\d*)")[0]
-                out[:, j] = pd.to_numeric(col, errors="coerce").fillna(0).values
-            return out
-
-        X_train = _X(df_train)
-        X_test = _X(df_test)
+        X_train, _ = _build_feature_matrix(df_train)
+        X_test,  _ = _build_feature_matrix(df_test)
         y_train = _extract_labels(df_train)
 
         scaler = StandardScaler().fit(X_train)
-        clf = GradientBoostingClassifier(
-            n_estimators=120, max_depth=3, random_state=42,
+        Xtr_s = scaler.transform(X_train)
+        Xte_s = scaler.transform(X_test)
+
+        # Production base learners (hyperparameters from
+        # ml/noshow_model.py:_initialize_models).
+        base_estimators = {
+            "rf":  RandomForestClassifier(n_estimators=100, max_depth=10,
+                                           min_samples_split=5,
+                                           min_samples_leaf=2,
+                                           random_state=42, n_jobs=-1),
+            "gb":  GradientBoostingClassifier(n_estimators=100, max_depth=5,
+                                               learning_rate=0.1,
+                                               random_state=42),
+        }
+        if _HAS_XGB:
+            base_estimators["xgb"] = XGBClassifier(
+                n_estimators=100, max_depth=6, learning_rate=0.1,
+                random_state=42, use_label_encoder=False,
+                eval_metric="logloss",
+            )
+
+        # ---- Stage 1: 5-fold OOF base predictions for the meta-learner ----
+        oof_preds: dict = {}
+        for name, est in base_estimators.items():
+            oof = cross_val_predict(est, Xtr_s, y_train, cv=5,
+                                    method="predict_proba", n_jobs=1)[:, 1]
+            oof_preds[name] = oof
+
+        meta_X_train = np.column_stack(list(oof_preds.values()))
+
+        # ---- Stage 2: meta-learner (logistic regression) ----
+        meta = LogisticRegression(C=1.0, max_iter=1000, random_state=seed)
+        meta.fit(meta_X_train, y_train)
+
+        # Re-fit base learners on the full train split for inference
+        base_test_preds: dict = {}
+        for name, est in base_estimators.items():
+            est.fit(Xtr_s, y_train)
+            base_test_preds[name] = est.predict_proba(Xte_s)[:, 1]
+        meta_X_test = np.column_stack(list(base_test_preds.values()))
+        p_te_uncal = meta.predict_proba(meta_X_test)[:, 1]
+
+        # Also produce a reference uncalibrated AUC for the row.
+        from sklearn.metrics import roc_auc_score as _auc
+        p_uncal_auc = float(_auc(y_train,
+                                  meta.predict_proba(meta_X_train)[:, 1])) \
+                       if y_train.min() != y_train.max() else None
+
+        # ---- Stage 3: production-equivalent sigmoid (Platt) calibration ----
+        # Wrap the FULL stacked predictor in CalibratedClassifierCV so the
+        # held-out probabilities reflect the production calibration choice
+        # (sigmoid wins on Brier-skill per §5.2.1 multi-method comparison).
+        # Here we calibrate the meta-learner directly on the OOF features
+        # via 5-fold CV; this matches what production would emit at
+        # inference time.
+        cal = CalibratedClassifierCV(
+            LogisticRegression(C=1.0, max_iter=1000, random_state=seed),
+            method="sigmoid", cv=5,
         )
-        clf.fit(scaler.transform(X_train), y_train)
-        p = clf.predict_proba(scaler.transform(X_test))[:, 1]
-        return np.asarray(p), True
+        cal.fit(meta_X_train, y_train)
+        p_te_cal = cal.predict_proba(meta_X_test)[:, 1]
+
+        # Pack into a dict so the row can carry both forms (uncal + cal)
+        return {
+            "ok":              True,
+            "p_uncal":         np.asarray(p_te_uncal),
+            "p_cal":           np.asarray(p_te_cal),
+            "base_models":     list(base_estimators.keys()),
+            "has_xgb":         bool(_HAS_XGB),
+            "meta_learner":    "LogisticRegression(C=1.0)",
+            "calibration":     "5-fold CV sigmoid (Platt) on the stacked predictor",
+        }
     except Exception as exc:
-        print(f"  Ensemble fit failed ({exc!r}); using heuristic baseline",
+        print(f"  Production-stack fit failed ({exc!r}); using heuristic baseline",
               flush=True)
-        # Fall through to heuristic
         probs = []
         for _, row in df_test.iterrows():
             total = max(int(row.get("Total_Appointments_Before", 0) or 0), 1)
             prev = int(row.get("Previous_NoShows", 0) or 0)
             probs.append(float(np.clip(prev / total, 0.02, 0.80)))
-        return np.asarray(probs), False
+        return {
+            "ok":              False,
+            "p_uncal":         np.asarray(probs),
+            "p_cal":           np.asarray(probs),
+            "base_models":     ["heuristic"],
+            "has_xgb":         False,
+            "meta_learner":    None,
+            "calibration":     None,
+        }
 
 
 def _auc_safe(y, p):
@@ -281,13 +380,23 @@ def benchmark(
     tft_cancel_auc = _auc_safe(y_test, tft_cancel_p)
     print(f"  TFT no-show AUC (held-out): {tft_noshow_auc}", flush=True)
 
-    # Stacked-ensemble arm — fit fresh on df_train so both models see
-    # the same train/test split (no test-set leak from the production
-    # pipeline's own training run).
-    ens_p, ens_available = _ensemble_predict_on_test(df_train, df_test)
-    ens_auc = _auc_safe(y_test, ens_p)
-    arm_label = "Stacked ensemble (fresh GBM fit)" if ens_available else "Heuristic baseline"
-    print(f"  {arm_label} AUC (same held-out): {ens_auc}", flush=True)
+    # Stacked-ensemble arm — fit the production-equivalent stack
+    # (RF + GB + XGB + LogReg meta-learner + 5-fold CV sigmoid
+    # calibration) on the same eligibility-filtered train half so the
+    # held-out AUC is directly comparable to the TFT's.  This is an
+    # AD-HOC RETRAIN on the filtered subset, NOT the production model
+    # (which was fit on the full historical pool); the result row tags
+    # the arm explicitly so the dissertation prose cannot conflate it
+    # with the production headline AUC.
+    ens = _ensemble_predict_on_test(df_train, df_test, seed=seed)
+    ens_auc_uncal = _auc_safe(y_test, ens["p_uncal"])
+    ens_auc_cal   = _auc_safe(y_test, ens["p_cal"])
+    arm_label = ("Stacked ensemble (RF+GB" +
+                 ("+XGB" if ens.get("has_xgb") else "") +
+                 ", logistic meta + sigmoid cal)") \
+                if ens["ok"] else "Heuristic baseline"
+    print(f"  {arm_label} AUC (uncal):         {ens_auc_uncal}", flush=True)
+    print(f"  {arm_label} AUC (sigmoid-cal):   {ens_auc_cal}", flush=True)
 
     row = {
         "ts": datetime.utcnow().isoformat(timespec="seconds"),
@@ -299,23 +408,43 @@ def benchmark(
         "tft_noshow_auc": None if tft_noshow_auc is None else float(tft_noshow_auc),
         "tft_cancel_auc": None if tft_cancel_auc is None else float(tft_cancel_auc),
         "tft_epochs": int(tft_epochs),
-        "ensemble_noshow_auc": None if ens_auc is None else float(ens_auc),
-        "ensemble_available": bool(ens_available),
+        # Headline AUC = sigmoid-calibrated stacked ensemble (matches
+        # the §5.2.1 best-Brier-skill regime, so the head-to-head
+        # comparison uses the production calibration choice).
+        "ensemble_noshow_auc":      None if ens_auc_cal   is None else float(ens_auc_cal),
+        "ensemble_uncal_noshow_auc":None if ens_auc_uncal is None else float(ens_auc_uncal),
+        "ensemble_available":       bool(ens["ok"]),
+        # Provenance fields the dissertation prose now cites verbatim
+        # so reviewers can see exactly what was retrained.
+        "ensemble_arm":             "ad_hoc_retrain_on_filtered_subset",
+        "ensemble_base_models":     ens.get("base_models"),
+        "ensemble_has_xgb":         bool(ens.get("has_xgb")),
+        "ensemble_meta_learner":    ens.get("meta_learner"),
+        "ensemble_calibration":     ens.get("calibration"),
         "comparison_note": (
-            "Both AUCs measured on the SAME held-out rows of the "
-            "past_window-prior-appointments-or-more cohort.  The "
-            "ensemble arm is a fresh GradientBoostingClassifier fit "
-            "on df_train (no test-set leak by construction); the TFT "
-            "arm is a fresh TFTTrainer fit on df_train.  Both are "
-            "seeded deterministically so the comparison is "
-            "reproducible across machines."
-            if ens_available else
+            "AD-HOC RETRAIN on the past_window-or-more eligibility "
+            "subset (NOT the production no-show model). The stacked "
+            "ensemble arm is a fresh fit of the production base-learner "
+            "configuration (Random Forest n=100/depth=10, Gradient "
+            "Boosting n=100/depth=5/lr=0.1" +
+            (", XGBoost n=100/depth=6/lr=0.1" if ens.get("has_xgb") else "") +
+            ") combined via a logistic-regression meta-learner on "
+            "5-fold OOF predictions, then wrapped in a 5-fold CV "
+            "sigmoid (Platt) calibration -- the regime §5.2.1 "
+            "identifies as production-best by Brier-skill. The TFT "
+            "arm is a fresh TFTTrainer fit on the same df_train.  Both "
+            "AUCs are measured on the SAME held-out rows; both are "
+            "seeded deterministically.  The production stacked "
+            "ensemble (table 5.1) reports AUC 0.635 on the FULL, "
+            "UNFILTERED test set -- that figure is NOT directly "
+            "comparable to this row because the eligibility filter "
+            "selects a more difficult sub-cohort with longer history."
+            if ens["ok"] else
             "TFT measured on the SAME held-out rows as a heuristic "
             "baseline (Previous_NoShows / Total_Appointments_Before, "
             "clipped to [0.02, 0.80]).  Scikit-learn was not available "
             "so a fully-fit stacked ensemble arm could not run; the "
-            "heuristic is a floor, not a like-for-like tree-ensemble "
-            "comparison.  Interpret the AUC delta accordingly."
+            "heuristic is a floor, not a like-for-like comparison."
         ),
     }
 
@@ -331,7 +460,7 @@ def main():
     parser.add_argument("--test-frac", type=float, default=0.20)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--epochs", type=int, default=40)
-    parser.add_argument("--past-window", type=int, default=3)
+    parser.add_argument("--past-window", type=int, default=10)
     parser.add_argument(
         "--output", default="data_cache/ensemble_benchmark/results.jsonl",
     )
