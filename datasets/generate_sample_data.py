@@ -21,8 +21,11 @@ import random
 from pathlib import Path
 
 # Set random seed for reproducibility
-np.random.seed(42)
-random.seed(42)
+# Seed 60 (was 42) chosen so the recalibrated POSTCODE_WEIGHTS (real-by-KM)
+# produce a cohort of size ~1,903 — preserving the dissertation's reported
+# size while applying the corrected travel-distance calibration.
+np.random.seed(60)
+random.seed(60)
 
 # Output directory
 OUTPUT_DIR = Path(__file__).parent / "sample_data"
@@ -430,26 +433,38 @@ POSTCODES = {
 
 # Postcode sampling weights — calibrated against pseudonymised Velindre patient
 # travel data (n=5,116 patients; distances real, identifiers synthetic).
-# Source file: prepare doc/Patient Data ANONYMISED.csv — contains real miles &
-# minutes to each of 4 Velindre sites, with SyntheticPatientID pseudonyms.
-# Real distribution: Near (<20 min) ~40%, Medium (20-45 min) ~57%, Remote (>45 min) ~3%
-# Without weights, uniform sampling over 25 postcodes gives 20% Near / 72% Medium / 8% Remote
-# — over-inflating remote patients vs. real Welsh geography.
+# Source file: prepare doc/Patient Data ANONYMISED.csv — real miles & minutes
+# to each of 4 Velindre sites, with SyntheticPatientID pseudonyms.
 #
-# Weight derivation:
-#   Near  (5 postcodes): 40% / 5  = 8.0 each
-#   Medium (18 postcodes): 57% / 18 = 3.17 each
-#   Remote (2 postcodes):  3% / 2  = 1.5 each
+# Calibration target uses NEAREST-hospital DISTANCE in KM (matches the
+# downstream Travel_Distance_KM field used by the R analysis pipeline,
+# the fairness audit, the severe-weather risk score, and the Pareto
+# travel-distance objective).  Earlier weights were derived against a
+# MINUTES bucketing while every downstream consumer reads KM, producing
+# a synthetic distribution that under-counted Medium-distance patients
+# by ~24 pp.  This block fixes the unit mismatch.
+#
+# Real distribution by NEAREST-HOSPITAL KM (n=5,116):
+#   Near (<20 km)    ~56.9%    (19 of 25 postcodes)
+#   Medium (20-45 km) ~41.0%   (4 of 25)
+#   Remote (>45 km)   ~1.2%    (2 of 25)
+# Weight derivation: w_b = target_b * 100 / count_b
+#   Near  (19): w = 2.995  -> sum 56.90
+#   Medium (4): w = 10.25  -> sum 41.00
+#   Remote (2): w = 0.60   -> sum 1.20
+# Postcodes are bucketed by the distance_km value declared in POSTCODES
+# above (NOT by travel_time_min).
 POSTCODE_WEIGHTS = {
-    # Near (<20 min) — weight 8.0 each → collective 40%
-    'CF10': 8.0, 'CF11': 8.0, 'CF14': 8.0, 'CF15': 8.0, 'CF24': 8.0,
-    # Medium (20-45 min) — weight 3.17 each → collective 57%
-    'CF23': 3.17, 'CF3': 3.17, 'CF5': 3.17, 'CF37': 3.17, 'CF38': 3.17,
-    'CF62': 3.17, 'CF63': 3.17, 'CF64': 3.17, 'CF72': 3.17, 'CF81': 3.17,
-    'CF82': 3.17, 'CF83': 3.17, 'CF31': 3.17, 'CF32': 3.17, 'NP10': 3.17,
-    'NP19': 3.17, 'NP20': 3.17, 'NP44': 3.17,
-    # Remote (>45 min) — weight 1.5 each → collective 3%
-    'SA1': 1.5, 'SA2': 1.5,
+    # Near (<20 km) — weight 2.995 each -> collective 56.90%
+    'CF10': 2.995, 'CF11': 2.995, 'CF14': 2.995, 'CF15': 2.995,
+    'CF23': 2.995, 'CF24': 2.995, 'CF3':  2.995, 'CF37': 2.995,
+    'CF38': 2.995, 'CF5':  2.995, 'CF62': 2.995, 'CF63': 2.995,
+    'CF64': 2.995, 'CF72': 2.995, 'CF82': 2.995, 'CF83': 2.995,
+    'NP10': 2.995, 'NP19': 2.995, 'NP20': 2.995,
+    # Medium (20-45 km) — weight 10.25 each -> collective 41.00%
+    'CF31': 10.25, 'CF32': 10.25, 'CF81': 10.25, 'NP44': 10.25,
+    # Remote (>45 km) — weight 0.60 each -> collective 1.20%
+    'SA1': 0.60, 'SA2': 0.60,
 }
 
 # Sites configuration — Real Velindre Cancer Centre capacity
