@@ -61,7 +61,48 @@ class ModelRecalibrator:
         self.current_version = self._get_current_version()
         self.baselines: Dict[str, float] = {}
 
+        # Lazy DriftDetector — instantiated on first check_drift() call.
+        # Holds the reference distribution from the offline training cohort
+        # so post-promotion data can be compared against it.
+        from ml.drift_detection import DriftDetector
+        self.drift_detector = DriftDetector()
+        self._drift_reference_set = False
+        self.last_drift_summary = None
+
         logger.info(f"ModelRecalibrator initialized. Version: {self.current_version}")
+
+    def set_drift_reference(self, reference_data: Dict[str, np.ndarray]):
+        """
+        Lock in the offline training-time feature distribution that
+        post-Channel-2 data will be compared against.  Call once after
+        the initial offline training run.
+        """
+        self.drift_detector.set_reference(reference_data)
+        self._drift_reference_set = True
+        logger.info(
+            f"Drift reference locked on {len(reference_data)} features"
+        )
+
+    def check_drift(self, new_data: Dict[str, np.ndarray]):
+        """
+        Run a full drift check against the locked reference distribution.
+
+        Returns a :class:`ml.drift_detection.DriftSummary`, or ``None``
+        when no reference is set yet (in which case the caller should
+        skip drift-driven routing and treat the source as 'unknown').
+        """
+        if not self._drift_reference_set:
+            logger.warning(
+                "ModelRecalibrator.check_drift called before "
+                "set_drift_reference(); returning None and skipping the "
+                "drift-aware routing override.  Call set_drift_reference"
+                "(...) once on the offline training distribution to "
+                "enable Channel-2 drift checks."
+            )
+            return None
+        summary = self.drift_detector.full_drift_check(new_data)
+        self.last_drift_summary = summary
+        return summary
 
     def _get_current_version(self) -> str:
         """Get current model version string."""
@@ -82,7 +123,8 @@ class ModelRecalibrator:
         self.baselines = baselines
 
     def determine_update_level(self, source: str, drift_score: float,
-                               sact_v4_quality: str = None) -> int:
+                               sact_v4_quality: str = None,
+                               drift_summary=None) -> int:
         """
         Decide recalibration level based on data source, drift magnitude,
         and (for SACT v4) the data quality phase.
@@ -92,12 +134,39 @@ class ModelRecalibrator:
             'conformance' (Jul 2026)               → Level 2
             'complete'    (Aug 2026+)              → Level 3 (full retrain)
 
+        Drift override:
+            If a :class:`DriftSummary` is supplied with
+            ``recommended_action == 'retrain'``, the routing forces
+            Level 3 regardless of the SACT-v4 phase.  This guarantees
+            that severe distribution shift on a Phase-1 ('preliminary')
+            real-data drop cannot silently coast on synthetic-trained
+            weights.
+
         Returns:
             0 = Parameter refresh (real-time data)
             1 = Baseline recalibration (monthly open data, low drift)
             2 = Feature weight update (quarterly data, moderate drift)
             3 = Full retrain (significant drift, new tier, or complete SACT v4 data)
         """
+        # Severe-drift override beats every other rule.  This is the
+        # safety belt for Channel 2 (real Velindre data) — if PSI on a
+        # critical feature crosses 0.25 between the offline reference
+        # and the new cohort, retrain end-to-end no matter what the
+        # data-source phase says.
+        if drift_summary is not None and \
+                getattr(drift_summary, 'recommended_action', None) == 'retrain':
+            logger.warning(
+                "determine_update_level: drift summary recommends "
+                "'retrain' (max_drift_score=%.3f, %d/%d features "
+                "drifted) — forcing Level 3 regardless of source=%r "
+                "and sact_v4_quality=%r",
+                drift_summary.max_drift_score,
+                drift_summary.features_drifted,
+                drift_summary.total_features_checked,
+                source, sact_v4_quality,
+            )
+            return 3
+
         # Real-time sources always Level 0
         if source in ('weather', 'traffic', 'events'):
             return 0

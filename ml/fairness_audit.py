@@ -52,6 +52,16 @@ class FairnessReport:
     passes_audit: bool
     violations: List[str]
     protected_groups_checked: List[str]
+    # ``passes_audit`` is True when no DPD/DIR violation was found AND
+    # the audit had enough data to make that judgement.  ``status``
+    # disambiguates a vacuous pass (no metrics computed because input
+    # was unusable) from a real pass.  Allowed values:
+    #   'pass'                — gates clear and sample size is sufficient
+    #   'fail'                — at least one DPD/DIR violation
+    #   'group_column_missing'— ``group_column`` not present on input
+    #   'single_group'        — every row landed in one bucket (no contrast)
+    #   'insufficient_sample' — every comparable pair had < min_group_size
+    status: str = 'pass'
 
 
 class FairnessAuditor:
@@ -79,6 +89,24 @@ class FairnessAuditor:
     # Maximum allowed difference in true positive rates
     EQUAL_OPPORTUNITY_THRESHOLD = 0.10
 
+    # Minimum patients per group before a pairwise comparison is meaningful.
+    # On real Velindre data a satellite site may have fewer than this — in
+    # which case we must not declare a vacuous PASS; surface 'insufficient_
+    # sample' so an operator knows the audit has not actually cleared.
+    MIN_GROUP_SIZE = 5
+
+    # Common gender-label variants we accept on real SACT data.  The
+    # SACT v4.0 standard uses Person_Stated_Gender_Code (1/2/9), but
+    # operational extracts often arrive as M/F or Male/Female strings.
+    GENDER_NORMALISATION = {
+        '1': 'Male',  1: 'Male',
+        '2': 'Female', 2: 'Female',
+        '9': 'Unknown', 9: 'Unknown',
+        'M': 'Male', 'm': 'Male', 'Male': 'Male', 'male': 'Male',
+        'F': 'Female', 'f': 'Female', 'Female': 'Female', 'female': 'Female',
+        'U': 'Unknown', 'NS': 'Unknown', 'Not Stated': 'Unknown',
+    }
+
     def __init__(self):
         self.audit_history: List[FairnessReport] = []
 
@@ -104,11 +132,47 @@ class FairnessAuditor:
                               if p.get('Patient_ID', p.get('patient_id', '')) in scheduled_ids)
         overall_rate = total_scheduled / max(1, total)
 
-        # Group patients
+        # ── Pre-audit input validation ────────────────────────────────────
+        # If the group column is absent on every input row we cannot
+        # produce a meaningful audit.  Do NOT silently fall back to a
+        # vacuous PASS: emit a report with status='group_column_missing'
+        # so the operator sees exactly why no metrics were computed.
+        column_present = any(group_column in p for p in patients)
+        if not column_present:
+            logger.warning(
+                "FairnessAuditor.audit_schedule: group_column %r is "
+                "absent on every input patient — returning empty audit "
+                "with status='group_column_missing'.  This guards "
+                "against vacuous PASS verdicts on real data that lacks "
+                "the expected column.",
+                group_column,
+            )
+            report = FairnessReport(
+                timestamp=datetime.now().isoformat(),
+                total_patients=total,
+                total_scheduled=total_scheduled,
+                overall_rate=round(overall_rate, 4),
+                metrics=[],
+                passes_audit=False,
+                violations=[
+                    f"audit could not run: column {group_column!r} "
+                    "is missing from input"
+                ],
+                protected_groups_checked=[group_column],
+                status='group_column_missing',
+            )
+            self.audit_history.append(report)
+            return report
+
+        # Group patients (with on-the-fly normalisation for known
+        # categorical columns so M/F vs Male/Female does not produce
+        # spurious extra groups on real data).
         groups = {}
         for p in patients:
             pid = p.get('Patient_ID', p.get('patient_id', ''))
             group_val = p.get(group_column, 'unknown')
+            if group_column in ('Gender', 'Person_Stated_Gender_Code'):
+                group_val = self.GENDER_NORMALISATION.get(group_val, group_val)
             if group_val not in groups:
                 groups[group_val] = {'total': 0, 'scheduled': 0, 'patients': []}
             groups[group_val]['total'] += 1
@@ -120,6 +184,7 @@ class FairnessAuditor:
         metrics = []
         violations = []
         group_names = list(groups.keys())
+        comparable_pairs_seen = 0
 
         for i, g1 in enumerate(group_names):
             for g2 in group_names[i + 1:]:
@@ -128,8 +193,9 @@ class FairnessAuditor:
                 s1 = groups[g1]['scheduled']
                 s2 = groups[g2]['scheduled']
 
-                if n1 < 2 or n2 < 2:
+                if n1 < self.MIN_GROUP_SIZE or n2 < self.MIN_GROUP_SIZE:
                     continue
+                comparable_pairs_seen += 1
 
                 rate1 = s1 / n1
                 rate2 = s2 / n2
@@ -166,15 +232,40 @@ class FairnessAuditor:
                 )
                 metrics.append(metric)
 
+        # Determine the verdict status.  A clean run with metrics →
+        # 'pass' or 'fail'.  No metrics computed → distinguish between
+        # a single-bucket input and a too-small-group input so the
+        # operator knows whether to look at data shape vs sample size.
+        if comparable_pairs_seen == 0:
+            if len(group_names) <= 1:
+                status_value = 'single_group'
+                violations.append(
+                    f"audit could not run: only {len(group_names)} "
+                    f"group(s) present for {group_column!r} — no "
+                    "pairwise contrast possible"
+                )
+            else:
+                status_value = 'insufficient_sample'
+                violations.append(
+                    f"audit could not run: every pairwise comparison "
+                    f"had < {self.MIN_GROUP_SIZE} patients in at "
+                    "least one group"
+                )
+            passes_audit = False
+        else:
+            status_value = 'pass' if not violations else 'fail'
+            passes_audit = (len(violations) == 0)
+
         report = FairnessReport(
             timestamp=datetime.now().isoformat(),
             total_patients=total,
             total_scheduled=total_scheduled,
             overall_rate=round(overall_rate, 4),
             metrics=metrics,
-            passes_audit=len(violations) == 0,
+            passes_audit=passes_audit,
             violations=violations,
-            protected_groups_checked=[group_column]
+            protected_groups_checked=[group_column],
+            status=status_value,
         )
 
         self.audit_history.append(report)

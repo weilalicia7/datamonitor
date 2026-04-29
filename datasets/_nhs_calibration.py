@@ -37,6 +37,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 import glob
+import logging
 import os
 
 try:
@@ -45,8 +46,24 @@ try:
 except ImportError:  # pragma: no cover
     PANDAS_AVAILABLE = False
 
+logger = logging.getLogger(__name__)
+
 _BASE = Path(__file__).parent.parent
 _CWT_DIR = _BASE / 'datasets' / 'nhs_open_data' / 'cancer_waiting_times'
+
+# CWT columns the calibration depends on.  If NHS England renames or
+# drops any of these we want a loud WARNING in the log rather than a
+# silent reversion to fallback_prior — schema drift on the upstream
+# publication is the most likely cause of a hard-to-diagnose
+# calibration regression.
+_EXPECTED_CWT_COLUMNS: Tuple[str, ...] = (
+    'Org_Code',
+    'Standard_or_Item',
+    'Treatment_Modality',
+    'Cancer_Type',
+    'Total',
+    'Within',
+)
 
 
 # ---------------------------------------------------------------------------
@@ -95,6 +112,11 @@ class CalibrationBundle:
     # Latest CWT snapshot filename
     cwt_file: Optional[str] = None
     cwt_row_count: int = 0
+    # Names of any expected CWT columns that were missing on the loaded
+    # snapshot.  Empty when the snapshot matches the schema this loader
+    # was written against.  When non-empty, ``source`` is forced to
+    # ``'fallback_prior'`` and a WARNING is logged at load time.
+    missing_cwt_columns: List[str] = field(default_factory=list)
 
 
 def _find_latest_cwt() -> Optional[Path]:
@@ -171,9 +193,33 @@ def load(force_reload: bool = False) -> CalibrationBundle:
 
     try:
         cwt_df = pd.read_csv(cwt_path)
-    except Exception:
+    except Exception as exc:
+        logger.warning(
+            "NHS calibration: failed to parse CWT snapshot %s (%s); "
+            "reverting to fallback_prior.  Synthetic generator will run "
+            "with hand-chosen priors until the file is fixed.",
+            cwt_path.name, exc,
+        )
         _cache = CalibrationBundle(source='fallback_prior',
                                    cwt_file=str(cwt_path.name))
+        return _cache
+
+    missing = [c for c in _EXPECTED_CWT_COLUMNS if c not in cwt_df.columns]
+    if missing:
+        logger.warning(
+            "NHS calibration: CWT snapshot %s is missing expected "
+            "columns %s — likely upstream schema change.  Reverting to "
+            "fallback_prior so the synthetic generator stays runnable; "
+            "update CWT_TO_INTERNAL / _EXPECTED_CWT_COLUMNS to track the "
+            "new schema.",
+            cwt_path.name, missing,
+        )
+        _cache = CalibrationBundle(
+            source='fallback_prior',
+            cwt_file=cwt_path.name,
+            cwt_row_count=len(cwt_df),
+            missing_cwt_columns=missing,
+        )
         return _cache
 
     weights = _compute_internal_cancer_weights(cwt_df)
@@ -196,6 +242,11 @@ def summary() -> str:
     lines = [f"NHS calibration source: {b.source}"]
     if b.cwt_file:
         lines.append(f"  CWT snapshot: {b.cwt_file} ({b.cwt_row_count:,} rows)")
+    if b.missing_cwt_columns:
+        lines.append(
+            f"  WARNING: missing CWT columns {b.missing_cwt_columns} "
+            "— see WARNING in load() log; calibration is on fallback_prior"
+        )
     lines.append(f"  62-day drug-regimen compliance: {b.drug_62d_within_fraction:.4f} "
                  f"(total monthly volume {b.drug_62d_total_volume:,})")
     lines.append(f"  No-show Beta({b.noshow_beta_alpha}, {b.noshow_beta_beta}) — "

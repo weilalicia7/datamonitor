@@ -286,7 +286,59 @@ REAL_SACT_COLUMN_MAP = {
     'CycleLength': 'Cycle_Length_In_Days',
     # Outcome
     'RegimenEndSummary': 'End_Of_Regimen_Summary',
+    # Scheduling-side variants — these are not in the SACT v4.0 native
+    # spec but show up in real Velindre operational extracts and other
+    # NHS day-unit dumps; normalising them here keeps the Channel-2
+    # ingest robust without forcing the trust to rename their columns.
+    'AppointmentDate': 'Appointment_Date',
+    'AppointmentTime': 'Start_Time',
+    'StartTime': 'Start_Time',
+    'AppointmentStartTime': 'Start_Time',
+    'EndTime': 'End_Time',
+    'AppointmentEndTime': 'End_Time',
+    'PlannedDuration': 'Planned_Duration',
+    'ActualDuration': 'Actual_Duration',
+    'AttendedStatus': 'Attended_Status',
+    'AttendanceStatus': 'Attended_Status',
+    'Priority': 'Priority',
+    'PriorityCode': 'Priority',
+    'SiteCode': 'Site_Code',
+    'Site': 'Site_Code',
+    'ChairNumber': 'Chair_Number',
+    'Chair': 'Chair_Number',
+    'PatientID': 'Patient_ID',
+    'AppointmentID': 'Appointment_ID',
+    'AppointmentId': 'Appointment_ID',
+    'CycleNumber': 'Cycle_Number',
 }
+
+
+def normalise_real_sact_columns(df):
+    """Apply :data:`REAL_SACT_COLUMN_MAP` (case-sensitive) plus a
+    case-insensitive fallback so a real SACT extract using e.g.
+    ``AppointmentDate`` or ``appointmentdate`` ends up as
+    ``Appointment_Date`` before downstream schema validation runs.
+
+    Returns a new DataFrame with renamed columns.  Columns that already
+    use the canonical name are left untouched.  Unknown columns pass
+    through unchanged so the gate failure (if any) is the schema
+    validator's call, not this helper's.
+    """
+    rename: Dict[str, str] = {}
+    canonical_lc = {v.lower(): v for v in REAL_SACT_COLUMN_MAP.values()}
+    map_lc = {k.lower(): v for k, v in REAL_SACT_COLUMN_MAP.items()}
+    for col in df.columns:
+        if col in REAL_SACT_COLUMN_MAP:
+            rename[col] = REAL_SACT_COLUMN_MAP[col]
+            continue
+        col_lc = col.lower()
+        if col_lc in map_lc and map_lc[col_lc] != col:
+            rename[col] = map_lc[col_lc]
+            continue
+        # Variant arrives lower-cased; map back to canonical capitalisation.
+        if col_lc in canonical_lc and canonical_lc[col_lc] != col:
+            rename[col] = canonical_lc[col_lc]
+    return df.rename(columns=rename) if rename else df
 
 
 # =============================================================================
@@ -596,11 +648,37 @@ class SACTv4DataAdapter:
             ).fillna('C80.9')
 
         # ── Step 8: Fill defaults for missing fields ──────────────────────
+        # Track per-field application so we can surface the impact of
+        # default-filling explicitly.  Silent imputation on real Velindre
+        # data hides drift (e.g. Phase-1 SACT v4.0 may omit
+        # Performance_Status entirely): a single aggregated WARNING per
+        # affected field is the production-ready signal.
+        n_rows = len(df)
+        absent_cols: List[str] = []
+        partial_fill: Dict[str, int] = {}
         for field, default in self.DEFAULTS.items():
             if field not in df.columns:
                 df[field] = default
+                absent_cols.append(field)
             else:
-                df[field] = df[field].fillna(default)
+                na_count = int(df[field].isna().sum())
+                if na_count > 0:
+                    df[field] = df[field].fillna(default)
+                    partial_fill[field] = na_count
+        if absent_cols:
+            logger.warning(
+                "SACTv4DataAdapter: %d column(s) absent on input "
+                "DataFrame; entire column filled with default "
+                "(rows=%d).  Affected fields: %s",
+                len(absent_cols), n_rows,
+                {f: self.DEFAULTS[f] for f in absent_cols},
+            )
+        if partial_fill:
+            logger.warning(
+                "SACTv4DataAdapter: per-field NaN count after fill "
+                "(rows=%d): %s",
+                n_rows, partial_fill,
+            )
 
         # ── Step 9: Encode intent and context as numeric ──────────────────
         intent_col = df['Intent_Of_Treatment'] if 'Intent_Of_Treatment' in df.columns \

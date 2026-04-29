@@ -216,35 +216,47 @@ def validate_schema(df) -> Tuple[bool, List[str]]:
 
 def anonymisation_check(df) -> Tuple[bool, List[str]]:
     """
-    Heuristic guard against raw PII leaking into the real-data drop:
+    Heuristic guard against raw PII leaking into the real-data drop.
 
-    * reject 10-digit all-numeric Patient_IDs (pattern of raw NHS Number)
-    * reject columns named Person_Given_Name / Person_Family_Name that
-      contain alphabetic content (should be hashed before drop-in)
-    * warn (not error) when postcodes are full 7-character UK postcodes
-      (we prefer the first 4 chars only for NOSHOW feature use)
+    Two severity levels are tracked separately:
 
-    The check is conservative — it warns rather than rejects on
-    anything ambiguous so we don't reject a legitimately-anonymised
-    cohort over a false positive.  Returns (ok, warnings).
+    * **Hard violations** (block promotion — return ``ok=False``):
+        - Patient_ID column containing 10-digit all-numeric values
+          (the NHS-Number pattern).
+        - Person_Given_Name / Person_Family_Name columns containing
+          alphabetic content.
+
+    * **Soft warnings** (advisory, do not block):
+        - Patient_Postcode column containing full 7-character UK
+          postcodes (the model only uses the outward code; truncating
+          is encouraged but is not strictly a PII breach).
+
+    The combined list of messages is returned as the second element
+    so the caller's existing ``status.warnings.extend(...)`` path
+    continues to surface them in the /status JSON.  Hard violations
+    are prefixed with ``BLOCKED:`` so an operator reading the log
+    can distinguish them from soft hints.
     """
+    errors: List[str] = []
     warnings: List[str] = []
 
     if "Patient_ID" in df.columns:
         sample = df["Patient_ID"].astype(str).head(50)
         if (sample.str.fullmatch(r"\d{10}")).any():
-            warnings.append(
-                "Patient_ID column contains 10-digit all-numeric values — "
-                "likely raw NHS Numbers.  Hash or pseudonymise before use."
+            errors.append(
+                "BLOCKED: Patient_ID column contains 10-digit all-numeric "
+                "values — likely raw NHS Numbers.  Hash or pseudonymise "
+                "before promoting to Channel 2."
             )
 
     for pii_col in ("Person_Given_Name", "Person_Family_Name"):
         if pii_col in df.columns:
             sample = df[pii_col].astype(str).head(50)
             if sample.str.match(r"^[A-Za-z]{2,}").any():
-                warnings.append(
-                    f"{pii_col} column contains alphabetic content — "
-                    "should be dropped or hashed."
+                errors.append(
+                    f"BLOCKED: {pii_col} column contains alphabetic "
+                    "content — drop or hash before promoting to "
+                    "Channel 2."
                 )
 
     if "Patient_Postcode" in df.columns:
@@ -257,10 +269,11 @@ def anonymisation_check(df) -> Tuple[bool, List[str]]:
                 "(the NoShowModel only uses the outer code)."
             )
 
-    # Warnings don't fail the check on their own; only explicit errors do.
-    # (We don't currently raise hard anonymisation errors — that would
-    # be up to the operator running under DPIA.)
-    return (True, warnings)
+    # Hard violations fail the gate; soft warnings do not.  Combined
+    # messages are returned so the caller can extend status.warnings
+    # without needing to change its signature; the BLOCKED: prefix
+    # disambiguates in logs.
+    return (len(errors) == 0, errors + warnings)
 
 
 # --------------------------------------------------------------------------- #
@@ -270,9 +283,24 @@ def anonymisation_check(df) -> Tuple[bool, List[str]]:
 
 def _read_appointments():
     """Lazy pandas import so detect_channel works in environments
-    that import the module for constants without pulling pandas."""
+    that import the module for constants without pulling pandas.
+
+    After reading, applies the SACT v4.0 column-name normaliser so a
+    Velindre extract using ``AppointmentDate`` / ``appointmentdate``
+    / ``ChairNumber`` (any case-fold variant the trust ships) lands on
+    the canonical column names the rest of the pipeline expects
+    (``Appointment_Date``, ``Chair_Number``, ...).
+    """
     import pandas as pd
-    return pd.read_excel(REAL_APPTS_FILE)
+    df = pd.read_excel(REAL_APPTS_FILE)
+    try:
+        from data.sact_v4_schema import normalise_real_sact_columns
+        df = normalise_real_sact_columns(df)
+    except ImportError:
+        # Schema module unavailable in this environment — fall back to
+        # raw columns and let validate_schema flag any mismatch.
+        pass
+    return df
 
 
 def load_real_cohort():

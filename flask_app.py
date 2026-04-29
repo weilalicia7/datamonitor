@@ -2694,7 +2694,65 @@ def start_real_data_watcher() -> None:
                 if not fp['ready']:
                     _real_data_watcher_state['pending_since'] = None
                     _real_data_watcher_state['last_rejection_reason'] = fp['reason']
-                    if fp['missing'] and current_channel != 'real':
+                    if fp['missing'] and current_channel == 'real':
+                        # Files vanished mid-operation while we are serving
+                        # real-channel.  Auto-demote to synthetic so the
+                        # next initialize_data() can succeed; audit-log the
+                        # transition for clinical-data-source compliance.
+                        logger.warning(
+                            "Channel 2 watcher: required real_data files "
+                            "vanished mid-operation (%s) — auto-demoting "
+                            "Ch2 (real) → Ch1 (synthetic) to keep the "
+                            "scheduler runnable.",
+                            fp['reason'],
+                        )
+                        DATA_SOURCE_CONFIG['use_sample_data'] = True
+                        DATA_SOURCE_CONFIG['local_path'] = str(SAMPLE_DATA_DIR)
+                        DATA_SOURCE_CONFIG['active_channel'] = 'synthetic'
+                        app_state['data_dir'] = str(SAMPLE_DATA_DIR)
+                        app_state['active_channel'] = 'synthetic'
+                        # Reset stability gate so a future re-drop has to
+                        # pass the two-poll mtime-stability check again.
+                        _real_data_watcher_state['last_mtime'] = 0
+                        _real_data_watcher_state['pending_since'] = None
+                        try:
+                            initialize_data()
+                            _real_data_watcher_state['last_switch'] = now_iso
+                            try:
+                                _audit_event(
+                                    actor='system',
+                                    action='data.channel_switch',
+                                    outcome='success',
+                                    metadata={
+                                        'mode': 'auto_demote',
+                                        'prev_channel': 'real',
+                                        'new_channel': 'synthetic',
+                                        'reason': fp['reason'],
+                                        'missing': list(fp.get('missing') or []),
+                                    },
+                                )
+                            except Exception:  # pragma: no cover
+                                pass
+                        except Exception as exc:
+                            logger.error(
+                                "Channel 2 watcher: auto-demote "
+                                "initialize_data() failed: %s", exc
+                            )
+                            try:
+                                _audit_event(
+                                    actor='system',
+                                    action='data.channel_switch',
+                                    outcome='failure',
+                                    metadata={
+                                        'mode': 'auto_demote',
+                                        'prev_channel': 'real',
+                                        'attempted_channel': 'synthetic',
+                                        'error': str(exc),
+                                    },
+                                )
+                            except Exception:  # pragma: no cover
+                                pass
+                    elif fp['missing'] and current_channel != 'real':
                         # Log partial drops once, then quieten down to poll-only.
                         if _real_data_watcher_state.get('_last_missing') != fp['missing']:
                             logger.info(
@@ -2733,6 +2791,7 @@ def start_real_data_watcher() -> None:
                         "Channel 2 watcher: real_data stable — auto-promoting "
                         "Ch1 (synthetic) → Ch2 (real hospital)."
                     )
+                    prev_channel = current_channel
                     DATA_SOURCE_CONFIG['use_sample_data'] = False
                     DATA_SOURCE_CONFIG['local_path'] = str(REAL_DATA_DIR)
                     DATA_SOURCE_CONFIG['active_channel'] = 'real'
@@ -2747,10 +2806,39 @@ def start_real_data_watcher() -> None:
                         logger.info(
                             "Channel 2 watcher: switch complete — models retraining."
                         )
+                        try:
+                            _audit_event(
+                                actor='system',
+                                action='data.channel_switch',
+                                outcome='success',
+                                metadata={
+                                    'mode': 'auto',
+                                    'prev_channel': prev_channel,
+                                    'new_channel': 'real',
+                                    'mtime': fp['mtime'],
+                                    'files': list(fp.get('files') or _real_data_watcher_state['required_files']),
+                                },
+                            )
+                        except Exception:  # pragma: no cover
+                            pass
                     except Exception as exc:
                         logger.error(
                             "Channel 2 watcher: initialize_data() failed: %s", exc
                         )
+                        try:
+                            _audit_event(
+                                actor='system',
+                                action='data.channel_switch',
+                                outcome='failure',
+                                metadata={
+                                    'mode': 'auto',
+                                    'prev_channel': prev_channel,
+                                    'attempted_channel': 'real',
+                                    'error': str(exc),
+                                },
+                            )
+                        except Exception:  # pragma: no cover
+                            pass
             except Exception as exc:  # pragma: no cover
                 logger.error(f"Channel 2 watcher error: {exc}")
             _t.sleep(_real_data_watcher_state['poll_seconds'])
@@ -7182,9 +7270,40 @@ def api_microbatch_submit():
     try:
         mb = _get_micro_batch()
         data = request.json or {}
+        change_type = data.get('change_type', '')
+        payload = data.get('payload', {}) or {}
+
+        # ── Channel-aware Patient-ID validation ───────────────────────────
+        # Mirror the gate enforced by /api/urgent/insert so the micro-batch
+        # path cannot be used to slip placeholder/auto-generated IDs into
+        # Channel 2 (real hospital data).  Only checked for change_types
+        # that carry a patient_id; cancel / reschedule reference an
+        # existing appointment_id and do not need this gate.
+        if change_type == 'insert':
+            supplied_id = (payload.get('patient_id') or '').strip()
+            active_channel = app_state.get('active_channel', 'synthetic')
+            placeholder_prefixes = ('URGENT_', 'PREVIEW', 'TEST')
+            is_placeholder = (
+                supplied_id == ''
+                or supplied_id.upper().startswith(placeholder_prefixes)
+            )
+            if active_channel == 'real' and is_placeholder:
+                return jsonify({
+                    'success': False,
+                    'error': (
+                        'Channel 2 (real hospital data) requires a real '
+                        'patient identifier (NHS Number or Trust Local '
+                        'ID). Placeholder/auto-generated IDs are rejected '
+                        'to prevent orphan appointments in the live '
+                        'schedule.'
+                    ),
+                    'active_channel': active_channel,
+                    'supplied_id': supplied_id,
+                }), 400
+
         out = mb.submit_change(
-            change_type=data.get('change_type', ''),
-            payload=data.get('payload', {}),
+            change_type=change_type,
+            payload=payload,
             submitted_by=data.get('submitted_by'),
         )
         return jsonify(asdict(out))
@@ -13207,6 +13326,8 @@ def api_data_source():
         data = request.json or {}
         channel = data.get('channel', 'synthetic')
 
+        prev_channel = app_state.get('active_channel', 'synthetic')
+
         if channel == 'real':
             # Enforce the same required-files rule as the Ch2 watcher so the
             # manual toggle and the auto-switch behave identically.
@@ -13237,9 +13358,32 @@ def api_data_source():
         else:
             return jsonify({'error': f'Unknown channel: {channel}. Use "synthetic" or "real".'}), 400
 
+        # Resolve actor for the audit trail.  Falls back to 'anonymous'
+        # when the request is not authenticated (e.g. local dev).
+        actor = 'anonymous'
+        try:
+            from flask_login import current_user
+            if getattr(current_user, 'is_authenticated', False):
+                actor = getattr(current_user, 'username', 'anonymous')
+        except Exception:
+            pass
+
         # Reload data with new source
         try:
             initialize_data()
+            try:
+                _audit_event(
+                    actor=actor,
+                    action='data.channel_switch',
+                    outcome='success',
+                    metadata={
+                        'mode': 'manual',
+                        'prev_channel': prev_channel,
+                        'new_channel': channel,
+                    },
+                )
+            except Exception:  # pragma: no cover
+                pass
             return jsonify({
                 'success': True,
                 'channel': channel,
@@ -13247,6 +13391,20 @@ def api_data_source():
                 'patients_loaded': len(app_state.get('patients', [])),
             })
         except Exception as e:
+            try:
+                _audit_event(
+                    actor=actor,
+                    action='data.channel_switch',
+                    outcome='failure',
+                    metadata={
+                        'mode': 'manual',
+                        'prev_channel': prev_channel,
+                        'attempted_channel': channel,
+                        'error': str(e),
+                    },
+                )
+            except Exception:  # pragma: no cover
+                pass
             return jsonify({'error': f'Failed to reload: {str(e)}'}), 500
 
 

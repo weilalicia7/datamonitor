@@ -76,6 +76,17 @@ class OnlineLearner:
         self.update_count = 0
         self.update_history: List[OnlineUpdateResult] = []
 
+        # Feature-schema guard.  Set via ``set_feature_schema`` during
+        # offline training.  When set, every SGD update is checked
+        # against this expected dimensionality (and feature names, if
+        # provided) before partial_fit runs.  Mismatches are logged
+        # and skipped — they would otherwise corrupt the SGD weight
+        # vector with the wrong feature ordering on Channel 2 data
+        # whose schema differs from synthetic.
+        self.expected_feature_dim: Optional[int] = None
+        self.expected_feature_names: Optional[List[str]] = None
+        self.skipped_due_to_schema_mismatch = 0
+
         # SGD models for online classification/regression
         if SKLEARN_AVAILABLE:
             self.sgd_classifier = SGDClassifier(
@@ -114,6 +125,57 @@ class OnlineLearner:
         }
 
         logger.info(f"OnlineLearner initialized (eta={learning_rate}, alpha={ema_alpha})")
+
+    def set_feature_schema(self, dim: int,
+                           names: Optional[List[str]] = None) -> None:
+        """Lock in the feature dimensionality (and, optionally, the
+        feature names) the offline training cohort used.  Subsequent
+        SGD updates are validated against this schema; mismatches are
+        skipped with a warning rather than silently corrupting the
+        weight vector.
+
+        Call this once after offline training, before promoting to
+        Channel 2 (real Velindre data).  If never called, online
+        updates run unguarded — the legacy behaviour.
+        """
+        self.expected_feature_dim = int(dim)
+        self.expected_feature_names = list(names) if names is not None else None
+        logger.info(
+            "OnlineLearner feature schema locked: dim=%d names=%s",
+            self.expected_feature_dim,
+            f"({len(self.expected_feature_names)} provided)"
+            if self.expected_feature_names else "not provided",
+        )
+
+    def _features_match_schema(self, features) -> bool:
+        """Return True if the supplied feature vector matches the locked
+        schema (or no schema is locked).  Updates a counter on
+        mismatch so the operator can spot a pattern of skipped
+        updates after Channel 2 promotion."""
+        if self.expected_feature_dim is None:
+            return True
+        try:
+            arr = np.asarray(features, dtype=float).reshape(1, -1)
+        except Exception:
+            self.skipped_due_to_schema_mismatch += 1
+            logger.warning(
+                "OnlineLearner: feature vector could not be cast to "
+                "float — skipping SGD update."
+            )
+            return False
+        if arr.shape[1] != self.expected_feature_dim:
+            self.skipped_due_to_schema_mismatch += 1
+            logger.warning(
+                "OnlineLearner: feature dim mismatch (got %d, expected "
+                "%d).  Skipping SGD update; total skipped=%d.  This "
+                "guards against silent SGD corruption on Channel 2 "
+                "data whose feature set differs from offline training.",
+                arr.shape[1],
+                self.expected_feature_dim,
+                self.skipped_due_to_schema_mismatch,
+            )
+            return False
+        return True
 
     def update_on_new_observation(self,
                                    patient_features: np.ndarray,
@@ -175,6 +237,8 @@ class OnlineLearner:
         """
         if not SKLEARN_AVAILABLE or self.sgd_classifier is None:
             return None
+        if not self._features_match_schema(features):
+            return None
 
         X = np.array(features).reshape(1, -1)
         y = np.array([0 if attended else 1])  # 1 = no-show
@@ -212,6 +276,8 @@ class OnlineLearner:
         where L = (y - θ^T x)^2 (squared error)
         """
         if not SKLEARN_AVAILABLE or self.sgd_regressor is None:
+            return None
+        if not self._features_match_schema(features):
             return None
 
         X = np.array(features).reshape(1, -1)
