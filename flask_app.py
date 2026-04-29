@@ -2823,8 +2823,29 @@ def start_real_data_watcher() -> None:
                             pass
                     except Exception as exc:
                         logger.error(
-                            "Channel 2 watcher: initialize_data() failed: %s", exc
+                            "Channel 2 watcher: initialize_data() failed — "
+                            "rolling channel state back to %s: %s",
+                            prev_channel, exc,
                         )
+                        # Roll the channel state back on failure so the
+                        # webapp does not serve a half-promoted channel
+                        # (config says 'real' but no data was actually
+                        # loaded).  Without this rollback, /api/predict
+                        # and friends would error against the synthetic
+                        # cohort that is no longer the active dir.  The
+                        # next watcher iteration will retry promotion.
+                        DATA_SOURCE_CONFIG['use_sample_data'] = (prev_channel != 'real')
+                        DATA_SOURCE_CONFIG['local_path'] = str(
+                            REAL_DATA_DIR if prev_channel == 'real' else SAMPLE_DATA_DIR
+                        )
+                        DATA_SOURCE_CONFIG['active_channel'] = prev_channel
+                        app_state['data_dir'] = str(
+                            REAL_DATA_DIR if prev_channel == 'real' else SAMPLE_DATA_DIR
+                        )
+                        app_state['active_channel'] = prev_channel
+                        # Reset the stability gate so a re-drop has to
+                        # pass it again before another promote attempt.
+                        _real_data_watcher_state['pending_since'] = None
                         try:
                             _audit_event(
                                 actor='system',
@@ -2834,6 +2855,7 @@ def start_real_data_watcher() -> None:
                                     'mode': 'auto',
                                     'prev_channel': prev_channel,
                                     'attempted_channel': 'real',
+                                    'rolled_back_to': prev_channel,
                                     'error': str(exc),
                                 },
                             )
@@ -9827,6 +9849,33 @@ def api_urgent_insert():
                     f"Manual urgent insert: {patient.patient_id} → "
                     f"{forced['chair_id']} @ {forced['start_time']}"
                 )
+                # Explicit audit event so the IG team can distinguish
+                # operator-forced inserts from engine-driven ones (the
+                # auto-audit at line 306 only logs a generic
+                # "post /api/urgent/insert" entry).
+                actor = 'anonymous'
+                try:
+                    from flask_login import current_user
+                    if getattr(current_user, 'is_authenticated', False):
+                        actor = getattr(current_user, 'username', 'anonymous')
+                except Exception:
+                    pass
+                try:
+                    _audit_event(
+                        actor=actor,
+                        action='urgent.manual_insert',
+                        outcome='success',
+                        metadata={
+                            'patient_id': patient.patient_id,
+                            'forced_chair': forced['chair_id'],
+                            'start_time': forced['start_time'],
+                            'duration_minutes': int(patient.expected_duration),
+                            'active_channel': active_channel,
+                            'strategy': 'manual_operator_selected',
+                        },
+                    )
+                except Exception:  # pragma: no cover
+                    pass
                 return jsonify({
                     'success': True,
                     'strategy': 'manual_operator_selected',
@@ -13202,6 +13251,21 @@ def _get_online_learner():
     if online_learner is None:
         from ml.online_learning import OnlineLearner
         online_learner = OnlineLearner(learning_rate=0.01, ema_alpha=0.1)
+        # Lock the feature dim that /api/ml/online-learning/update
+        # actually assembles below (lines ~13238–13248).  This activates
+        # the schema-guard so a Channel-2 caller passing a different
+        # feature set is skipped with a WARNING rather than silently
+        # corrupting the SGD weights.  Names are documentary; dim is the
+        # invariant the guard enforces.
+        online_learner.set_feature_schema(
+            dim=8,
+            names=[
+                'previous_noshow_rate', 'distance_km', 'age',
+                'cycle_number', 'weather_severity',
+                'expected_duration', 'is_first_cycle',
+                'has_comorbidities',
+            ],
+        )
     return online_learner
 
 

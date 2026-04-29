@@ -819,8 +819,15 @@ class ModelRecalibrator:
             elif not ir.is_new_data:
                 continue  # Non-SACT sources skip if no new data
 
-            # Determine update level (quality-aware for SACT v4)
-            level = self.determine_update_level(ir.source, drift_score, sact_v4_quality)
+            # Determine update level (quality-aware for SACT v4 + drift-aware
+            # override).  Passing drift_summary is critical: when severe drift
+            # is detected on a Phase-1 ('preliminary') Channel-2 batch the
+            # phase router would route to Level 2; the drift override
+            # in determine_update_level forces Level 3 instead.
+            level = self.determine_update_level(
+                ir.source, drift_score, sact_v4_quality,
+                drift_summary=drift_summary,
+            )
 
             # Load the downloaded data
             data = None
