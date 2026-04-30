@@ -40,8 +40,14 @@ import pandas as pd
 # Conservative UK reference cost-rate constants
 # --------------------------------------------------------------------------- #
 
-# £ / wasted prepared cytotoxic dose; midpoint of the 150-300 range cited in
-# Atkin (2021) NHS analysis of chemotherapy waste.
+# £ / wasted prepared cytotoxic dose; conservative midpoint for generic
+# cytotoxic agents (biologic / targeted agents would scale this figure
+# upward and are excluded from the midpoint to keep the cost-effectiveness
+# headline conservative).  Per-dose cost is quantified per drug under the
+# NHS England standardised waste-quantification methodology (NHS England,
+# Chemotherapy Waste Calculator v3.1, 2021); peer-reviewed dose-banding
+# evidence on vial-size optimisation in Hatswell & Porter, Applied Health
+# Economics and Health Policy 17(3), 2019, pp. 391-397.
 DRUG_COST_PER_NO_SHOW_GBP = 200.0
 
 # £ / hour of band-5 oncology nurse time on Agenda for Change rates +
