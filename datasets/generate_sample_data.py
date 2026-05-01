@@ -1218,35 +1218,27 @@ def generate_historical_appointments(patients_df, n_months=12):
                     # =========================================================
 
                     # Demographics (SACT Section 2)
-                    'Person_Stated_Gender_Code': random.choices([1, 2, 9], weights=[0.44, 0.53, 0.03])[0],  # 1=Male, 2=Female, 9=Not stated
+                    # Pull patient-level gender so a single patient stays one
+                    # gender across every appointment row (regenerating
+                    # randomly per-row breaks gender-stratified fairness audits).
+                    'Person_Stated_Gender_Code': patient.get('Person_Stated_Gender_Code', 1),  # 1=Male, 2=Female, 9=Not stated
 
-                    # Clinical Status (SACT Section 3)
-                    'Primary_Diagnosis_ICD10': random.choice([
-                        'C18.9', 'C34.9', 'C50.9', 'C83.3', 'C43.9',  # Colorectal, Lung, Breast, Lymphoma, Melanoma
-                        'C61', 'C56.9', 'C25.9', 'C64.9', 'C67.9'     # Prostate, Ovary, Pancreas, Kidney, Bladder
-                    ]),
+                    # Clinical Status (SACT Section 3) — pull patient-stable
+                    # attributes so a single patient keeps the same diagnosis,
+                    # treatment intent, and trial enrolment across every
+                    # appointment row.  Performance_Status legitimately varies
+                    # over a treatment course, so it is regenerated per row.
+                    'Primary_Diagnosis_ICD10': patient.get('Primary_Diagnosis_ICD10', 'C18.9'),
                     'Performance_Status': random.choices(
                         [0, 1, 2, 3, 4],
                         weights=[0.25, 0.35, 0.25, 0.12, 0.03]
                     )[0],  # WHO Performance Status 0-4
 
                     # Regimen (SACT Section 4) - Using SACT v4.0 codes
-                    'Intent_Of_Treatment': random.choices(
-                        ['06', '07'],  # 06=Curative, 07=Non-curative
-                        weights=[0.55, 0.45]
-                    )[0],
-                    'Treatment_Context': random.choices(
-                        ['01', '02', '03'],  # 01=Neoadjuvant, 02=Adjuvant, 03=SACT Only
-                        weights=[0.15, 0.30, 0.55]
-                    )[0],
-                    'Clinical_Trial': random.choices(
-                        ['01', '02'],  # 01=In trial, 02=Not in trial
-                        weights=[0.08, 0.92]
-                    )[0],
-                    'Chemoradiation': random.choices(
-                        ['Y', 'N'],
-                        weights=[0.12, 0.88]
-                    )[0],
+                    'Intent_Of_Treatment': patient.get('Intent_Of_Treatment', '06'),
+                    'Treatment_Context': patient.get('Treatment_Context', '03'),
+                    'Clinical_Trial': patient.get('Clinical_Trial', '02'),
+                    'Chemoradiation': patient.get('Chemoradiation', 'N'),
                     # Historical appointment-level Date_Decision_To_Treat —
                     # calibrated to CWT 62D drug-regimen compliance (same split
                     # as the patient-level field above).
