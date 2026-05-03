@@ -70,6 +70,70 @@ fix is the substantive correctness improvement.
 
 ---
 
+## Patch 2 — Cardiff Windows WMI bypass (2026-05-03)
+
+**File added:** `scripts/install_wmi_bypass.py` (self-installing).
+
+**Bug:** On Cardiff-University-managed Windows endpoints (corporate
+antivirus + locked-down Winmgmt service) the Python 3.12 `platform`
+module hangs indefinitely on `platform._wmi_query` (CPython
+`Lib/platform.py:326`).  The query is invoked transitively by
+`numpy.testing._private.utils:89` -> `platform.machine()`, which is
+loaded the first time anything imports `scipy.sparse` / `sklearn`.
+Net effect: importing the `optimization.*` package (or anything else
+that pulls sklearn) deadlocks the interpreter.  The Flask webapp
+process never reaches `app.run`, every `ml/benchmark_*.py` harness
+hangs at startup, and pytest collection blocks for >30 min.
+
+**Repro:** any of these hang on the affected machine, exit cleanly
+on a healthy one:
+```
+python -c "import platform, time; t=time.time(); platform.machine(); print(time.time()-t)"
+python -c "from optimization.optimizer import ScheduleOptimizer"
+python flask_app.py
+```
+
+**Fix:** `scripts/install_wmi_bypass.py` writes a `usercustomize.py`
+into the user's site-packages.  Python auto-loads `usercustomize.py`
+at every interpreter startup when `site.ENABLE_USER_SITE` is True
+(default).  The hook patches `platform._wmi_query` to raise
+`OSError` immediately, which is the exact exception CPython's own
+non-WMI fallback path is written for (`platform._win32_ver` lines
+400-443).  The fallback uses `sys.getwindowsversion()` and `winreg`
+- direct Windows API calls that return the SAME version / release /
+build / edition values WMI would have returned on a healthy box.
+
+**Verification on the affected Cardiff machine:**
+- Before fix: `python -c "import platform; platform.machine()"` hung
+  past the timeout (>15 s); `flask_app.py` never bound port 1421.
+- After fix: `platform.machine() = 'AMD64'` (<1 ms),
+  `platform.win32_ver() = ('11', '10.0.26100', 'SP0', 'Multiprocessor Free')`
+  (~45 ms), `optimization` imports in 5.5 s, `flask_app.py` boots in
+  ~70 s and serves `GET /` (HTTP 200, 176 KB) and
+  `GET /api/data/channel/real/status` (HTTP 200).
+
+**Install / uninstall:**
+```
+python scripts/install_wmi_bypass.py            # install
+python scripts/install_wmi_bypass.py --status   # check
+python scripts/install_wmi_bypass.py --uninstall # remove
+```
+
+**Why it's safe to ship:**
+- No-op on non-Windows hosts (the installer prints "nothing to install").
+- No-op on healthy Windows hosts: the WMI fallback path was already a
+  first-class CPython feature, the patch just routes the WMI call to
+  the same fallback unconditionally.  The values returned are
+  identical because they come from the same Windows kernel APIs.
+- Removing the file silently restores upstream behaviour - no other
+  source code depends on the patch.
+- Independent of any project code: applies system-wide for the user's
+  Python interpreter, so the dev server, R via reticulate, every
+  `ml/benchmark_*.py`, and ad-hoc CLI scripts all benefit without
+  per-script changes.
+
+---
+
 ## Roadmap reference
 
 The aborted-at-Stage-2 regeneration plan and exact CLI reproduction
