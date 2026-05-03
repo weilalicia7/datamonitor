@@ -741,7 +741,7 @@ class ColumnGenerator:
             if time_limit_hit:
                 logger.info(
                     f"CG time-limit hit during pricing at iteration {iterations} "
-                    f"(elapsed {time.time() - t0:.2f}s ≥ budget "
+                    f"(elapsed {time.time() - t0:.2f}s >= budget "
                     f"{self.time_limit_s:.2f}s); returning best-feasible-so-far"
                 )
                 break

@@ -205,9 +205,13 @@ class CoxProportionalHazards:
                         x_bar = weighted_x_sum[i] / risk_sum[i]
                         gradient += X_sorted[i] - x_bar
 
-                        # Hessian contribution
-                        weighted_xx = np.outer(weighted_x_sum[i], weighted_x_sum[i]) / (risk_sum[i] ** 2)
-                        hessian -= weighted_xx
+                        # Hessian contribution.  Mathematically this is
+                        # outer(weighted_x_sum, weighted_x_sum) / risk_sum**2,
+                        # but computing the squared denominator overflows when
+                        # exp(eta) is large (clip is wide for numerical
+                        # fidelity).  outer(x_bar, x_bar) is identical and the
+                        # ratio is bounded.
+                        hessian -= np.outer(x_bar, x_bar)
 
             # Add small regularization for stability
             hessian -= np.eye(n_features) * 0.01

@@ -248,6 +248,22 @@ class SequenceFeatureEngineer:
         self.feature_names = []
         self.is_fitted = False
 
+    @staticmethod
+    def _resolve_date_column(appointments_df: pd.DataFrame) -> str:
+        """Return the column holding the appointment date.
+
+        SACT v4.0 sample data uses ``Date``.  Earlier internal datasets
+        and the unit-test fixtures use ``Appointment_Date``.  Accept
+        either; raise a clear KeyError if neither is present.
+        """
+        for candidate in ('Date', 'Appointment_Date'):
+            if candidate in appointments_df.columns:
+                return candidate
+        raise KeyError(
+            "appointments_df must have a 'Date' or 'Appointment_Date' "
+            "column; got: " + ", ".join(appointments_df.columns[:20])
+        )
+
     def create_sequence_features(self, appointments_df: pd.DataFrame,
                                    patient_id: str) -> Optional[SequenceFeatures]:
         """
@@ -260,10 +276,11 @@ class SequenceFeatureEngineer:
         Returns:
             SequenceFeatures object or None if insufficient data
         """
+        date_col = self._resolve_date_column(appointments_df)
         # Filter to this patient and sort by date
         patient_appts = appointments_df[
             appointments_df['Patient_ID'] == patient_id
-        ].sort_values('Appointment_Date')
+        ].sort_values(date_col)
 
         if len(patient_appts) < 2:
             return None  # Need at least 2 appointments for sequence
@@ -280,7 +297,7 @@ class SequenceFeatureEngineer:
             features = {}
 
             # Time features
-            appt_date = pd.to_datetime(row['Appointment_Date'])
+            appt_date = pd.to_datetime(row[date_col])
             timestamps.append(appt_date)
 
             features['day_of_week_sin'] = np.sin(2 * np.pi * appt_date.dayofweek / 7)
@@ -292,7 +309,7 @@ class SequenceFeatureEngineer:
 
             # Gap since last appointment
             if i > 0:
-                prev_date = pd.to_datetime(patient_appts.iloc[i-1]['Appointment_Date'])
+                prev_date = pd.to_datetime(patient_appts.iloc[i-1][date_col])
                 gap_days = (appt_date - prev_date).days
                 features['gap_days'] = min(gap_days / 30.0, 6.0)  # Normalize, cap at 6 months
                 features['gap_weeks'] = min(gap_days / 7.0, 26.0)

@@ -9,7 +9,13 @@ Runs on port 1421.
 """
 
 from flask import Flask, render_template, request, jsonify, redirect, url_for
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
+
+
+def _utcnow_iso(timespec: str = 'seconds') -> str:
+    """ISO-8601 UTC timestamp without tzinfo, replacing deprecated
+    datetime.utcnow().isoformat()."""
+    return datetime.now(timezone.utc).replace(tzinfo=None).isoformat(timespec=timespec)
 from dataclasses import asdict
 from typing import Dict as _Dict, Optional
 import json
@@ -1948,9 +1954,21 @@ def train_advanced_ml_models():
                     test_size=0.2,
                     appointments_df=df  # For sequence model training
                 )
-                logger.info(f"NoShow ensemble TRAINED: accuracy={train_result.get('accuracy', 0):.3f}, "
-                           f"AUC={train_result.get('auc', 0):.3f}, "
-                           f"is_trained={noshow_model.is_trained}")
+                # noshow_model.train() returns CV metrics under the
+                # cv_mean_auc / cv_std_auc keys (see ml/noshow_model.py
+                # ~line 606).  An older revision used 'accuracy' / 'auc',
+                # so we read both shapes and fall back gracefully.
+                _auc = train_result.get('cv_mean_auc',
+                                        train_result.get('auc', 0.0))
+                _auc_std = train_result.get('cv_std_auc')
+                _acc = train_result.get('accuracy')
+                msg = f"NoShow ensemble TRAINED: AUC={_auc:.3f}"
+                if _auc_std is not None:
+                    msg += f" +/- {_auc_std:.3f}"
+                if _acc is not None:
+                    msg += f", accuracy={_acc:.3f}"
+                msg += f", is_trained={noshow_model.is_trained}"
+                logger.info(msg)
             except Exception as e:
                 logger.warning(f"NoShow ensemble training failed (using rule-based fallback): {e}")
 
@@ -2686,7 +2704,7 @@ def start_real_data_watcher() -> None:
         while _real_data_watcher_state['enabled']:
             try:
                 fp = _real_data_fingerprint()
-                now_iso = datetime.utcnow().isoformat(timespec='seconds')
+                now_iso = _utcnow_iso()
                 _real_data_watcher_state['last_check'] = now_iso
                 _real_data_watcher_state['required_files_present'] = fp['ready']
                 current_channel = app_state.get('active_channel', 'synthetic')
@@ -7246,7 +7264,7 @@ def _mb_rl_tick() -> dict:
     for a *continuous* background improvement signal; this fulfils
     that contract without monkey-patching the existing RL module.
     """
-    return {'ts': datetime.utcnow().isoformat(timespec='seconds'), 'noop': False}
+    return {'ts': _utcnow_iso(), 'noop': False}
 
 
 def _get_micro_batch():
@@ -7458,7 +7476,7 @@ def _twin_optimize_fn(state, policy) -> dict:
     # The twin is a rollout — we only *record* that a slow path fired here
     # to keep rollouts deterministic.  (Calling the real optimiser over
     # rolled-forward virtual state would blow horizon budgets into hours.)
-    return {'ts': datetime.utcnow().isoformat(timespec='seconds'), 'noop': True}
+    return {'ts': _utcnow_iso(), 'noop': True}
 
 
 def _twin_noshow_fn(patient_rec: dict, appointment: dict) -> float:
@@ -9139,7 +9157,7 @@ def api_override_log():
         from ml.override_learning import get_learner, OverrideEvent
         data = request.json or {}
         event = OverrideEvent(
-            ts=datetime.utcnow().isoformat(timespec='seconds'),
+            ts=_utcnow_iso(),
             patient_id=str(data.get('patient_id', '')),
             original_chair_id=data.get('original_chair_id'),
             original_start_time=data.get('original_start_time'),
