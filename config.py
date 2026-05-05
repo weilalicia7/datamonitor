@@ -88,12 +88,26 @@ SEVERITY_WEIGHTS = {
     'entity': 0.2
 }
 
-# Priority definitions
+# Priority definitions.
+#
+# 4-tier oncology simplification of the NHS FSSA *Clinical Guide to
+# Surgical Prioritisation* (5-tier P1a/P1b/P2/P3/P4).  The collapse
+# merges FSSA's P1a (< 24 h) and P1b (< 72 h) into a single P1/P2
+# split, which is the convention used across the dissertation prose
+# (main.tex Sections 1.2, 2, and Results) and reflects oncology
+# practice where the same-day-vs-3-day distinction is less load-
+# bearing than in surgery.  See dissertation/PRIORITY_TIER_NOTE.md.
+#
+# max_delay_days is informational only -- the optimiser enforces
+# P1_MAX_START_MIN (90 min from opening) plus per-patient
+# earliest_time / latest_time set by callers.  No object reads
+# the max_delay_days field at runtime; it is kept here as a single
+# source of truth for documentation and audit purposes.
 PRIORITY_DEFINITIONS = {
-    1: {'name': 'Critical', 'max_delay_days': 2},
-    2: {'name': 'High', 'max_delay_days': 7},
-    3: {'name': 'Standard', 'max_delay_days': 14},
-    4: {'name': 'Routine', 'max_delay_days': 30}
+    1: {'name': 'Critical', 'max_delay_days': 1},   # FSSA P1a   (< 24 h)
+    2: {'name': 'High',     'max_delay_days': 3},   # FSSA P1b   (< 72 h)
+    3: {'name': 'Standard', 'max_delay_days': 14},  # FSSA P2    (< 1 month, cycle window)
+    4: {'name': 'Routine',  'max_delay_days': 30}   # FSSA P3    (< 3 months)
 }
 
 # =============================================================================
@@ -125,11 +139,14 @@ class PatientPriority(Enum):
     P3_STANDARD = 3    # Maintenance therapy, stable disease
     P4_DEFERRABLE = 4  # Palliative, symptom control
 
-# Maximum delay (days) by priority
+# Maximum delay (days) by priority -- mirrors PRIORITY_DEFINITIONS above
+# and tracks the same FSSA-aligned timeframes (1 / 3 / 14 / 30 days).
+# Informational only; not currently read at runtime.  See
+# dissertation/PRIORITY_TIER_NOTE.md for the authoritative source.
 PRIORITY_MAX_DELAY = {
-    PatientPriority.P1_CRITICAL: 2,
-    PatientPriority.P2_HIGH: 7,
-    PatientPriority.P3_STANDARD: 14,
+    PatientPriority.P1_CRITICAL:   1,
+    PatientPriority.P2_HIGH:       3,
+    PatientPriority.P3_STANDARD:  14,
     PatientPriority.P4_DEFERRABLE: 30
 }
 

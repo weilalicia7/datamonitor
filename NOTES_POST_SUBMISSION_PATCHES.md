@@ -134,6 +134,38 @@ python scripts/install_wmi_bypass.py --uninstall # remove
 
 ---
 
+## Patch 3 — priority-tier `max_delay_days` aligned with FSSA framework (2026-05-05)
+
+**File:** `config.py`, `PRIORITY_DEFINITIONS` and `PRIORITY_MAX_DELAY`.
+
+**Before:** values were 2 / 7 / 14 / 30 days for P1 / P2 / P3 / P4.
+
+**After:** values are 1 / 3 / 14 / 30 days, matching the FSSA *Clinical
+Guide to Surgical Prioritisation* (P1a < 24 h, P1b < 72 h, P2 < 1 month,
+P3 < 3 months) under the 4-tier oncology collapse the dissertation uses
+(P1 = FSSA P1a, P2 = FSSA P1b).
+
+**Bug:** the legacy 2 / 7 day values contradicted the dissertation's
+prose ("P1 within 24 h, P2 within 72 h", repeated at `main.tex:1008,
+1175, 1188, 2242`) for no functional reason -- the `max_delay_days`
+field is **not read at runtime** by any module.  Verified by
+grepping the whole tree: only the dict object is imported (by
+`data/validators.py`, `optimization/emergency_mode.py`,
+`optimization/squeeze_in.py`, `optimization/constraints.py`), and
+only the `name` field is ever dereferenced.
+
+**Impact:** none on simulation behaviour, benchmark outputs, or
+dissertation deliverables.  The change is documentation-quality
+only -- it makes the codebase's printed deadlines match the
+prose's clinical aspirations.  The actual runtime enforcement is
+unchanged: `P1_MAX_START_MIN = 90` (hard CP-SAT constraint) plus
+per-patient `earliest_time` / `latest_time` set by callers.
+
+**Audit trail:** full rationale, FSSA mapping table, and source
+citations live at `dissertation/PRIORITY_TIER_NOTE.md`.
+
+---
+
 ## Roadmap reference
 
 The aborted-at-Stage-2 regeneration plan and exact CLI reproduction
