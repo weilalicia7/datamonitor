@@ -10010,11 +10010,26 @@ def api_find_best_slot():
             allow_double_booking=data.get('allow_double_booking', True)
         )
 
-        # Score picks the top 10 best-fit options; then present them
-        # chronologically so the UI reads left-to-right as a time-of-day
-        # list rather than jumping between morning, afternoon, and evening.
-        # Score is still displayed on each row so the ranking signal isn't lost.
-        top10 = sorted(options[:10], key=lambda o: o.start_time)
+        # Score-desc -> 30-min bucket cap -> chronological.  Without the
+        # bucket-cap step the top 10 collapses onto whichever single shift
+        # has the highest no-show probability (typically the late-morning
+        # cohort that lands in the 10:30 window after the 8 am cohort
+        # finishes), making the preview useless for time-of-day choice.
+        # Cap = 2 per 30-min bucket spreads the list across the day so the
+        # operator can see morning / midday / afternoon options together.
+        # Score is still on every row, so the ranking signal isn't lost.
+        bucket_cap = 2
+        bucket_count = {}
+        diversified = []
+        for opt in options:  # find_best_slot_for_urgent returns score-desc
+            bucket = (opt.start_time.hour * 60 + opt.start_time.minute) // 30
+            if bucket_count.get(bucket, 0) >= bucket_cap:
+                continue
+            bucket_count[bucket] = bucket_count.get(bucket, 0) + 1
+            diversified.append(opt)
+            if len(diversified) >= 10:
+                break
+        top10 = sorted(diversified, key=lambda o: o.start_time)
 
         options_data = []
         for opt in top10:
