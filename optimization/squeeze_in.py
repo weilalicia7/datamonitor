@@ -1186,12 +1186,38 @@ class SqueezeInHandler:
                     confidence_level="N/A"
                 )
 
+        # Compose an actionable message that distinguishes "we tried and
+        # nothing fit" from "you disabled the strategy that would have fit".
+        attempted = ["gaps"]  # always tried
+        skipped = []
+        if allow_double_booking and self.noshow_model and patient_data_map:
+            attempted.append("double-booking")
+        else:
+            skipped.append("double-booking")
+        if allow_rescheduling:
+            attempted.append("rescheduling")
+        else:
+            skipped.append("rescheduling")
+
+        if skipped:
+            msg = (
+                f"No suitable slot found. Tried: {', '.join(attempted)}. "
+                f"Disabled: {', '.join(skipped)} -- enabling these may help."
+            )
+        else:
+            msg = (
+                "No suitable slot found. All strategies tried "
+                f"({', '.join(attempted)}); the schedule is fully packed and no "
+                f"existing appointment crossed the no-show threshold or had a "
+                f"compatible duration for this {patient.expected_duration}-min insertion."
+            )
+
         return SqueezeInResult(
             success=False,
             appointment=None,
             options_evaluated=options_evaluated,
             affected_patients=[],
-            message="No suitable squeeze-in slot found (gaps, double-booking, or rescheduling)",
+            message=msg,
             strategy_used="none",
             noshow_probability=0.0,
             confidence_level="N/A"
