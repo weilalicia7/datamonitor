@@ -258,7 +258,12 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-
                 <div style="margin-top:12px;display:flex;gap:8px;align-items:center;">
                     <label style="font-size:0.8em;"><input type="checkbox" id="sq-resched"> Allow rescheduling lower-priority patients</label>
                 </div>
-                <div style="margin-top:14px;display:flex;gap:8px;">
+                <div style="margin-top:14px;font-size:0.78em;color:#475569;background:#f1f5f9;border-left:3px solid #3b82f6;padding:6px 10px;border-radius:4px;">
+                    <strong>Preview Best Slots</strong> ranks all candidates by combined score (favours high-utilisation double-books);
+                    <strong>Insert Now</strong> uses a safety-first cascade (any gap beats any double-book).
+                    To pin an exact preview slot, click <em>Insert here</em> on that row.
+                </div>
+                <div style="margin-top:8px;display:flex;gap:8px;">
                     <button onclick="previewSlots()" style="flex:1;padding:8px;background:#3b82f6;color:white;border:none;border-radius:5px;cursor:pointer;font-size:0.85em;">Preview Best Slots</button>
                     <button onclick="insertUrgent()" style="flex:1;padding:8px;background:#ef4444;color:white;border:none;border-radius:5px;cursor:pointer;font-size:0.85em;">Insert Now</button>
                 </div>
