@@ -1512,7 +1512,25 @@ function previewSlots() {
             h += `</div>`;
             document.getElementById('sq-result').innerHTML = h;
         } else {
-            document.getElementById('sq-result').innerHTML = '<span style="color:#ef4444;">No slots available: ' + (d.message || 'Schedule may be full') + '</span>';
+            // Distinguish "schedule empty" (operator just needs to run the
+            // optimiser) from "schedule full" (genuine no-fit) so the empty
+            // state isn't read as a bug.
+            const total = (d.total_options !== undefined) ? d.total_options : 0;
+            if (d.success && total === 0) {
+                document.getElementById('sq-result').innerHTML =
+                    `<div style="padding:10px 12px;background:#fff7ed;border-radius:5px;border-left:3px solid #f59e0b;font-size:0.85em;color:#7c2d12;">
+                        <strong>No optimised schedule loaded.</strong>
+                        Preview Best Slots scores existing scheduled appointments by no-show probability,
+                        but the day's schedule is currently empty (e.g. immediately after a fresh boot
+                        or after &lsquo;Insert urgent patient&rsquo; reset state).
+                        Run the optimiser from the <em>Optimize</em> tab (or POST /api/optimize/run)
+                        to populate the day, then click <em>Preview Best Slots</em> again.
+                        This is expected behaviour, not a bug.
+                    </div>`;
+            } else {
+                document.getElementById('sq-result').innerHTML =
+                    '<span style="color:#ef4444;">No slots available: ' + (d.message || 'Schedule may be full') + '</span>';
+            }
         }
     }).catch(e => { document.getElementById('sq-result').innerHTML = '<span style="color:#ef4444;">Error: '+e.message+'</span>'; });
 }
@@ -1613,8 +1631,16 @@ function loadSqueezeTab() {
     // Load high no-show slots
     fetch('/api/urgent/high-noshow-slots').then(r=>r.json()).then(d => {
         const slots = d.slots || d.high_noshow_slots || [];
+        const totalRaw = (d.total_slots !== undefined) ? d.total_slots
+                       : (d.returned_after_diversification !== undefined ? d.returned_after_diversification
+                       : slots.length);
         if (slots.length > 0) {
-            let h = '';
+            const shown = Math.min(slots.length, 15);
+            let h = `<div style="font-size:0.82em;color:#475569;margin-bottom:8px;">
+                <strong>Showing ${shown} of ${totalRaw}</strong>
+                <span style="color:#888;"> &nbsp;— every scheduled appointment is scored by the no-show ML model;
+                rows are bucketed by 30-minute window (max 2 per bucket) and re-sorted chronologically for readability.</span>
+            </div>`;
             slots.slice(0,15).forEach(s => {
                 const prob = s.noshow_probability || s.probability || 0;
                 const color = prob >= 0.4 ? '#ef4444' : prob >= 0.25 ? '#f59e0b' : '#eab308';
@@ -1626,7 +1652,21 @@ function loadSqueezeTab() {
             });
             document.getElementById('noshow-slots').innerHTML = h;
         } else {
-            document.getElementById('noshow-slots').innerHTML = '<span style="color:#888;">No high no-show slots found</span>';
+            // Empty state: distinguish "no schedule loaded" from "schedule loaded
+            // but no high-risk slots".  total_slots = 0 means there's nothing
+            // to score (the day's optimised schedule is empty), which usually
+            // means the operator needs to run the optimiser first.
+            const empty = totalRaw === 0
+                ? `<div style="padding:10px 12px;background:#fff7ed;border-radius:5px;border-left:3px solid #f59e0b;font-size:0.85em;color:#7c2d12;">
+                    <strong>No optimised schedule loaded.</strong>
+                    The squeeze-in handler scores existing scheduled appointments by no-show probability,
+                    but the day's schedule is currently empty (e.g. immediately after a fresh boot
+                    or after ‘Insert urgent patient’ reset state).
+                    Run the optimiser from the <em>Optimize</em> tab (or POST /api/optimize/run)
+                    to populate the day, then return here. This is expected behaviour, not a bug.
+                </div>`
+                : `<span style="color:#888;">Schedule has ${totalRaw} appointments, but none crossed the 0.20 medium-risk threshold.</span>`;
+            document.getElementById('noshow-slots').innerHTML = empty;
         }
     }).catch(() => { document.getElementById('noshow-slots').innerHTML = '<span style="color:#888;">Could not load slots</span>'; });
 
