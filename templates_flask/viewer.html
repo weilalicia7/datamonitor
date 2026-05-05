@@ -1636,15 +1636,16 @@ function loadSqueezeTab() {
     // Load high no-show slots
     fetch('/api/urgent/high-noshow-slots').then(r=>r.json()).then(d => {
         const slots = d.slots || d.high_noshow_slots || [];
-        const totalRaw = (d.total_slots !== undefined) ? d.total_slots
-                       : (d.returned_after_diversification !== undefined ? d.returned_after_diversification
-                       : slots.length);
+        const totalRaw = (d.total_slots !== undefined) ? d.total_slots : slots.length;
         if (slots.length > 0) {
             const shown = Math.min(slots.length, 15);
             let h = `<div style="font-size:0.82em;color:#475569;margin-bottom:8px;">
                 <strong>Showing ${shown} of ${totalRaw}</strong>
-                <span style="color:#888;"> &nbsp;— every scheduled appointment is scored by the no-show ML model;
-                rows are bucketed by 30-minute window (max 2 per bucket) and re-sorted chronologically for readability.</span>
+                <span style="color:#888;"> &nbsp;— every scheduled appointment is scored by the no-show ML model
+                and listed here in <strong>risk-descending order</strong>
+                (highest no-show probability first).
+                This is the operator's situational-awareness view: <em>which existing patients carry the most no-show risk?</em>
+                For per-urgent-patient placement options across different times of day, use <em>Preview Best Slots</em> above.</span>
             </div>`;
             slots.slice(0,15).forEach(s => {
                 const prob = s.noshow_probability || s.probability || 0;

@@ -9693,29 +9693,25 @@ def api_high_noshow_slots():
             date=datetime.now()
         )
 
-        # Greedy time-bucket diversification: after the risk-descending sort
-        # from find_high_noshow_slots(), cap how many adjacent minute-equal
-        # entries are emitted so the UI top-N doesn't collapse onto a single
-        # minute (e.g., 13:02 ×11) when CP-SAT packs many same-duration
-        # patients at the same instant.  Each 30-minute bucket is capped at 2.
-        bucket_cap = 2
-        bucket_count = {}
-        def _bucket(dt):
-            m = dt.hour * 60 + dt.minute
-            return f'{m // 30:03d}'  # 30-min bucket id
-        diversified = []
-        for slot in noshow_slots:
-            key = _bucket(slot.start_time)
-            if bucket_count.get(key, 0) >= bucket_cap:
-                continue
-            bucket_count[key] = bucket_count.get(key, 0) + 1
-            diversified.append(slot)
-
-        # After the risk+diversity filter has picked the best candidates,
-        # re-sort the survivors CHRONOLOGICALLY so the UI reads left-to-right
-        # as "how does my day look for double-booking opportunities?".
-        # Risk is still visible on each row so no information is lost.
-        diversified.sort(key=lambda s: s.start_time)
+        # This panel is the operator's situational-awareness view of which
+        # *existing* patients carry the highest no-show risk -- it answers
+        # "which appointments could I double-book on if an urgent referral
+        # comes in?" independent of any specific urgent patient.  It is
+        # complementary to /api/urgent/find-best-slot, which scores slots
+        # for a *specific* urgent insertion.
+        #
+        # Sort policy: risk-descending on the displaced patient's no-show
+        # probability (NOT the double_book_score, which mixes in time-of-day
+        # and duration weights that overlap with the find-best-slot ranking
+        # and made the two panels look identical).  Top 10 emitted in
+        # risk-descending order.  No time-bucket filtering here -- the
+        # operator wants to see the genuinely highest-risk patients, even
+        # if several land in the same shift.
+        diversified = sorted(
+            noshow_slots,
+            key=lambda s: s.noshow_probability,
+            reverse=True,
+        )[:10]
 
         slots_data = []
         for slot in diversified:
@@ -9735,8 +9731,8 @@ def api_high_noshow_slots():
         return jsonify({
             'success': True,
             'total_slots': len(noshow_slots),
-            'returned_after_diversification': len(slots_data),
-            'bucket_cap_per_30min': bucket_cap,
+            'returned': len(slots_data),
+            'sort_policy': 'noshow_probability_desc',
             'high_risk_count': sum(1 for s in slots_data if s['noshow_probability'] >= 0.30),
             'medium_risk_count': sum(1 for s in slots_data if 0.20 <= s['noshow_probability'] < 0.30),
             'slots': slots_data
