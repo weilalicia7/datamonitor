@@ -6589,7 +6589,14 @@ def api_optimize():
 
             # Step 3: Run CP-SAT optimization with ML-informed patients
             result = optimizer.optimize(app_state['patients'])
-            app_state['appointments'].extend(result.appointments)
+            # REPLACE the day's schedule, do NOT extend.  /api/optimize/run
+            # (line ~1523), /api/optimize/autoscale (~9093), and the
+            # micro-batch handler (~7245) all use = list(...).  The previous
+            # .extend(...) here meant a second click of the Optimize button
+            # produced 2x the appointments, which in turn made the High
+            # No-Show Slots panel score every appointment twice and surface
+            # each slot as a duplicate row.
+            app_state['appointments'] = list(result.appointments)
 
             # Step 4: Post-optimization fairness check
             fairness_check = _post_optimization_fairness(result)
