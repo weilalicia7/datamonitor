@@ -6790,6 +6790,14 @@ def api_optimize():
             data = request.json or {}
             # Wall-clock timer for the run-history strip on the Optimize tab
             _opt_t0 = datetime.now()
+            # Per-stage timings so the operator can verify every phase
+            # (data filter, ML predict, uncertainty, CP-SAT, overflow)
+            # actually ran — otherwise an "instant" optimise would be
+            # indistinguishable from a hard-coded fake response.
+            _stage_ms = {}
+            def _stage(name, t_start):
+                _stage_ms[name] = int((datetime.now() - t_start).total_seconds() * 1000)
+            _t_stage = datetime.now()
             # Date-aware filter: only schedule patients whose earliest_time
             # matches the requested date. Without this filter the solver
             # was being handed all 213 active patients as if they all
@@ -6833,11 +6841,15 @@ def api_optimize():
             # the registry-wide age-band distribution, which it never does.
             app_state['today_patient_ids'] = set(p.patient_id for p in day_patients)
 
+            _stage('data_filter', _t_stage); _t_stage = datetime.now()
+
             # Step 1: Run ML predictions and assign to Patient objects
             run_ml_predictions()
+            _stage('ml_predict', _t_stage); _t_stage = datetime.now()
 
             # Step 2: Apply MC Dropout uncertainty (if available)
             uncertainty_info = _apply_uncertainty_to_patients(day_patients)
+            _stage('uncertainty', _t_stage); _t_stage = datetime.now()
 
             # Step 3: Mode-aware CP-SAT optimization. NORMAL runs the
             # solver as-is. ELEVATED/CRISIS/EMERGENCY apply the deltas
@@ -6927,6 +6939,7 @@ def api_optimize():
             # No-Show Slots panel score every appointment twice and surface
             # each slot as a duplicate row.
             app_state['appointments'] = list(result.appointments)
+            _stage('cpsat_solve', _t_stage); _t_stage = datetime.now()
 
             # Step 3b: Cross-site overflow (option B). For any patient
             # the solver couldn't fit at their preferred site, try every
@@ -7119,6 +7132,7 @@ def api_optimize():
                             result.metrics['objective_score'] - 2 * len(overflow_assignments), 1
                         )
                     logger.info(f"Cross-site overflow placed {len(overflow_assignments)} patients")
+            _stage('overflow', _t_stage); _t_stage = datetime.now()
 
             # Step 4: Post-optimization fairness check
             fairness_check = _post_optimization_fairness(result)
@@ -7169,6 +7183,7 @@ def api_optimize():
                 'mode_actions': mode_actions,
                 'deferred_count': len(deferred_ids),
                 'deferred_patients': deferred_ids,
+                'stage_ms': _stage_ms,
                 'ml_integration': {
                     'noshow_predictions_applied': sum(1 for a in result.appointments if hasattr(a, 'priority')),
                     'uncertainty': uncertainty_info,

@@ -2374,8 +2374,18 @@ async function loadOptimizeHistory() {
 function runOptimize() {
     const r = document.getElementById('opt-result');
     r.style.display = 'block';
-    r.innerHTML = '<span style="color:#10b981;">Running ML predictions + CP-SAT optimisation&hellip;</span>';
     const t0 = Date.now();
+    // Live elapsed-time counter so the operator can SEE the call is in
+    // flight. Without this, an instant fake response would be visually
+    // indistinguishable from a real ~5-min ML + CP-SAT run.
+    const renderRunning = () => {
+        const sec = Math.floor((Date.now() - t0) / 1000);
+        const mm = String(Math.floor(sec / 60)).padStart(1, '0');
+        const ss = String(sec % 60).padStart(2, '0');
+        r.innerHTML = `<span style="color:#10b981;">Running ML predictions + CP-SAT optimisation... <strong>${mm}:${ss}</strong> elapsed</span>`;
+    };
+    renderRunning();
+    const tickHandle = setInterval(renderRunning, 1000);
     const lockEl = document.getElementById('lock-home-site');
     const optDateEl = document.getElementById('opt-date');
     const datePickerEl = document.getElementById('date-select');
@@ -2384,6 +2394,7 @@ function runOptimize() {
         target_date: (optDateEl && optDateEl.value) || (datePickerEl && datePickerEl.value) || undefined,
     };
     fetch('/api/optimize', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)}).then(r=>r.json()).then(d => {
+        clearInterval(tickHandle);
         const elapsed = Date.now() - t0;
         populateOptKPIs(d, elapsed);
         const placedTotal = (d.scheduled || 0);
@@ -2415,12 +2426,29 @@ function runOptimize() {
             if (ml.uncertainty) h += `<br>MC Dropout: ${ml.uncertainty.high_uncertainty_patients || 0} high-uncertainty patients (${escapeHtml(ml.uncertainty.buffer_applied || '')})`;
             if (ml.rl_feedback && ml.rl_feedback.learned) h += `<br>RL agent: reward=${ml.rl_feedback.reward}, epsilon=${ml.rl_feedback.epsilon}`;
         }
+        // Per-stage timing breakdown — proves every phase ran (data
+        // filter, ML predictions, MC Dropout uncertainty, CP-SAT solve,
+        // cross-site overflow). Without this an instant fake response
+        // would be visually indistinguishable from a real run.
+        if (d.stage_ms && Object.keys(d.stage_ms).length) {
+            h += `<br><br><strong style="color:#0369a1;">Real-process timing (ms):</strong> `;
+            const order = ['data_filter','ml_predict','uncertainty','cpsat_solve','overflow'];
+            const labels = {data_filter:'Filter',ml_predict:'ML predict',uncertainty:'MC Dropout',cpsat_solve:'CP-SAT solve',overflow:'Overflow'};
+            const parts = order.filter(k => d.stage_ms[k] != null).map(k =>
+                `${labels[k]} <strong>${d.stage_ms[k]}</strong>`
+            );
+            h += parts.join(' &middot; ');
+            h += `<br><span style="font-size:0.85em;color:#64748b;">Total runtime: ${d.runtime_ms} ms (round-trip ${elapsed} ms)</span>`;
+        }
         h += '</div>';
         r.innerHTML = h;
         loadOptimizeHistory();
         // Refresh appointments + backup queue so the Schedule tab is up-to-date
         refreshBackupQueue().then(() => { /* schedule re-renders next time the tab is opened */ });
-    }).catch(e => { r.innerHTML = '<span style="color:#ef4444;">Optimisation failed: '+escapeHtml(e.message)+'</span>'; });
+    }).catch(e => {
+        clearInterval(tickHandle);
+        r.innerHTML = '<span style="color:#ef4444;">Optimisation failed: '+escapeHtml(e.message)+'</span>';
+    });
 }
 
 // Legacy Pareto-tab handler kept as a no-op so any stale call sites
