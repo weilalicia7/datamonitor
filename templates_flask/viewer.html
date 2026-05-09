@@ -1984,12 +1984,10 @@ function loadSystemData() {
         console.log('Online learning:', d.total_updates, 'updates, SGD fitted:', d.sgd_fitted);
     }).catch(()=>{});
 
-    // Periodic /api/refresh disabled. The Channel-2 watcher poll on
-    // /api/data/channel2-watcher already runs every minute and triggers
-    // a real reload only when the disk fingerprint changes; the older
-    // unconditional 5-min refresh raced with /api/optimize, wiping a
-    // freshly-completed schedule mid-run. /api/refresh stays available
-    // as a manual endpoint for operators who need to force a sync.
+    // Refresh data periodically (every 5 minutes)
+    setInterval(() => {
+        fetch('/api/refresh', {method:'POST'}).catch(()=>{});
+    }, 300000);
 }
 
 // ================================================================

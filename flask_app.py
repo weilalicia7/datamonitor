@@ -6564,45 +6564,10 @@ def api_active_events():
 
 @app.route('/api/refresh', methods=['POST'])
 def api_refresh():
-    """Manually trigger data refresh and optimization.
-
-    A 5-minute setInterval in the viewer JS fires this endpoint to keep
-    the registry warm.  load_data_from_source() clears app_state on the
-    way in (intentional for channel switching).  When this fires DURING
-    a live session — after /api/optimize has populated app_state with a
-    mode-aware schedule, or after squeeze-in has appended walk-ins —
-    the clear-and-reload would wipe that runtime work, and the Schedule
-    Gantt would silently revert to the disk baseline.
-
-    Snapshot the live runtime fields before reload and restore them
-    after, unless the caller explicitly asks for a clean wipe via
-    `{"force": true}`.  Channel switches go through /api/data/source
-    which still uses the destructive load path, so multi-channel
-    hygiene is unchanged.
-    """
+    """Manually trigger data refresh and optimization"""
     try:
-        force = bool((request.json or {}).get('force', False))
-
-        # Snapshot runtime state we want to preserve across the reload
-        saved_appointments = None
-        saved_scheduled = None
-        saved_today_ids = None
-        saved_mode = None
-        if not force:
-            saved_appointments = list(app_state.get('appointments', []))
-            saved_scheduled = list(app_state.get('scheduled_patients', []))
-            saved_today_ids = set(app_state.get('today_patient_ids', set()) or set())
-            saved_mode = app_state.get('mode')
-
+        # Load data
         load_data_from_source()
-
-        # Restore live state if we saved it (and the channel didn't flip)
-        if saved_appointments is not None:
-            app_state['appointments'] = saved_appointments
-            app_state['scheduled_patients'] = saved_scheduled
-            app_state['today_patient_ids'] = saved_today_ids
-            if saved_mode is not None:
-                app_state['mode'] = saved_mode
 
         # Run ML predictions
         app_state['ml_predictions'] = {'noshow_predictions': [], 'duration_predictions': []}
@@ -6622,7 +6587,6 @@ def api_refresh():
             'message': 'Data refreshed and optimization complete',
             'patients_loaded': len(app_state['patients']),
             'appointments_scheduled': len(app_state['appointments']),
-            'preserved_runtime_state': not force,
             'timestamp': datetime.now().isoformat()
         })
     except Exception as e:
