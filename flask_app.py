@@ -13190,60 +13190,25 @@ def api_schedule_full():
                 return 0
             m = _re.search(r'(\d+)\s*$', str(cid))
             return int(m.group(1)) if m else 0
-
-        # Pre-build a patient_id -> registry row map so the live overlay
-        # can carry forward Patient_Name, Regimen_Name, Cancer_Type, Cycle,
-        # Site_Name, Nurse_Name, etc. Without this, live records render
-        # with empty tooltip fields ("Regimen: ()", "Chair: 1 at" with
-        # missing site name) — visually distinct from disk-sourced rows
-        # in a way that confuses the operator.
-        _pdf = app_state.get('patients_df')
-        _pat_lookup = {}
-        if _pdf is not None and len(_pdf) > 0:
-            try:
-                _pat_lookup = _pdf.set_index('Patient_ID', drop=False).to_dict('index')
-            except Exception:
-                _pat_lookup = {}
-        # Site_Code -> Site_Name from DEFAULT_SITES (cheap; static)
-        _site_names = {s['code']: s['name'] for s in DEFAULT_SITES}
-
         live_records = []
         live_dates = set()
         for apt in app_state.get('appointments', []):
             try:
                 d = apt.start_time.strftime('%Y-%m-%d')
                 live_dates.add(d)
-                pat = _pat_lookup.get(apt.patient_id, {}) or {}
-                rec = {
+                live_records.append({
                     'Appointment_ID': f'LIVE_{apt.patient_id}_{apt.start_time.strftime("%H%M")}',
                     'Patient_ID': apt.patient_id,
-                    'Patient_Name': (
-                        f"{pat.get('Person_Given_Name', pat.get('First_Name', ''))} "
-                        f"{pat.get('Person_Family_Name', pat.get('Surname', ''))}"
-                    ).strip() or apt.patient_id,
-                    'NHS_Number': pat.get('NHS_Number', ''),
                     'Date': d,
                     'Start_Time': apt.start_time.strftime('%H:%M'),
                     'End_Time': apt.end_time.strftime('%H:%M'),
                     'Duration_Minutes': apt.duration,
                     'Site_Code': apt.site_code,
-                    'Site_Name': _site_names.get(apt.site_code, apt.site_code),
                     'Chair_Number': _chair_num(apt.chair_id),
                     'Chair_ID': apt.chair_id,
-                    'Regimen_Code': pat.get('Regimen_Code', ''),
-                    'Regimen_Name': pat.get('Regimen_Name', pat.get('Regimen_Code', '')),
-                    'Cancer_Type': pat.get('Cancer_Type', ''),
-                    'Cycle_Number': pat.get('Cycle_Number', 1),
-                    'Total_Cycles': pat.get('Total_Cycles', 1),
-                    'Day_In_Cycle': pat.get('Day_In_Cycle', 1),
                     'Priority': apt.priority,
-                    'Performance_Status': pat.get('Performance_Status', 0),
-                    'Requires_1to1_Nursing': pat.get('Requires_1to1_Nursing', False),
-                    'Requires_Bed': pat.get('Requires_Bed', False),
-                    'Status': 'Scheduled',
                     'source': 'live',
-                }
-                live_records.append(rec)
+                })
             except Exception:
                 continue  # skip malformed live entries rather than 500
 
