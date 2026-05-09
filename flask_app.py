@@ -6682,6 +6682,29 @@ def api_add_patient():
             is_urgent=data.get('is_urgent', False)
         )
 
+        # Mode-aware squeeze-in: enforce the priority floor that the bulk
+        # solver is honouring. CRISIS rejects P4 walk-ins; EMERGENCY
+        # rejects P3+P4. We deliberately do NOT apply the duration buffer
+        # to walk-ins — operators booking an urgent patient typically
+        # know the actual treatment time, and inflating it risks finding
+        # no slot at all on a dense day. The buffer remains on the bulk
+        # solver where it absorbs ML-uncertainty-driven over-runs.
+        current_mode = app_state.get('mode', OperatingMode.NORMAL)
+        if current_mode != OperatingMode.NORMAL:
+            settings = EmergencyModeHandler.MODE_SETTINGS[current_mode]
+            if patient.priority > settings['min_priority']:
+                return jsonify({
+                    'success': False,
+                    'message': (
+                        f"{current_mode.value} mode floors at "
+                        f"P{settings['min_priority']}; this insertion is "
+                        f"P{patient.priority}. Switch to a less-restrictive "
+                        f"mode or downgrade the priority."
+                    ),
+                    'mode': current_mode.value,
+                    'mode_block': True,
+                })
+
         # Store patient data for no-show predictions
         app_state['patient_data_map'][data['patient_id']] = {
             'patient_id': data['patient_id'],
@@ -6777,6 +6800,14 @@ def api_optimize():
                 target_date_obj = datetime.strptime(target_date_str, '%Y-%m-%d').date()
             except Exception:
                 target_date_obj = datetime.now().date()
+            # Snapshot the operating mode BEFORE any ML / event /
+            # uncertainty step. The /api/optimize body runs for ~5
+            # minutes and during that window other paths can reset
+            # app_state['mode'] (refresh_events, news_monitor side
+            # effects, periodic /api/refresh on the JS side). Reading
+            # current_mode at the top freezes the operator's intent
+            # at request-arrival time, which is the right semantics.
+            current_mode = app_state.get('mode', OperatingMode.NORMAL)
             full_patients = app_state['patients']
             day_patients = [p for p in full_patients if getattr(p, 'earliest_time', None) and p.earliest_time.date() == target_date_obj]
             if not day_patients:
@@ -6808,8 +6839,86 @@ def api_optimize():
             # Step 2: Apply MC Dropout uncertainty (if available)
             uncertainty_info = _apply_uncertainty_to_patients(day_patients)
 
-            # Step 3: Run CP-SAT optimization on the local day-filtered list
-            result = optimizer.optimize(day_patients)
+            # Step 3: Mode-aware CP-SAT optimization. NORMAL runs the
+            # solver as-is. ELEVATED/CRISIS/EMERGENCY apply the deltas
+            # from EmergencyModeHandler.MODE_SETTINGS — duration buffer
+            # (1.15/1.25/1.5x), priority floor (P4/P3/P2 cut-off), and
+            # +8 community-site chairs in EMERGENCY only.
+            #
+            # Mutations to patient.expected_duration and optimizer.chairs
+            # are snapshotted before the solve and restored in a finally
+            # block, so flipping back to NORMAL never carries forward
+            # inflated durations or stranded community chairs.
+            #
+            # Mode results surface in the response payload (mode_actions,
+            # deferred_count) and the Recent runs strip — they are NOT
+            # painted onto the Schedule Gantt. The Gantt remains the
+            # system-of-record view (Ch1 disk or Ch2 hospital export);
+            # mode-aware solves are a planning lens, not a retroactive
+            # schedule rewrite. Lesson learned from 11c6392→f870b63: any
+            # attempt to merge live-overlay onto the Gantt raced with
+            # the periodic /api/refresh wipe and the warm-up CG output,
+            # producing visually contaminated and confusing displays.
+            mode_actions = []
+            deferred_ids = []
+            if current_mode != OperatingMode.NORMAL:
+                settings = EmergencyModeHandler.MODE_SETTINGS[current_mode]
+                min_priority = settings['min_priority']
+                eligible = [p for p in day_patients if p.priority <= min_priority]
+                deferred = [p for p in day_patients if p.priority > min_priority]
+                deferred_ids = [p.patient_id for p in deferred]
+
+                duration_snapshot = {p.patient_id: p.expected_duration for p in eligible}
+                buffer_mult = settings['buffer_multiplier']
+                if buffer_mult != 1.0:
+                    for p in eligible:
+                        p.expected_duration = int(p.expected_duration * buffer_mult)
+                    mode_actions.append(
+                        f"Inflated durations by {int((buffer_mult-1)*100)}% "
+                        f"({current_mode.value} mode buffer)"
+                    )
+                if deferred:
+                    mode_actions.append(
+                        f"Deferred {len(deferred)} patients with priority > P{min_priority} "
+                        f"({current_mode.value} mode floor)"
+                    )
+
+                chairs_snapshot = list(optimizer.chairs)
+                if settings['community_sites']:
+                    from config import OPERATING_HOURS as _oh
+                    sh_, eh_ = _oh
+                    _target_dt = datetime.strptime(target_date_str, '%Y-%m-%d')
+                    community_chairs = []
+                    for site in EmergencyModeHandler.COMMUNITY_SITES:
+                        for i in range(site['chairs']):
+                            community_chairs.append(Chair(
+                                chair_id=f"{site['code']}-C{i+1:02d}",
+                                site_code=site['code'],
+                                is_recliner=False,
+                                available_from=_target_dt.replace(hour=sh_, minute=0),
+                                available_until=_target_dt.replace(hour=eh_, minute=0),
+                            ))
+                    optimizer.set_chairs(chairs_snapshot + community_chairs)
+                    mode_actions.append(
+                        f"Activated {len(EmergencyModeHandler.COMMUNITY_SITES)} community sites "
+                        f"(+{len(community_chairs)} chairs)"
+                    )
+
+                emergency_handler.set_mode(current_mode)
+                logger.info(
+                    f"[mode] {current_mode.value}: eligible={len(eligible)}, "
+                    f"deferred={len(deferred)}, buffer={buffer_mult}, "
+                    f"community={settings['community_sites']}"
+                )
+                try:
+                    result = optimizer.optimize(eligible)
+                finally:
+                    for p in eligible:
+                        if p.patient_id in duration_snapshot:
+                            p.expected_duration = duration_snapshot[p.patient_id]
+                    optimizer.set_chairs(chairs_snapshot)
+            else:
+                result = optimizer.optimize(day_patients)
             # REPLACE the day's schedule, do NOT extend.  /api/optimize/run
             # (line ~1523), /api/optimize/autoscale (~9093), and the
             # micro-batch handler (~7245) all use = list(...).  The previous
@@ -7040,6 +7149,8 @@ def api_optimize():
                 'runtime_ms': runtime_ms,
                 'weights': dict(optimizer.weights),
                 'channel': app_state.get('active_channel', 'synthetic'),
+                'mode': current_mode.value,
+                'deferred_count': len(deferred_ids),
             })
             del history[:-5]
 
@@ -7054,6 +7165,10 @@ def api_optimize():
                 'overflow_assignments': overflow_assignments,
                 'metrics': result.metrics,
                 'runtime_ms': runtime_ms,
+                'mode': current_mode.value,
+                'mode_actions': mode_actions,
+                'deferred_count': len(deferred_ids),
+                'deferred_patients': deferred_ids,
                 'ml_integration': {
                     'noshow_predictions_applied': sum(1 for a in result.appointments if hasattr(a, 'priority')),
                     'uncertainty': uncertainty_info,
