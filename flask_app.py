@@ -13177,6 +13177,19 @@ def api_schedule_full():
 
         # ── Step 1: live overlay (translate ScheduledAppointment objects
         # to dict shape compatible with the disk records). ──────────────
+        # Disk Chair_Number is int64 (1..N) and the viewer's renderSchedule
+        # uses STRICT equality (a.chair === ch) when iterating chair rows,
+        # so live records must expose Chair_Number as the same integer
+        # type. Optimiser chair_id strings look like "WC-C01" / "PCH-C03"
+        # (or COMM1-C01 in EMERGENCY mode); parse the trailing digits to
+        # recover the integer position. The full chair_id is preserved
+        # under Chair_ID for downstream consumers that need the unique key.
+        import re as _re
+        def _chair_num(cid: str) -> int:
+            if cid is None:
+                return 0
+            m = _re.search(r'(\d+)\s*$', str(cid))
+            return int(m.group(1)) if m else 0
         live_records = []
         live_dates = set()
         for apt in app_state.get('appointments', []):
@@ -13191,7 +13204,8 @@ def api_schedule_full():
                     'End_Time': apt.end_time.strftime('%H:%M'),
                     'Duration_Minutes': apt.duration,
                     'Site_Code': apt.site_code,
-                    'Chair_Number': apt.chair_id,
+                    'Chair_Number': _chair_num(apt.chair_id),
+                    'Chair_ID': apt.chair_id,
                     'Priority': apt.priority,
                     'source': 'live',
                 })
