@@ -527,21 +527,7 @@ DATA_SOURCE_CONFIG = {
     'appointment_file': 'appointments.xlsx',
     'refresh_interval': 900,
     'last_data_load': None,
-    # Disabled. The auto_optimize at startup runs the warm-up CG against
-    # all 1,037 patients with no date filter, then writes the result into
-    # app_state['appointments']. Two consequences contaminate the live
-    # session:
-    #   1. /api/schedule/full's live overlay merge (added in 3e441f4)
-    #      treats those entries as today's mode-aware schedule and
-    #      replaces the disk's same-date rows with sparse warm-up output
-    #      (no Patient_Name, no Regimen_Name, etc.). Schedule looks
-    #      contaminated from boot.
-    #   2. The warm-up cache entry uses 1,037-patient fingerprints, so
-    #      it never matches a user-triggered ~188-patient day_patients
-    #      solve. The cache priming benefit is nil.
-    # Operator always runs Optimise via the mode dropdown to populate
-    # the day's schedule, so skipping the auto-run loses nothing.
-    'auto_optimize': False,
+    'auto_optimize': True,
     'use_sample_data': not _real_data_available,
     'active_channel': _auto_selected_channel,  # 'synthetic' or 'real'
 }
