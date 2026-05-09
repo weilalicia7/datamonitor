@@ -348,6 +348,11 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-
 <div class="content">
     <!-- TAB: SCHEDULE (Gantt Chart) -->
     <div id="tab-schedule" class="tab-content">
+        <!-- Mode banner: hidden when mode == NORMAL; populated by
+             refreshScheduleModeBanner() from the most recent /api/optimize
+             response so the operator can see which mode produced the
+             schedule on screen and how many patients were deferred. -->
+        <div id="sched-mode-banner" style="display:none;margin:0 0 10px;padding:10px 14px;border-radius:6px;font-size:0.85em;line-height:1.45;"></div>
         <div class="controls">
             <label>Date:</label>
             <input type="date" id="date-select" style="width:160px;">
@@ -2150,6 +2155,10 @@ function insertUrgent(forceRescheduling) {
             h += '</div>';
             r.innerHTML = h;
             loadSqueezeTab();
+            // Also refresh the Schedule-tab mode banner so an operator
+            // who switches to that view sees the just-inserted walk-in
+            // attributed to the current mode.
+            try { paintScheduleModeBanner(d); } catch (e) { /* swallow */ }
         } else {
             // If the cascade exhausted gaps + double-book and the user had
             // rescheduling off, surface a one-click retry that turns it on
@@ -2327,6 +2336,40 @@ async function saveWeightsAndRun() {
 
 function _setKPI(id, v) { const e = document.getElementById(id); if (e) e.textContent = v; }
 
+// Show a mode banner on the Schedule tab summarising the run that
+// produced the visible Gantt. Hidden when mode is NORMAL (no deltas
+// applied). Shown with mode-coloured border + deferred-patient count
+// when ELEVATED / CRISIS / EMERGENCY.
+function paintScheduleModeBanner(d) {
+    const el = document.getElementById('sched-mode-banner');
+    if (!el) return;
+    const mode = (d && d.mode) || 'normal';
+    if (mode === 'normal') {
+        el.style.display = 'none';
+        el.innerHTML = '';
+        return;
+    }
+    const palette = {
+        elevated:  {bg: '#fef3c7', border: '#f59e0b', fg: '#92400e'},
+        crisis:    {bg: '#fed7aa', border: '#f97316', fg: '#7c2d12'},
+        emergency: {bg: '#fee2e2', border: '#ef4444', fg: '#7f1d1d'},
+    };
+    const c = palette[mode] || palette.elevated;
+    el.style.display = 'block';
+    el.style.background = c.bg;
+    el.style.borderLeft = '4px solid ' + c.border;
+    el.style.color = c.fg;
+    const actions = (d.mode_actions || []).map(escapeHtml).join(' &middot; ') || '(none recorded)';
+    const deferred = d.deferred_count || 0;
+    const deferredHtml = deferred > 0
+        ? `<strong>${deferred}</strong> patients deferred this run.`
+        : 'No patients deferred this run.';
+    el.innerHTML =
+        `<strong>${mode.toUpperCase()} mode active.</strong> `
+        + `Schedule below was produced under ${escapeHtml(mode)} settings: ${actions}. `
+        + deferredHtml;
+}
+
 function populateOptKPIs(d, runtime_ms_hint) {
     const m = d && d.metrics ? d.metrics : {};
     _setKPI('kpi-last', new Date().toLocaleTimeString('en-GB', {hour:'2-digit', minute:'2-digit', second:'2-digit'}));
@@ -2380,6 +2423,10 @@ function runOptimize() {
     fetch('/api/optimize', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)}).then(r=>r.json()).then(d => {
         const elapsed = Date.now() - t0;
         populateOptKPIs(d, elapsed);
+        // Mirror the run's mode + deferred count onto the Schedule tab so
+        // an operator who flips to that view immediately sees what mode
+        // produced the visible Gantt and how many patients were deferred.
+        try { paintScheduleModeBanner(d); } catch (e) { /* swallow */ }
         const placedTotal = (d.scheduled || 0);
         const homeSitePlaced = placedTotal - (d.overflow_count || 0);
         let h = `<div style="padding:10px;background:#f0fdf4;border-radius:6px;border-left:3px solid #10b981;">

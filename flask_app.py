@@ -6682,6 +6682,39 @@ def api_add_patient():
             is_urgent=data.get('is_urgent', False)
         )
 
+        # Mode-aware squeeze-in: apply the same MODE_SETTINGS deltas that
+        # /api/optimize uses, so an urgent walk-in can't bypass the mode's
+        # priority floor or its duration buffer. Without this, an operator
+        # could insert a P4 walk-in during EMERGENCY mode (which on the
+        # bulk path defers all P3+P4) — operationally inconsistent.
+        current_mode = app_state.get('mode', OperatingMode.NORMAL)
+        mode_block_reason = None
+        if current_mode != OperatingMode.NORMAL:
+            settings = EmergencyModeHandler.MODE_SETTINGS[current_mode]
+            if patient.priority > settings['min_priority']:
+                mode_block_reason = (
+                    f"{current_mode.value} mode floors at P{settings['min_priority']}; "
+                    f"this insertion is P{patient.priority}. "
+                    f"Switch to a less-restrictive mode or downgrade the priority."
+                )
+            else:
+                buffer_mult = settings['buffer_multiplier']
+                if buffer_mult != 1.0:
+                    original_dur = patient.expected_duration
+                    patient.expected_duration = int(original_dur * buffer_mult)
+                    logger.info(
+                        f"[mode] {current_mode.value}: walk-in {patient.patient_id} "
+                        f"duration {original_dur} -> {patient.expected_duration} "
+                        f"(x{buffer_mult})"
+                    )
+        if mode_block_reason:
+            return jsonify({
+                'success': False,
+                'message': mode_block_reason,
+                'mode': current_mode.value,
+                'mode_block': True,
+            })
+
         # Store patient data for no-show predictions
         app_state['patient_data_map'][data['patient_id']] = {
             'patient_id': data['patient_id'],
@@ -6735,7 +6768,17 @@ def api_add_patient():
                         'chair_id': result.appointment.chair_id,
                         'start_time': result.appointment.start_time.strftime('%H:%M'),
                         'end_time': result.appointment.end_time.strftime('%H:%M')
-                    }
+                    },
+                    # Same mode-aware envelope shape as /api/optimize so the
+                    # Schedule-tab banner can refresh from a successful
+                    # walk-in insert without re-running the bulk solve.
+                    'mode': current_mode.value,
+                    'mode_actions': (
+                        [f"Walk-in duration buffered "
+                         f"x{EmergencyModeHandler.MODE_SETTINGS[current_mode]['buffer_multiplier']} "
+                         f"({current_mode.value} mode)"]
+                        if current_mode != OperatingMode.NORMAL else []
+                    ),
                 })
             else:
                 return jsonify({
@@ -13117,26 +13160,74 @@ app.template_folder = str(templates_dir)
 def api_schedule_full():
     """
     Enriched schedule data for the viewer Gantt chart.
-    Serves the full appointments.xlsx data (34 fields) with ML predictions.
+
+    Channel-agnostic merge: the disk file (Ch1 synthetic OR Ch2 real
+    hospital export, picked via app_state['data_dir']) supplies the
+    multi-day baseline; app_state['appointments'] (today's optimise
+    output + walk-ins inserted via squeeze-in) overrides for any date
+    it covers. Without this merge a Ch2-mode operator would see
+    yesterday's hospital snapshot with NO awareness of today's
+    optimise output, mode-aware deferrals, or walk-ins. Ch3 (NHS open
+    data) doesn't enter this view — it's calibration metadata, not
+    appointment data.
     """
     try:
-        # Use the rich appointments data from Excel (not the sparse optimizer output)
         data_dir = app_state.get('data_dir', 'datasets/sample_data')
         appt_path = Path(data_dir) / 'appointments.xlsx'
+
+        # ── Step 1: live overlay (translate ScheduledAppointment objects
+        # to dict shape compatible with the disk records). ──────────────
+        live_records = []
+        live_dates = set()
+        for apt in app_state.get('appointments', []):
+            try:
+                d = apt.start_time.strftime('%Y-%m-%d')
+                live_dates.add(d)
+                live_records.append({
+                    'Appointment_ID': f'LIVE_{apt.patient_id}_{apt.start_time.strftime("%H%M")}',
+                    'Patient_ID': apt.patient_id,
+                    'Date': d,
+                    'Start_Time': apt.start_time.strftime('%H:%M'),
+                    'End_Time': apt.end_time.strftime('%H:%M'),
+                    'Duration_Minutes': apt.duration,
+                    'Site_Code': apt.site_code,
+                    'Chair_Number': apt.chair_id,
+                    'Priority': apt.priority,
+                    'source': 'live',
+                })
+            except Exception:
+                continue  # skip malformed live entries rather than 500
+
+        # ── Step 2: ML prediction map (shared across disk + live) ───────
+        raw_predictions = app_state.get('ml_predictions', {})
+        pred_map = {}
+        if isinstance(raw_predictions, dict) and 'noshow_predictions' in raw_predictions:
+            for p in raw_predictions.get('noshow_predictions', []):
+                pred_map[p['patient_id']] = p
+        elif isinstance(raw_predictions, dict):
+            pred_map = raw_predictions
+
+        # Apply ML enrichment to the live overlay first
+        for rec in live_records:
+            pid = rec.get('Patient_ID')
+            if pid and pid in pred_map:
+                rec['noshow_probability'] = pred_map[pid].get(
+                    'probability', pred_map[pid].get('noshow_probability', 0)
+                )
+                rec['risk_level'] = pred_map[pid].get('risk_level', 'unknown')
 
         if appt_path.exists():
             df = pd.read_excel(appt_path)
 
-            # Add ML predictions — build pid->prediction map from list
-            raw_predictions = app_state.get('ml_predictions', {})
-            pred_map = {}
-            if isinstance(raw_predictions, dict) and 'noshow_predictions' in raw_predictions:
-                for p in raw_predictions.get('noshow_predictions', []):
-                    pred_map[p['patient_id']] = p
-            elif isinstance(raw_predictions, dict):
-                pred_map = raw_predictions  # Already a map
+            # ── Step 3: drop disk rows for dates the live overlay covers,
+            # so today's mode-aware schedule (and any walk-ins) aren't
+            # double-counted alongside the disk's pre-optimise rows for
+            # the same date. ─────────────────────────────────────────────
+            if live_dates and 'Date' in df.columns:
+                df['_d'] = df['Date'].astype(str).str[:10]
+                df = df[~df['_d'].isin(live_dates)].drop(columns='_d')
 
-            if pred_map:
+            if pred_map and 'Patient_ID' in df.columns:
                 df['noshow_probability'] = df['Patient_ID'].map(
                     lambda pid: pred_map.get(pid, {}).get('probability', pred_map.get(pid, {}).get('noshow_probability', 0))
                 )
@@ -13144,36 +13235,30 @@ def api_schedule_full():
                     lambda pid: pred_map.get(pid, {}).get('risk_level', 'unknown')
                 )
 
-            # Convert to JSON-safe records
-            # Replace NaN/NaT with None, convert numpy types to Python native
-            df = df.fillna('')  # Replace all NaN with empty string
-            df = df.where(df.notna(), None)  # Belt and suspenders
-
-            # Use pandas to_dict which handles type conversion
-            records = json.loads(df.to_json(orient='records', date_format='iso', default_handler=str))
+            # JSON-safe NaN handling
+            df = df.fillna('')
+            df = df.where(df.notna(), None)
+            disk_records = json.loads(df.to_json(orient='records', date_format='iso', default_handler=str))
+            records = disk_records + live_records
 
             return jsonify({
                 'schedule': records,
                 'count': len(records),
+                'live_count': len(live_records),
+                'live_dates': sorted(live_dates),
+                'channel': app_state.get('active_channel', 'synthetic'),
                 'has_ml_predictions': bool(pred_map)
             })
         else:
-            # Fallback to optimizer output
-            schedule = app_state.get('appointments', [])
-            enriched = []
-            for appt in schedule:
-                entry = {}
-                if hasattr(appt, '__dict__'):
-                    entry = {k: str(v) if hasattr(v, 'isoformat') else v
-                             for k, v in appt.__dict__.items() if not k.startswith('_')}
-                elif isinstance(appt, dict):
-                    entry = dict(appt)
-                enriched.append(entry)
-
+            # No disk file (Ch2 may not have one yet on a fresh hospital
+            # connection). Live overlay alone is the entire schedule.
             return jsonify({
-                'schedule': enriched,
-                'count': len(enriched),
-                'has_ml_predictions': False
+                'schedule': live_records,
+                'count': len(live_records),
+                'live_count': len(live_records),
+                'live_dates': sorted(live_dates),
+                'channel': app_state.get('active_channel', 'synthetic'),
+                'has_ml_predictions': bool(pred_map),
             })
     except Exception as e:
         logger.error(f"Schedule full error: {e}")
