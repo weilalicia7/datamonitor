@@ -436,7 +436,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-
                     <label style="font-size:0.8em;"><input type="checkbox" id="sq-double" checked> Allow double-booking (high no-show slots)</label>
                 </div>
                 <div style="margin-top:12px;display:flex;gap:8px;align-items:center;">
-                    <label style="font-size:0.8em;"><input type="checkbox" id="sq-resched"> Allow rescheduling lower-priority patients</label>
+                    <label style="font-size:0.8em;"><input type="checkbox" id="sq-resched" checked> Allow rescheduling lower-priority patients <span style="color:#64748b;font-weight:400;">(last-resort tier of the cascade — only fires if gap and double-book both fail)</span></label>
                 </div>
                 <div style="margin-top:14px;font-size:0.78em;color:#475569;background:#f1f5f9;border-left:3px solid #3b82f6;padding:6px 10px;border-radius:4px;">
                     <strong>Preview Best Slots</strong> ranks all candidates by combined score (favours high-utilisation double-books);
@@ -2126,10 +2126,12 @@ function manualInsertSlot(chair_id, start_time, btn) {
     });
 }
 
-function insertUrgent() {
+function insertUrgent(forceRescheduling) {
     const r = document.getElementById('sq-result');
     r.style.display = 'block';
     r.innerHTML = '<span style="color:#ef4444;">Inserting urgent patient...</span>';
+    const reschedEl = document.getElementById('sq-resched');
+    const allowResched = forceRescheduling ? true : (reschedEl && reschedEl.checked);
     fetch('/api/add_patient', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({
         patient_id: document.getElementById('sq-pid').value,
         priority: document.getElementById('sq-priority').value,
@@ -2139,7 +2141,7 @@ function insertUrgent() {
         no_shows: parseInt(document.getElementById('sq-noshows').value),
         is_urgent: true,
         allow_double_booking: document.getElementById('sq-double').checked,
-        allow_rescheduling: document.getElementById('sq-resched').checked
+        allow_rescheduling: allowResched,
     })}).then(r=>r.json()).then(d => {
         if (d.success) {
             let h = `<div style="padding:10px;background:#f0fdf4;border-radius:6px;border-left:3px solid #10b981;">
@@ -2158,9 +2160,22 @@ function insertUrgent() {
             r.innerHTML = h;
             loadSqueezeTab();
         } else {
-            r.innerHTML = `<span style="color:#ef4444;">Failed: ${d.message}</span>`;
+            // If the cascade exhausted gaps + double-book and the user had
+            // rescheduling off, surface a one-click retry that turns it on
+            // for THIS attempt only.  Cleaner than re-asking the operator
+            // to find the checkbox below the form, then click again.
+            const msg = d.message || '';
+            const reschedDisabled = /Disabled:[^.]*reschedul/i.test(msg) && !allowResched;
+            if (reschedDisabled) {
+                r.innerHTML = `<div style="padding:10px;background:#fef3c7;border-radius:6px;border-left:3px solid #f59e0b;">
+                    <strong style="color:#92400e;">Failed:</strong> ${escapeHtml(msg)}<br>
+                    <button onclick="insertUrgent(true)" style="margin-top:8px;padding:6px 14px;background:#10b981;color:white;border:none;border-radius:5px;cursor:pointer;font-size:0.85em;">Retry with rescheduling enabled</button>
+                </div>`;
+            } else {
+                r.innerHTML = `<span style="color:#ef4444;">Failed: ${escapeHtml(msg)}</span>`;
+            }
         }
-    }).catch(e => { r.innerHTML = '<span style="color:#ef4444;">Error: '+e.message+'</span>'; });
+    }).catch(e => { r.innerHTML = '<span style="color:#ef4444;">Error: '+escapeHtml(e.message)+'</span>'; });
 }
 
 function loadSqueezeTab() {
