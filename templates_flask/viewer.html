@@ -43,16 +43,16 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-
 }
 
 .stats {
-    display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-    gap: 12px; margin-bottom: 20px;
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+    gap: 8px; margin-bottom: 12px;
 }
 .stat-card {
-    background: white; padding: 16px 20px; border-radius: 10px;
+    background: white; padding: 8px 12px; border-radius: 8px;
     box-shadow: 0 1px 3px rgba(0,0,0,0.08);
 }
-.stat-card .label { font-size: 0.75em; text-transform: uppercase; color: #888; letter-spacing: 0.5px; }
-.stat-card .value { font-size: 1.8em; font-weight: 700; color: #1a1a2e; margin-top: 4px; }
-.stat-card .detail { font-size: 0.8em; color: #888; margin-top: 2px; }
+.stat-card .label { font-size: 0.65em; text-transform: uppercase; color: #888; letter-spacing: 0.4px; }
+.stat-card .value { font-size: 1.2em; font-weight: 700; color: #1a1a2e; margin-top: 2px; }
+.stat-card .detail { font-size: 0.7em; color: #888; margin-top: 1px; }
 
 .schedule-container {
     background: white; border-radius: 10px; box-shadow: 0 1px 3px rgba(0,0,0,0.08);
@@ -78,7 +78,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-
 .chair-timeline { flex: 1; position: relative; min-height: 36px; }
 .appt-block {
     position: absolute; top: 3px; bottom: 3px; border-radius: 4px;
-    font-size: 0.68em; padding: 2px 6px; overflow: hidden;
+    font-size: 0.68em; padding: 2px 4px 2px 6px; overflow: hidden;
     cursor: pointer; transition: opacity 0.15s; white-space: nowrap;
     display: flex; align-items: center; gap: 4px;
     border: 1px solid rgba(0,0,0,0.1);
@@ -88,11 +88,140 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-
 .appt-block:hover { opacity: 0.85; z-index: 10; box-shadow: 0 2px 8px rgba(0,0,0,0.2); min-width: auto; overflow: visible; }
 .appt-block .one-to-one { background: #e94560; color: white; border-radius: 3px; padding: 0 3px; font-size: 0.85em; font-weight: 700; }
 
-/* Risk border colors for ML no-show prediction */
+/* Risk border colors for ML no-show prediction.
+   Original 3px border — block size unchanged. The wider visual
+   reference for users sits in the legend swatches below, which are
+   not constrained by the timeline grid. */
 .risk-low { border-left: 3px solid #22c55e; }
 .risk-medium { border-left: 3px solid #eab308; }
 .risk-high { border-left: 3px solid #ef4444; }
-.risk-very-high { border-left: 3px solid #dc2626; background-image: repeating-linear-gradient(45deg, transparent, transparent 5px, rgba(220,38,38,0.1) 5px, rgba(220,38,38,0.1) 10px); }
+.risk-very-high { border-left: 3px solid #dc2626; background-image: repeating-linear-gradient(45deg, transparent, transparent 5px, rgba(220,38,38,0.18) 5px, rgba(220,38,38,0.18) 10px); }
+
+/* Risk filter buttons in the legend strip — click to show only matching
+   slots. Multi-select supported (click each level you want to keep
+   visible); click an active button again to deselect. When at least one
+   filter is active, every other button is dimmed so the user can see
+   the focus state at a glance. */
+.risk-filter-btn {
+    font-size: 0.7em;
+    display: inline-flex; align-items: center; gap: 6px;
+    background: white; border: 1px solid transparent;
+    border-radius: 6px; padding: 3px 8px;
+    cursor: pointer; transition: all 0.15s;
+    color: #1f2937; font-family: inherit;
+}
+.risk-filter-btn:hover { background: #f1f5f9; }
+.risk-filter-btn.active {
+    background: #1e293b; color: white;
+    border-color: #0f172a; box-shadow: 0 1px 3px rgba(0,0,0,0.18);
+}
+/* When ANY filter is active, dim the inactive buttons */
+.legend-has-active .risk-filter-btn:not(.active) { opacity: 0.45; }
+
+/* Regimen filter buttons keep their coloured fill (each .reg-* class
+   provides the background). Selection is shown via a dark ring rather
+   than overriding the colour, so the user still recognises the regimen
+   from its hue while clearly seeing what's active. */
+.regimen-filter-btn {
+    padding: 2px 8px; border-radius: 4px; font-size: 0.68em;
+    cursor: pointer; transition: all 0.15s; font-family: inherit;
+    border: 2px solid transparent;
+}
+.regimen-filter-btn:hover { transform: scale(1.05); }
+.regimen-filter-btn.active {
+    border-color: #0f172a;
+    box-shadow: 0 0 0 2px rgba(15,23,42,0.25), 0 1px 3px rgba(0,0,0,0.18);
+}
+.legend-has-active .regimen-filter-btn:not(.active) { opacity: 0.4; }
+
+/* Optimize-tab KPI strip and weight sliders */
+.opt-kpi { padding: 8px 10px; background: #f8fafc; border-radius: 6px; min-width: 0; }
+.opt-kpi .kpi-label { font-size: 0.62em; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.4px; font-weight: 600; }
+.opt-kpi .kpi-value { font-size: 1.05em; font-weight: 700; color: #0f172a; margin-top: 2px; }
+.weight-row { display: grid; grid-template-columns: 130px 1fr 50px; align-items: center; gap: 10px; padding: 4px 0; font-size: 0.82em; }
+.weight-row .label { color: #1f2937; font-weight: 600; }
+.weight-row .label small { display: block; font-size: 0.78em; font-weight: 400; color: #94a3b8; line-height: 1.2; margin-top: 1px; }
+.weight-row input[type=range] { width: 100%; }
+.weight-row .val { text-align: right; font-variant-numeric: tabular-nums; color: #475569; }
+.opt-history-row { display: grid; grid-template-columns: 1.4fr 0.7fr 0.6fr 0.7fr 0.7fr 0.7fr 0.6fr 0.6fr; gap: 12px; padding: 5px 0; font-size: 0.78em; border-bottom: 1px solid #f1f5f9; }
+.opt-history-row.head { font-size: 0.66em; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.4px; font-weight: 600; border-bottom: 2px solid #e2e8f0; }
+
+/* Backup-queue pill on high/very-high risk blocks. Only visible while
+   the schedule has the High or Very-High no-show-risk filter active —
+   keeps the default Gantt view clean and surfaces the action exactly
+   when the operator is reviewing at-risk slots. */
+.appt-block .backup-pill {
+    display: none; position: absolute; top: 2px; right: 2px;
+    background: rgba(15,23,42,0.85); color: white;
+    border: none; border-radius: 9px;
+    padding: 1px 6px; font-size: 0.78em; font-weight: 700;
+    cursor: pointer; z-index: 5;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.25);
+}
+.gantt-show-backup-pill .appt-block.risk-high .backup-pill,
+.gantt-show-backup-pill .appt-block.risk-very-high .backup-pill { display: inline-flex; align-items: center; }
+.appt-block .backup-pill:hover { background: #0b1224; }
+.appt-block .backup-queued-mark {
+    position: absolute; top: 2px; right: 2px;
+    background: #facc15; color: #422006;
+    border-radius: 9px; padding: 0px 6px;
+    font-size: 0.78em; font-weight: 700; z-index: 4;
+}
+/* When a slot already has a backup queued, the queued mark replaces
+   the pill so the operator can't double-queue. */
+.appt-block.has-backup .backup-pill { display: none !important; }
+
+/* Backup-popover backdrop — invisible click-catcher. Sitting at
+   z-index 49 it intercepts clicks anywhere on the page that aren't
+   on the popover (z-index 50) or its children. The popover-open
+   state turns this on so click-to-dismiss is reliable regardless of
+   what other layers (tooltip z-1000, modals, etc.) happen to be live.
+   Pointer-events default ON when the .visible class is present. */
+#backup-backdrop {
+    position: fixed; inset: 0; z-index: 49;
+    background: transparent; display: none;
+    cursor: default;
+}
+#backup-backdrop.visible { display: block; }
+
+/* Backup popover (no-tab-switch candidate picker) */
+#backup-popover {
+    position: fixed; z-index: 50;
+    background: white; border-radius: 10px;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.18);
+    padding: 12px 14px; min-width: 320px; max-width: 380px;
+    font-size: 0.78em; color: #1f2937; display: none;
+}
+#backup-popover.visible { display: block; }
+#backup-popover h4 { margin: 0 0 6px 0; font-size: 1em; color: #0f172a; }
+#backup-popover .candidate-row {
+    display: flex; align-items: center; gap: 8px;
+    padding: 6px; border-radius: 6px;
+    border: 1px solid #e5e7eb; margin-bottom: 4px;
+    cursor: pointer; transition: all 0.12s;
+}
+#backup-popover .candidate-row:hover { background: #f1f5f9; border-color: #94a3b8; }
+#backup-popover .candidate-row .name { font-weight: 600; flex: 1; }
+#backup-popover .candidate-row .badge {
+    padding: 1px 6px; border-radius: 4px;
+    font-size: 0.85em; font-weight: 700;
+    background: #e0f2fe; color: #075985;
+}
+#backup-popover .channel-chip {
+    margin-top: 6px; padding-top: 6px;
+    border-top: 1px solid #e5e7eb;
+    font-size: 0.85em; color: #64748b;
+}
+#backup-popover .channel-chip code {
+    background: #f1f5f9; padding: 1px 5px;
+    border-radius: 3px; color: #334155;
+}
+#backup-popover .close-btn {
+    position: absolute; top: 6px; right: 8px;
+    background: none; border: none;
+    font-size: 1.2em; color: #94a3b8; cursor: pointer;
+}
+#backup-popover .close-btn:hover { color: #1e293b; }
 
 /* Regimen colors - high contrast, distinct per cancer type */
 /* Colorectal (blues) */
@@ -201,40 +330,55 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-
         </div>
         <div class="stats" id="schedule-stats"></div>
         <!-- Color Legend -->
-        <div style="background:white;border-radius:8px;padding:10px 16px;margin-bottom:16px;box-shadow:0 1px 3px rgba(0,0,0,0.06);display:flex;flex-wrap:wrap;gap:6px;align-items:center;">
+        <div id="regimen-legend" style="background:white;border-radius:8px;padding:10px 16px;margin-bottom:16px;box-shadow:0 1px 3px rgba(0,0,0,0.06);display:flex;flex-wrap:wrap;gap:6px;align-items:center;">
             <span style="font-size:0.72em;color:#888;font-weight:600;margin-right:6px;">REGIMEN:</span>
-            <span class="reg-FOLFOX" style="padding:2px 8px;border-radius:4px;font-size:0.68em;">FOLFOX</span>
-            <span class="reg-FOLFIRI" style="padding:2px 8px;border-radius:4px;font-size:0.68em;">FOLFIRI</span>
-            <span class="reg-CAPOX" style="padding:2px 8px;border-radius:4px;font-size:0.68em;">CAPOX</span>
-            <span class="reg-RCHOP" style="padding:2px 8px;border-radius:4px;font-size:0.68em;">R-CHOP</span>
-            <span class="reg-RITUX" style="padding:2px 8px;border-radius:4px;font-size:0.68em;">Rituximab</span>
-            <span class="reg-FECT" style="padding:2px 8px;border-radius:4px;font-size:0.68em;">FEC-T</span>
-            <span class="reg-DOCE" style="padding:2px 8px;border-radius:4px;font-size:0.68em;">Docetaxel</span>
-            <span class="reg-PACW" style="padding:2px 8px;border-radius:4px;font-size:0.68em;">Paclitaxel</span>
-            <span class="reg-AC" style="padding:2px 8px;border-radius:4px;font-size:0.68em;">AC</span>
-            <span class="reg-TRAS" style="padding:2px 8px;border-radius:4px;font-size:0.68em;">Trastuzumab</span>
-            <span class="reg-CARBPAC" style="padding:2px 8px;border-radius:4px;font-size:0.68em;">Carbo/Pac</span>
-            <span class="reg-PEME" style="padding:2px 8px;border-radius:4px;font-size:0.68em;">Peme/Carbo</span>
-            <span class="reg-CISE" style="padding:2px 8px;border-radius:4px;font-size:0.68em;">Cis/Etop</span>
-            <span class="reg-PEMBRO" style="padding:2px 8px;border-radius:4px;font-size:0.68em;">Pembrolizumab</span>
-            <span class="reg-NIVO" style="padding:2px 8px;border-radius:4px;font-size:0.68em;">Nivolumab</span>
-            <span class="reg-IPNIVO" style="padding:2px 8px;border-radius:4px;font-size:0.68em;">Ipi/Nivo</span>
-            <span class="reg-GEM" style="padding:2px 8px;border-radius:4px;font-size:0.68em;">Gemcitabine</span>
-            <span class="reg-BEVA" style="padding:2px 8px;border-radius:4px;font-size:0.68em;">Bevacizumab</span>
-            <span class="reg-ZOLE" style="padding:2px 8px;border-radius:4px;font-size:0.68em;">Zoledronic</span>
-            <span class="reg-VINO" style="padding:2px 8px;border-radius:4px;font-size:0.68em;">Vinorelbine</span>
+            <button type="button" class="reg-FOLFOX regimen-filter-btn" data-filter="FOLFOX" onclick="toggleRegimenFilter(this)">FOLFOX</button>
+            <button type="button" class="reg-FOLFIRI regimen-filter-btn" data-filter="FOLFIRI" onclick="toggleRegimenFilter(this)">FOLFIRI</button>
+            <button type="button" class="reg-CAPOX regimen-filter-btn" data-filter="CAPOX" onclick="toggleRegimenFilter(this)">CAPOX</button>
+            <button type="button" class="reg-RCHOP regimen-filter-btn" data-filter="RCHOP" onclick="toggleRegimenFilter(this)">R-CHOP</button>
+            <button type="button" class="reg-RITUX regimen-filter-btn" data-filter="RITUX" onclick="toggleRegimenFilter(this)">Rituximab</button>
+            <button type="button" class="reg-FECT regimen-filter-btn" data-filter="FECT" onclick="toggleRegimenFilter(this)">FEC-T</button>
+            <button type="button" class="reg-DOCE regimen-filter-btn" data-filter="DOCE" onclick="toggleRegimenFilter(this)">Docetaxel</button>
+            <button type="button" class="reg-PACW regimen-filter-btn" data-filter="PACW" onclick="toggleRegimenFilter(this)">Paclitaxel</button>
+            <button type="button" class="reg-AC regimen-filter-btn" data-filter="AC" onclick="toggleRegimenFilter(this)">AC</button>
+            <button type="button" class="reg-TRAS regimen-filter-btn" data-filter="TRAS" onclick="toggleRegimenFilter(this)">Trastuzumab</button>
+            <button type="button" class="reg-CARBPAC regimen-filter-btn" data-filter="CARBPAC" onclick="toggleRegimenFilter(this)">Carbo/Pac</button>
+            <button type="button" class="reg-PEME regimen-filter-btn" data-filter="PEME" onclick="toggleRegimenFilter(this)">Peme/Carbo</button>
+            <button type="button" class="reg-CISE regimen-filter-btn" data-filter="CISE" onclick="toggleRegimenFilter(this)">Cis/Etop</button>
+            <button type="button" class="reg-PEMBRO regimen-filter-btn" data-filter="PEMBRO" onclick="toggleRegimenFilter(this)">Pembrolizumab</button>
+            <button type="button" class="reg-NIVO regimen-filter-btn" data-filter="NIVO" onclick="toggleRegimenFilter(this)">Nivolumab</button>
+            <button type="button" class="reg-IPNIVO regimen-filter-btn" data-filter="IPNIVO" onclick="toggleRegimenFilter(this)">Ipi/Nivo</button>
+            <button type="button" class="reg-GEM regimen-filter-btn" data-filter="GEM" onclick="toggleRegimenFilter(this)">Gemcitabine</button>
+            <button type="button" class="reg-BEVA regimen-filter-btn" data-filter="BEVA" onclick="toggleRegimenFilter(this)">Bevacizumab</button>
+            <button type="button" class="reg-ZOLE regimen-filter-btn" data-filter="ZOLE" onclick="toggleRegimenFilter(this)">Zoledronic</button>
+            <button type="button" class="reg-VINO regimen-filter-btn" data-filter="VINO" onclick="toggleRegimenFilter(this)">Vinorelbine</button>
         </div>
         <!-- Risk Legend -->
-        <div style="background:white;border-radius:8px;padding:8px 16px;margin-bottom:16px;box-shadow:0 1px 3px rgba(0,0,0,0.06);display:flex;gap:16px;align-items:center;">
+        <div id="risk-legend" style="background:white;border-radius:8px;padding:8px 16px;margin-bottom:16px;box-shadow:0 1px 3px rgba(0,0,0,0.06);display:flex;gap:16px;align-items:center;flex-wrap:wrap;">
             <span style="font-size:0.72em;color:#888;font-weight:600;">NO-SHOW RISK:</span>
-            <span style="font-size:0.7em;display:flex;align-items:center;gap:4px;"><span style="width:14px;height:14px;border-radius:3px;border-left:3px solid #22c55e;background:#f0fdf4;display:inline-block;"></span> Low (&lt;10%)</span>
-            <span style="font-size:0.7em;display:flex;align-items:center;gap:4px;"><span style="width:14px;height:14px;border-radius:3px;border-left:3px solid #eab308;background:#fefce8;display:inline-block;"></span> Medium (10-25%)</span>
-            <span style="font-size:0.7em;display:flex;align-items:center;gap:4px;"><span style="width:14px;height:14px;border-radius:3px;border-left:3px solid #ef4444;background:#fef2f2;display:inline-block;"></span> High (25-40%)</span>
-            <span style="font-size:0.7em;display:flex;align-items:center;gap:4px;"><span style="width:14px;height:14px;border-radius:3px;border-left:3px solid #dc2626;background:repeating-linear-gradient(45deg,transparent,transparent 3px,rgba(220,38,38,0.1) 3px,rgba(220,38,38,0.1) 6px);display:inline-block;"></span> Very High (&gt;40%)</span>
-            <span style="font-size:0.7em;display:flex;align-items:center;gap:4px;"><span style="background:#e94560;color:white;border-radius:3px;padding:0 4px;font-size:0.85em;font-weight:700;">1:1</span> Requires 1:1 nursing</span>
+            <button type="button" class="risk-filter-btn" data-filter="low" onclick="toggleRiskFilter(this)" title="Click to show only Low-risk slots"><span style="width:28px;height:18px;border-radius:3px;border-left:8px solid #22c55e;background:#dcfce7;display:inline-block;"></span> Low (&lt;10%)</button>
+            <button type="button" class="risk-filter-btn" data-filter="medium" onclick="toggleRiskFilter(this)" title="Click to show only Medium-risk slots"><span style="width:28px;height:18px;border-radius:3px;border-left:8px solid #eab308;background:#fef9c3;display:inline-block;"></span> Medium (10-25%)</button>
+            <button type="button" class="risk-filter-btn" data-filter="high" onclick="toggleRiskFilter(this)" title="Click to show only High-risk slots"><span style="width:28px;height:18px;border-radius:3px;border-left:8px solid #ef4444;background:#fee2e2;display:inline-block;"></span> High (25-40%)</button>
+            <button type="button" class="risk-filter-btn" data-filter="very-high" onclick="toggleRiskFilter(this)" title="Click to show only Very High-risk slots"><span style="width:28px;height:18px;border-radius:3px;border-left:8px solid #dc2626;background:repeating-linear-gradient(45deg,#fee2e2,#fee2e2 4px,rgba(220,38,38,0.25) 4px,rgba(220,38,38,0.25) 8px);display:inline-block;"></span> Very High (&gt;40%)</button>
+            <button type="button" class="risk-filter-btn" data-filter="one-to-one" onclick="toggleRiskFilter(this)" title="Click to show only 1:1 nursing slots"><span style="background:#e94560;color:white;border-radius:3px;padding:0 4px;font-size:0.85em;font-weight:700;">1:1</span> Requires 1:1 nursing</button>
         </div>
         <div class="schedule-container" id="gantt" style="max-height: 70vh; overflow-y: auto;">
             <div class="loading"><i>&#8987;</i>Loading schedule from API...</div>
+        </div>
+        <!-- Click-catcher backdrop sits behind the popover. Clicks on
+             this element close the popover; clicks on the popover itself
+             stop on the popover (stopPropagation in inner handlers). This
+             replaced a document-wide click-outside handler that was
+             racing with the tooltip's z-index 1000 and producing a
+             "popover flashes open then shut" symptom. -->
+        <div id="backup-backdrop" onclick="closeBackupPopover()"></div>
+        <!-- Backup-queue popover (rendered globally; positioned at click) -->
+        <div id="backup-popover" role="dialog" aria-label="Plan backup for high-risk slot">
+            <button type="button" class="close-btn" onclick="event.stopPropagation(); closeBackupPopover()">&times;</button>
+            <h4 id="backup-popover-title">Plan backup for slot</h4>
+            <div id="backup-popover-slot-info" style="font-size:0.92em;color:#475569;margin-bottom:8px;"></div>
+            <div id="backup-popover-candidates"><em style="color:#94a3b8;">Loading candidates&hellip;</em></div>
+            <div class="channel-chip" id="backup-popover-channel-chip">Data: registry channel &middot; risk weighting via <code>CH3</code> events.</div>
         </div>
     </div>
 
@@ -286,31 +430,71 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-
 
     <!-- TAB: OPTIMIZE -->
     <div id="tab-optimize" class="tab-content hidden">
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;">
-            <!-- Run Optimization -->
-            <div style="background:white;border-radius:10px;padding:20px;box-shadow:0 1px 3px rgba(0,0,0,0.08);">
-                <h3 style="font-size:0.95em;color:#1a1a2e;margin-bottom:14px;">Run Schedule Optimization</h3>
-                <p style="font-size:0.78em;color:#888;margin-bottom:14px;">Uses OR-Tools CP-SAT solver to find the optimal assignment of patients to chairs, balancing 6 objectives with fairness constraints.</p>
-                <button onclick="runOptimize()" style="width:100%;padding:12px;background:#10b981;color:white;border:none;border-radius:8px;cursor:pointer;font-size:0.9em;font-weight:600;">Run Optimization</button>
-                <div id="opt-result" style="margin-top:14px;font-size:0.82em;color:#555;display:none;"></div>
-            </div>
 
-            <!-- Pareto Frontier -->
-            <div style="background:white;border-radius:10px;padding:20px;box-shadow:0 1px 3px rgba(0,0,0,0.08);">
-                <h3 style="font-size:0.95em;color:#1a1a2e;margin-bottom:14px;">Pareto Frontier (Multi-Objective Trade-offs)</h3>
-                <p style="font-size:0.78em;color:#888;margin-bottom:14px;">Generate 5 different schedules showing trade-offs between throughput, waiting time, risk, and robustness.</p>
-                <button onclick="runParetoFromTab()" style="width:100%;padding:12px;background:#8b5cf6;color:white;border:none;border-radius:8px;cursor:pointer;font-size:0.9em;font-weight:600;">Generate Pareto Frontier</button>
-                <div id="pareto-tab-result" style="margin-top:14px;font-size:0.82em;color:#555;display:none;"></div>
+        <!-- ROW 1: Run + KPI strip -->
+        <div style="background:white;border-radius:10px;padding:18px 20px;margin-bottom:14px;box-shadow:0 1px 3px rgba(0,0,0,0.08);display:grid;grid-template-columns:240px 1fr;gap:24px;align-items:center;">
+            <div>
+                <label style="display:block;font-size:0.7em;color:#475569;margin:0 0 4px;font-weight:600;">Target date</label>
+                <input type="date" id="opt-date" style="width:100%;padding:8px;border:1px solid #cbd5e1;border-radius:6px;font-size:0.85em;margin-bottom:8px;">
+                <button onclick="runOptimize()" style="width:100%;padding:14px;background:#10b981;color:white;border:none;border-radius:8px;cursor:pointer;font-size:0.95em;font-weight:700;">Run optimisation</button>
+                <label style="display:flex;align-items:center;gap:6px;font-size:0.7em;color:#475569;margin:8px 0 0;cursor:pointer;">
+                    <input type="checkbox" id="lock-home-site" style="margin:0;">
+                    Lock to home site (no overflow)
+                </label>
+                <p style="font-size:0.7em;color:#94a3b8;margin:4px 0 0;line-height:1.4;">CP-SAT, ML-informed. Cross-site overflow is on by default.</p>
+            </div>
+            <div id="opt-kpis" style="display:grid;grid-template-columns:repeat(5,1fr);gap:14px;">
+                <div class="opt-kpi"><div class="kpi-label">Last run</div><div class="kpi-value" id="kpi-last">&mdash;</div></div>
+                <div class="opt-kpi"><div class="kpi-label">Patients placed</div><div class="kpi-value" id="kpi-placed">&mdash;</div></div>
+                <div class="opt-kpi"><div class="kpi-label">Chair util.</div><div class="kpi-value" id="kpi-util">&mdash;</div></div>
+                <div class="opt-kpi"><div class="kpi-label">Objective</div><div class="kpi-value" id="kpi-obj">&mdash;</div></div>
+                <div class="opt-kpi"><div class="kpi-label">Runtime</div><div class="kpi-value" id="kpi-runtime">&mdash;</div></div>
+            </div>
+            <div id="opt-result" style="grid-column:1/-1;margin-top:6px;font-size:0.82em;color:#555;display:none;"></div>
+            <!-- Realism note: utilisation expectations -->
+            <div style="grid-column:1/-1;margin-top:8px;padding:10px 14px;background:#fef9c3;border-left:3px solid #eab308;border-radius:6px;font-size:0.78em;color:#713f12;line-height:1.5;">
+                <strong>Why utilisation isn&apos;t 100%.</strong>
+                Velindre runs at 50&ndash;65% in steady state &mdash; healthy practice, leaves slack for urgent insertions, turnaround, over-runs, and cancellations. The optimiser&apos;s value is <em>better placement</em> within that load, not pushing the headline number higher.
             </div>
         </div>
 
-        <!-- Fairness Audit -->
-        <div style="background:white;border-radius:10px;padding:20px;margin-top:16px;box-shadow:0 1px 3px rgba(0,0,0,0.08);">
-            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
-                <h3 style="font-size:0.95em;color:#1a1a2e;margin:0;">Fairness Audit (Equality Act 2010)</h3>
-                <button onclick="runFairnessFromTab()" style="padding:6px 16px;background:#06b6d4;color:white;border:none;border-radius:5px;cursor:pointer;font-size:0.82em;">Run Full Audit</button>
+        <!-- ROW 2: Weights + Fairness side-by-side -->
+        <div style="display:grid;grid-template-columns:1.4fr 1fr;gap:14px;margin-bottom:14px;">
+            <!-- Objective weights -->
+            <div style="background:white;border-radius:10px;padding:18px 20px;box-shadow:0 1px 3px rgba(0,0,0,0.08);">
+                <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:10px;">
+                    <h3 style="font-size:0.95em;color:#1a1a2e;margin:0;">Objective weights</h3>
+                    <div>
+                        <button onclick="resetWeights()" style="padding:4px 12px;background:#f1f5f9;color:#475569;border:1px solid #cbd5e1;border-radius:5px;cursor:pointer;font-size:0.75em;">Reset to defaults</button>
+                        <button onclick="saveWeightsAndRun()" style="padding:4px 12px;background:#0f172a;color:white;border:none;border-radius:5px;cursor:pointer;font-size:0.75em;font-weight:600;margin-left:6px;">Save &amp; re-run</button>
+                    </div>
+                </div>
+                <p style="font-size:0.72em;color:#94a3b8;margin:0 0 12px;line-height:1.5;">Six trade-offs the CP-SAT solver balances. Slide a weight to change the balance; "Save &amp; re-run" persists the new weights and re-optimises in one step. Sum is shown live so you can see the weight allocation at a glance.</p>
+                <div id="weight-sliders"><em style="color:#94a3b8;font-size:0.82em;">Loading weights&hellip;</em></div>
+                <div style="margin-top:10px;font-size:0.78em;color:#475569;display:flex;justify-content:space-between;">
+                    <span>Total weight: <strong id="weight-sum">&mdash;</strong></span>
+                    <span style="color:#94a3b8;">(default 0.30 / 0.25 / 0.15 / 0.15 / 0.10 / 0.05)</span>
+                </div>
             </div>
-            <div id="fairness-tab-result" style="font-size:0.82em;color:#555;">Click "Run Full Audit" to check scheduling fairness across Age, Gender, and Distance groups.</div>
+
+            <!-- Fairness audit (compact) -->
+            <div style="background:white;border-radius:10px;padding:18px 20px;box-shadow:0 1px 3px rgba(0,0,0,0.08);">
+                <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:10px;">
+                    <h3 style="font-size:0.95em;color:#1a1a2e;margin:0;">Fairness audit</h3>
+                    <button onclick="runFairnessFromTab()" style="padding:4px 12px;background:#06b6d4;color:white;border:none;border-radius:5px;cursor:pointer;font-size:0.75em;font-weight:600;">Run full audit</button>
+                </div>
+                <p style="font-size:0.72em;color:#94a3b8;margin:0 0 10px;line-height:1.5;">Four-Fifths Rule (Equality Act 2010) on Age, Gender, Site, Priority. Pass &ge; 0.80; flag &lt; 0.80.</p>
+                <div id="fairness-tab-result" style="font-size:0.82em;color:#475569;">Click <em>Run full audit</em> to see ratios.</div>
+            </div>
+        </div>
+
+        <!-- ROW 3: Recent runs -->
+        <div style="background:white;border-radius:10px;padding:14px 20px;box-shadow:0 1px 3px rgba(0,0,0,0.08);">
+            <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px;">
+                <h3 style="font-size:0.95em;color:#1a1a2e;margin:0;">Recent runs</h3>
+                <span style="font-size:0.7em;color:#94a3b8;">last 5 / in-memory</span>
+            </div>
+            <div id="opt-history"><em style="color:#94a3b8;font-size:0.82em;">No runs yet this session.</em></div>
         </div>
     </div>
 
@@ -466,8 +650,8 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-
             <div style="background:white;border-radius:10px;padding:20px 24px;box-shadow:0 1px 3px rgba(0,0,0,0.08);">
                 <h3 style="font-size:0.95em;margin-bottom:14px;color:#1a1a2e;">Multi-Objective Optimization Weights</h3>
                 <p style="font-size:0.78em;color:#888;margin-bottom:14px;">
-                    The scheduler balances 6 competing objectives. Weights can be adjusted to generate different
-                    trade-off solutions (Pareto frontier). The NHS 62-day target drives the waiting time weight.
+                    The scheduler balances 6 competing objectives. Weights can be adjusted from the
+                    Optimize tab to shift the trade-off; the NHS 62-day target drives the waiting-time weight.
                 </p>
                 <div id="weights-chart"></div>
             </div>
@@ -724,6 +908,15 @@ let staff = [];
 let sites = [];
 let regimens = [];
 let mlPredictions = {};
+// In-memory mirror of /api/urgent/backups so the Gantt can render
+// "✓ backup queued" indicators without a per-block fetch.
+let backupQueue = {};
+
+function escapeHtml(s) {
+    return String(s == null ? '' : s)
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
 
 // ================================================================
 // INITIALIZATION
@@ -738,6 +931,7 @@ document.querySelectorAll('.tab').forEach(tab => {
         if (tab.dataset.tab === 'squeeze') loadSqueezeTab();
         if (tab.dataset.tab === 'events') { loadEventsTab(); loadDataChannelStatus(); }
         if (tab.dataset.tab === 'irl') loadIRLTab();
+        if (tab.dataset.tab === 'optimize') loadOptimizeTab();
     });
 });
 
@@ -974,13 +1168,52 @@ async function init() {
         const dates = [...new Set(appointments.map(a => a.date))].sort();
         const datePicker = document.getElementById('date-select');
         if (dates.length > 0) {
-            // Find first weekday date
-            const firstDate = dates.find(d => { const day = new Date(d).getDay(); return day > 0 && day < 6; }) || dates[0];
-            datePicker.value = firstDate;
+            // Default to today's date when it exists in the dataset; otherwise
+            // pick the closest future date (so the user lands on real-time
+            // data instead of the earliest historical day in the synthetic
+            // sample). Falls back to the closest past date if no future date
+            // is available.
+            const todayIso = new Date().toISOString().slice(0, 10);
+            let defaultDate;
+            if (dates.includes(todayIso)) {
+                defaultDate = todayIso;
+            } else {
+                const future = dates.find(d => d >= todayIso);
+                defaultDate = future || dates[dates.length - 1];
+            }
+            datePicker.value = defaultDate;
             datePicker.min = dates[0];
             datePicker.max = dates[dates.length - 1];
+
+            // Mirror the same default to the Optimize tab's standalone
+            // date picker so the "Run optimisation" button has a usable
+            // target_date even if the user never opens the Schedule tab.
+            const optDate = document.getElementById('opt-date');
+            if (optDate) {
+                optDate.value = defaultDate;
+                optDate.min = dates[0];
+                optDate.max = dates[dates.length - 1];
+                // Bidirectional link: changing one picker updates the other
+                // so Schedule and Optimize tabs always agree on the date.
+                optDate.addEventListener('change', () => {
+                    if (datePicker.value !== optDate.value) {
+                        datePicker.value = optDate.value;
+                        renderSchedule();
+                    }
+                });
+            }
         }
-        datePicker.addEventListener('change', renderSchedule);
+        datePicker.addEventListener('change', () => {
+            const optDate = document.getElementById('opt-date');
+            if (optDate && optDate.value !== datePicker.value) {
+                optDate.value = datePicker.value;
+            }
+            renderSchedule();
+        });
+
+        // Hydrate the backup-queue mirror once on init so the first
+        // renderSchedule() can mark slots that already have a backup.
+        await refreshBackupQueue();
 
         renderSchedule();
         renderAppointments();
@@ -1010,13 +1243,25 @@ function renderSchedule() {
     const nChairs = site.chairs || 10;
     const openStr = (site.hours || '08:00-18:00').split('-')[0];
     const closeStr = (site.hours || '08:00-18:00').split('-')[1];
-    const openMin = timeToMin(openStr);
-    const closeMin = timeToMin(closeStr);
+    let openMin = timeToMin(openStr);
+    let closeMin = timeToMin(closeStr);
 
     // Filter by BOTH date AND site
     let siteAppts = appointments;
     if (selectedDate) siteAppts = siteAppts.filter(a => a.date === selectedDate);
     if (siteId) siteAppts = siteAppts.filter(a => a.site === siteId);
+
+    // Auto-expand the timeline window so every appointment fits on screen.
+    // If any appt starts before the site's nominal open time, shift openMin
+    // earlier (rounded down to the previous 30-minute mark). Same on the
+    // close side for late-running blocks.
+    if (siteAppts.length > 0) {
+        const earliestStart = Math.min(...siteAppts.map(a => timeToMin(a.start)));
+        const latestEnd = Math.max(...siteAppts.map(a => timeToMin(a.start) + a.dur));
+        if (earliestStart < openMin) openMin = Math.floor(earliestStart / 30) * 30;
+        if (latestEnd > closeMin) closeMin = Math.ceil(latestEnd / 30) * 30;
+    }
+    const displayedRange = `${minToTime(openMin)} - ${minToTime(closeMin)}`;
 
     const total = siteAppts.length;
     const totalMin = siteAppts.reduce((s,a) => s + a.dur, 0);
@@ -1033,7 +1278,7 @@ function renderSchedule() {
             <div style="margin-top:6px"><div class="util-bar-bg"><div class="util-bar ${util>85?'high':util>70?'medium':''}" style="width:${Math.min(util,100)}%"></div></div></div>
         </div>
         <div class="stat-card"><div class="label">1:1 Nursing</div><div class="value">${oneToOne}</div></div>
-        <div class="stat-card"><div class="label">Chairs</div><div class="value">${nChairs}</div><div class="detail">${openStr} - ${closeStr}</div></div>
+        <div class="stat-card"><div class="label">Chairs</div><div class="value">${nChairs}</div><div class="detail">${displayedRange}</div></div>
     `;
 
     const pxPerMin = 1.8;
@@ -1062,9 +1307,20 @@ function renderSchedule() {
             html += `<div style="position:absolute;left:${(m-openMin)*pxPerMin}px;top:0;bottom:0;width:1px;background:#f0f0f0;"></div>`;
         }
 
-        chairAppts.forEach(a => {
+        // Sort once so we can cap each block's render-width at the distance
+        // to the next appointment on the same chair. The 130px readable
+        // minimum still applies wherever there is room, but never spills
+        // into the following slot — so back-to-back short appointments
+        // (e.g. two 30-min blocks at 15:00 and 15:30) no longer overlap.
+        const sortedAppts = chairAppts.slice().sort((x, y) => timeToMin(x.start) - timeToMin(y.start));
+        sortedAppts.forEach((a, idx) => {
             const left = (timeToMin(a.start) - openMin) * pxPerMin;
-            const width = Math.max(a.dur * pxPerMin, 130);  // Minimum 130px so names are readable
+            const desiredWidth = Math.max(a.dur * pxPerMin, 130);  // Readable minimum
+            const next = sortedAppts[idx + 1];
+            const roomAvailable = next
+                ? (timeToMin(next.start) - timeToMin(a.start)) * pxPerMin
+                : (closeMin - timeToMin(a.start)) * pxPerMin;
+            const width = Math.min(desiredWidth, roomAvailable);
 
             // ML risk class
             const prob = a.noshow || (mlPredictions[a.pid] ? mlPredictions[a.pid].probability : 0) || 0;
@@ -1072,12 +1328,27 @@ function renderSchedule() {
 
             const dataStr = JSON.stringify(a).replace(/'/g, "&#39;").replace(/"/g, "&quot;");
 
-            html += `<div class="appt-block reg-${a.reg} ${riskClass}"
-                style="left:${left}px; width:${Math.max(width-2, 20)}px;"
+            const apptId = a.id || '';
+            const hasBackup = apptId && backupQueue && backupQueue[apptId];
+            const isHighRisk = riskClass === 'risk-high' || riskClass === 'risk-very-high';
+            // The +Backup pill is only emitted for high / very-high blocks.
+            // CSS gates its visibility on `.gantt-show-backup-pill` so it
+            // only renders while the High or Very-High risk filter is on.
+            const pillHtml = (isHighRisk && apptId && !hasBackup)
+                ? `<button type="button" class="backup-pill" onclick="event.stopPropagation(); openBackupPopover(event, '${apptId}')" title="Plan a backup if this patient does not attend">+ Backup</button>`
+                : '';
+            const queuedMarkHtml = hasBackup
+                ? `<span class="backup-queued-mark" title="Backup queued: ${escapeHtml(backupQueue[apptId].urgent_patient_id)}" onclick="event.stopPropagation(); cancelBackup('${apptId}')">&#10003; backup</span>`
+                : '';
+
+            html += `<div class="appt-block reg-${a.reg} ${riskClass}${hasBackup ? ' has-backup' : ''}"
+                style="left:${left}px; width:${Math.max(width, 20)}px;"
                 data-appt="${dataStr}"
+                data-appt-id="${apptId}"
                 onmouseenter="showTooltip(event, this)" onmouseleave="hideTooltip()">
                 ${a.oneToOne ? '<span class="one-to-one">1:1</span>' : ''}
                 ${a.name.split(' ').pop()} &middot; ${a.reg} &middot; ${a.dur}m
+                ${pillHtml}${queuedMarkHtml}
             </div>`;
         });
 
@@ -1085,7 +1356,206 @@ function renderSchedule() {
     }
 
     document.getElementById('gantt').innerHTML = html || '<div class="loading">No appointments for this site</div>';
+    // Re-apply any active risk filter so toggles persist across date/site changes
+    applyRiskFilter();
 }
+
+// ================================================================
+// Schedule filter buttons (risk + regimen legends)
+// ================================================================
+// Click a legend button to show only matching slots on the schedule.
+// Within an axis multi-select ORs (e.g. Low + Medium); across axes
+// AND (e.g. High AND AC = high-risk AC patients only). Click an
+// active button again to deselect. With no active filters anywhere,
+// all slots are visible.
+function toggleRiskFilter(btn) { btn.classList.toggle('active'); applyFilters(); }
+function toggleRegimenFilter(btn) { btn.classList.toggle('active'); applyFilters(); }
+
+function applyFilters() {
+    const riskLegend = document.getElementById('risk-legend');
+    const regimenLegend = document.getElementById('regimen-legend');
+    const riskFilters = riskLegend
+        ? new Set(Array.from(riskLegend.querySelectorAll('.risk-filter-btn.active')).map(b => b.dataset.filter))
+        : new Set();
+    const regimenFilters = regimenLegend
+        ? new Set(Array.from(regimenLegend.querySelectorAll('.regimen-filter-btn.active')).map(b => b.dataset.filter))
+        : new Set();
+    if (riskLegend) riskLegend.classList.toggle('legend-has-active', riskFilters.size > 0);
+    if (regimenLegend) regimenLegend.classList.toggle('legend-has-active', regimenFilters.size > 0);
+
+    const matchesRisk = (block) => {
+        if (riskFilters.has('low') && block.classList.contains('risk-low')) return true;
+        if (riskFilters.has('medium') && block.classList.contains('risk-medium')) return true;
+        if (riskFilters.has('high') && block.classList.contains('risk-high')) return true;
+        if (riskFilters.has('very-high') && block.classList.contains('risk-very-high')) return true;
+        if (riskFilters.has('one-to-one') && block.querySelector('.one-to-one')) return true;
+        return false;
+    };
+    const matchesRegimen = (block) => {
+        for (const reg of regimenFilters) {
+            if (block.classList.contains('reg-' + reg)) return true;
+        }
+        return false;
+    };
+
+    document.querySelectorAll('#gantt .appt-block').forEach(block => {
+        const passesRisk = riskFilters.size === 0 || matchesRisk(block);
+        const passesRegimen = regimenFilters.size === 0 || matchesRegimen(block);
+        block.style.display = (passesRisk && passesRegimen) ? '' : 'none';
+    });
+
+    // Show the +Backup pill on the Gantt only while the operator is
+    // looking at high / very-high risk slots (the workflow it supports).
+    // The CSS rule keys off the .gantt-show-backup-pill class on #gantt.
+    const gantt = document.getElementById('gantt');
+    if (gantt) {
+        const showPill = riskFilters.has('high') || riskFilters.has('very-high');
+        gantt.classList.toggle('gantt-show-backup-pill', showPill);
+    }
+}
+
+// Backwards-compat alias for the renderSchedule() hook installed earlier.
+function applyRiskFilter() { applyFilters(); }
+
+// ================================================================
+// Backup-queue popover (Schedule-tab integration of Squeeze-In)
+// ================================================================
+// When the operator filters the Schedule tab to High / Very-High no-show
+// risk, each visible appointment can show a "+ Backup" pill. Clicking
+// opens this popover with up to 3 candidate patients ranked from
+// Channel 1 (synthetic appointments registry); Channel 3 (weather/traffic)
+// is folded into the no-show probability that gates which slots qualify.
+// One click on a candidate calls /api/urgent/queue-backup; the slot then
+// shows a "✓ backup" mark which can be clicked to cancel the queue.
+// The existing Squeeze-In tab endpoints are unchanged — both flows coexist.
+async function refreshBackupQueue() {
+    try {
+        const r = await fetch('/api/urgent/backups');
+        const d = await r.json();
+        if (d && d.success) {
+            backupQueue = d.backups || {};
+        }
+    } catch (e) {
+        console.warn('refreshBackupQueue failed', e);
+    }
+}
+
+function openBackupPopover(event, appointmentId) {
+    const pop = document.getElementById('backup-popover');
+    const backdrop = document.getElementById('backup-backdrop');
+    if (!pop) return;
+    // Hide the hover tooltip so it can't visually clip the popover.
+    hideTooltip();
+    // Position near the click
+    const x = Math.min(event.clientX, window.innerWidth - 400);
+    const y = Math.min(event.clientY + 8, window.innerHeight - 280);
+    pop.style.left = x + 'px';
+    pop.style.top = y + 'px';
+    pop.classList.add('visible');
+    if (backdrop) backdrop.classList.add('visible');
+    pop.dataset.apptId = appointmentId;
+    document.getElementById('backup-popover-title').textContent = 'Plan backup for slot ' + appointmentId;
+    document.getElementById('backup-popover-slot-info').textContent = 'Loading slot details…';
+    document.getElementById('backup-popover-candidates').innerHTML = '<em style="color:#94a3b8;">Loading candidates…</em>';
+
+    fetch('/api/urgent/candidates-for-slot/' + encodeURIComponent(appointmentId))
+        .then(r => r.json())
+        .then(d => {
+            if (!d || !d.success) {
+                document.getElementById('backup-popover-candidates').innerHTML =
+                    '<div style="color:#dc2626;">' + escapeHtml(d && d.error || 'Lookup failed') + '</div>';
+                return;
+            }
+            const slot = d.slot || {};
+            document.getElementById('backup-popover-slot-info').textContent =
+                `Chair ${slot.chair} · ${slot.time} · ${slot.regimen} · ${slot.duration} min`;
+            // Render the live data-source chip so the operator sees which
+            // channel the candidate registry came from (CH1 synthetic vs
+            // CH2 real hospital), plus CH3 for the risk-gate weighting.
+            const ds = d.data_sources || {};
+            const regChip = ds.registry_channel || 'CH1';
+            const regLabel = (ds.active_channel === 'real')
+                ? 'real hospital registry'
+                : 'synthetic registry';
+            const ch3On = ds.event_channel_3 ? '<code>CH3</code> events fold into risk weighting.' : '<code>CH3</code> events disabled (no active model).';
+            const otherChan = (regChip === 'CH2') ? 'CH1' : 'CH2';
+            document.getElementById('backup-popover-channel-chip').innerHTML =
+                `Data: <code>${regChip}</code> ${regLabel} &middot; ${ch3On} &middot; ${otherChan} not accessed on this path.`;
+            const cands = d.candidates || [];
+            if (cands.length === 0) {
+                document.getElementById('backup-popover-candidates').innerHTML =
+                    '<em style="color:#94a3b8;">No matching candidates in the synthetic registry.</em>';
+                return;
+            }
+            const rows = cands.map(c => `
+                <div class="candidate-row" onclick="event.stopPropagation(); queueBackup('${escapeHtml(appointmentId)}', '${escapeHtml(c.patient_id)}', '${escapeHtml(c.patient_name)}', '${escapeHtml(c.priority)}', ${c.duration}, '${escapeHtml(c.regimen)}')">
+                    <div class="name">${escapeHtml(c.patient_name)} <span style="color:#64748b;font-weight:400;">(${escapeHtml(c.patient_id)})</span></div>
+                    <span class="badge">${escapeHtml(c.priority)} · ${escapeHtml(c.regimen)} · ${c.duration}m</span>
+                    <span style="color:#94a3b8;font-size:0.9em;">+${c.score}</span>
+                </div>
+            `).join('');
+            document.getElementById('backup-popover-candidates').innerHTML = rows;
+        })
+        .catch(err => {
+            document.getElementById('backup-popover-candidates').innerHTML =
+                '<div style="color:#dc2626;">' + escapeHtml(err.message || err) + '</div>';
+        });
+}
+
+function closeBackupPopover() {
+    const pop = document.getElementById('backup-popover');
+    const backdrop = document.getElementById('backup-backdrop');
+    if (pop) pop.classList.remove('visible');
+    if (backdrop) backdrop.classList.remove('visible');
+}
+
+async function queueBackup(appointmentId, patientId, patientName, priority, duration, regimen) {
+    try {
+        const r = await fetch('/api/urgent/queue-backup', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                appointment_id: appointmentId,
+                urgent_patient_id: patientId,
+                urgent_patient_name: patientName,
+                urgent_priority: priority,
+                urgent_duration: duration,
+                urgent_regimen: regimen,
+            })
+        });
+        const d = await r.json();
+        if (!d || !d.success) {
+            alert('Queue failed: ' + (d && d.error || 'unknown'));
+            return;
+        }
+        await refreshBackupQueue();
+        closeBackupPopover();
+        renderSchedule();
+    } catch (e) {
+        alert('Queue failed: ' + e.message);
+    }
+}
+
+async function cancelBackup(appointmentId) {
+    if (!confirm('Cancel the queued backup for this slot?')) return;
+    try {
+        const r = await fetch('/api/urgent/queue-backup/' + encodeURIComponent(appointmentId), {method: 'DELETE'});
+        const d = await r.json();
+        if (!d || !d.success) {
+            alert('Cancel failed: ' + (d && d.error || 'unknown'));
+            return;
+        }
+        await refreshBackupQueue();
+        renderSchedule();
+    } catch (e) {
+        alert('Cancel failed: ' + e.message);
+    }
+}
+
+// Outside-click dismissal is now handled by the #backup-backdrop element
+// (clicking it calls closeBackupPopover). The previous document-wide
+// click handler raced with the tooltip's z-index 1000 and produced
+// an open-then-immediately-close flash on certain blocks.
 
 function showTooltip(e, el) {
     const a = JSON.parse(el.dataset.appt.replace(/&quot;/g, '"').replace(/&#39;/g, "'"));
@@ -1689,76 +2159,219 @@ function loadSqueezeTab() {
 // ================================================================
 // OPTIMIZE TAB
 // ================================================================
+// ================================================================
+// Optimize tab — Run + KPIs + weight sliders + recent runs
+// ================================================================
+const OPT_OBJ_KEYS = ['priority', 'utilization', 'noshow_risk', 'waiting_time', 'robustness', 'travel'];
+const OPT_OBJ_LABELS = {
+    priority:    ['Urgency',     'favour P1 (urgent) over P4 (routine)'],
+    utilization: ['Chair use',   'fill chairs evenly across the day'],
+    noshow_risk: ['No-show',     'avoid slots likely to be missed'],
+    waiting_time:['Waiting',     'shorten days-since-booked'],
+    robustness:  ['Robustness',  'leave buffer for over-runs'],
+    travel:      ['Travel',      'limit patient travel distance'],
+};
+const OPT_DEFAULTS = { priority:0.30, utilization:0.25, noshow_risk:0.15, waiting_time:0.15, robustness:0.10, travel:0.05 };
+
+async function loadOptimizeTab() {
+    await Promise.all([loadOptimizeWeights(), loadOptimizeHistory()]);
+}
+
+async function loadOptimizeWeights() {
+    try {
+        const d = await fetch('/api/optimize/weights').then(r => r.json());
+        renderWeightSliders(d.weights || OPT_DEFAULTS);
+    } catch (e) {
+        document.getElementById('weight-sliders').innerHTML = '<span style="color:#ef4444;">Failed to load weights: ' + escapeHtml(e.message) + '</span>';
+    }
+}
+
+function renderWeightSliders(w) {
+    const host = document.getElementById('weight-sliders');
+    if (!host) return;
+    host.innerHTML = OPT_OBJ_KEYS.map(k => {
+        const [lab, desc] = OPT_OBJ_LABELS[k] || [k, ''];
+        const v = (w[k] ?? OPT_DEFAULTS[k] ?? 0).toFixed(2);
+        return `
+        <div class="weight-row">
+            <div class="label">${lab}<small>${desc}</small></div>
+            <input type="range" min="0" max="1" step="0.01" value="${v}"
+                data-key="${k}" oninput="onWeightSliderInput(this)">
+            <div class="val" data-val="${k}">${v}</div>
+        </div>`;
+    }).join('');
+    updateWeightSum();
+}
+
+function onWeightSliderInput(el) {
+    const k = el.dataset.key;
+    const v = parseFloat(el.value);
+    document.querySelector(`[data-val="${k}"]`).textContent = v.toFixed(2);
+    updateWeightSum();
+}
+
+function updateWeightSum() {
+    let s = 0;
+    document.querySelectorAll('#weight-sliders input[type=range]').forEach(el => { s += parseFloat(el.value || 0); });
+    const sumEl = document.getElementById('weight-sum');
+    if (sumEl) {
+        sumEl.textContent = s.toFixed(2);
+        sumEl.style.color = (Math.abs(s - 1) < 0.02) ? '#10b981' : '#f59e0b';
+    }
+}
+
+function resetWeights() {
+    renderWeightSliders(OPT_DEFAULTS);
+}
+
+async function saveWeightsAndRun() {
+    const weights = {};
+    document.querySelectorAll('#weight-sliders input[type=range]').forEach(el => {
+        weights[el.dataset.key] = parseFloat(el.value);
+    });
+    try {
+        await fetch('/api/optimize/weights', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({weights})
+        });
+    } catch (e) { /* fall through to runOptimize which surfaces errors */ }
+    runOptimize();
+}
+
+function _setKPI(id, v) { const e = document.getElementById(id); if (e) e.textContent = v; }
+
+function populateOptKPIs(d, runtime_ms_hint) {
+    const m = d && d.metrics ? d.metrics : {};
+    _setKPI('kpi-last', new Date().toLocaleTimeString('en-GB', {hour:'2-digit', minute:'2-digit', second:'2-digit'}));
+    _setKPI('kpi-placed', (d.scheduled != null) ? `${d.scheduled}` + (d.unscheduled ? ` / ${d.scheduled + d.unscheduled}` : '') : '—');
+    _setKPI('kpi-util',   m.utilization != null ? `${(m.utilization*100).toFixed(0)}%` : '—');
+    _setKPI('kpi-obj',    m.objective_score != null ? Number(m.objective_score).toFixed(0) : (m.objective != null ? Number(m.objective).toFixed(0) : '—'));
+    const rt = d.runtime_ms != null ? d.runtime_ms : runtime_ms_hint;
+    _setKPI('kpi-runtime', rt != null ? `${rt} ms` : '—');
+}
+
+async function loadOptimizeHistory() {
+    try {
+        const d = await fetch('/api/optimize/recent').then(r => r.json());
+        const runs = (d && d.runs) || [];
+        const host = document.getElementById('opt-history');
+        if (!host) return;
+        if (runs.length === 0) {
+            host.innerHTML = '<em style="color:#94a3b8;font-size:0.82em;">No runs yet this session.</em>';
+            return;
+        }
+        const rows = runs.slice().reverse().map(r => `
+            <div class="opt-history-row">
+                <div>${escapeHtml(r.timestamp || '—')}</div>
+                <div>${escapeHtml(r.target_date || '—')}</div>
+                <div>${r.demand != null ? r.demand : '—'}</div>
+                <div>${r.scheduled != null ? r.scheduled : '—'}${r.overflow_count ? ` <span style="color:#0f766e;">(↻${r.overflow_count})</span>` : ''}</div>
+                <div>${r.utilization != null ? (r.utilization*100).toFixed(0) + '%' : '—'}</div>
+                <div>${r.objective_score != null ? Number(r.objective_score).toFixed(0) : '—'}</div>
+                <div>${r.runtime_ms != null ? r.runtime_ms + ' ms' : '—'}</div>
+                <div>${escapeHtml(r.channel || '—')}</div>
+            </div>`).join('');
+        host.innerHTML = `
+            <div class="opt-history-row head">
+                <div>Timestamp</div><div>Date</div><div>Demand</div><div>Placed (↻ overflow)</div><div>Util.</div><div>Objective</div><div>Runtime</div><div>Channel</div>
+            </div>${rows}`;
+    } catch (e) { /* swallow */ }
+}
+
 function runOptimize() {
     const r = document.getElementById('opt-result');
     r.style.display = 'block';
-    r.innerHTML = '<span style="color:#10b981;">Running ML predictions + CP-SAT optimization...</span>';
-    fetch('/api/optimize', {method:'POST', headers:{'Content-Type':'application/json'}, body:'{}'}).then(r=>r.json()).then(d => {
+    r.innerHTML = '<span style="color:#10b981;">Running ML predictions + CP-SAT optimisation&hellip;</span>';
+    const t0 = Date.now();
+    const lockEl = document.getElementById('lock-home-site');
+    const optDateEl = document.getElementById('opt-date');
+    const datePickerEl = document.getElementById('date-select');
+    const body = {
+        lock_to_home_site: !!(lockEl && lockEl.checked),
+        target_date: (optDateEl && optDateEl.value) || (datePickerEl && datePickerEl.value) || undefined,
+    };
+    fetch('/api/optimize', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)}).then(r=>r.json()).then(d => {
+        const elapsed = Date.now() - t0;
+        populateOptKPIs(d, elapsed);
+        const placedTotal = (d.scheduled || 0);
+        const homeSitePlaced = placedTotal - (d.overflow_count || 0);
         let h = `<div style="padding:10px;background:#f0fdf4;border-radius:6px;border-left:3px solid #10b981;">
-            <strong>${d.message || 'Optimization complete'}</strong><br>
-            Scheduled: ${d.scheduled || 0} | Unscheduled: ${d.unscheduled || 0}`;
+            <strong>${escapeHtml(d.message || 'Optimisation complete')}</strong> &middot; <span style="color:#64748b;">target date ${escapeHtml(d.target_date || '')}, demand ${d.demand || 0}</span><br>
+            Scheduled: ${placedTotal} | Unscheduled: ${d.unscheduled || 0}`;
+        if (d.overflow_count && d.overflow_count > 0) {
+            h += ` <span style="color:#0f766e;">(${d.overflow_count} routed to alternate site, +14 min travel each)</span>`;
+        } else if (d.lock_to_home_site) {
+            h += ` <span style="color:#94a3b8;">(home-site lock on)</span>`;
+        }
         if (d.metrics) {
-            h += `<br>Utilization: ${(d.metrics.utilization*100).toFixed(0)}% | No-show exposure: ${((d.metrics.noshow_exposure||0)*100).toFixed(1)}%`;
-            h += ` | Robustness: ${d.metrics.robustness_score || '--'}`;
+            h += `<br>Utilisation: ${(d.metrics.utilization*100).toFixed(0)}% | No-show exposure: ${((d.metrics.noshow_exposure||0)*100).toFixed(1)}%`;
+            if (d.metrics.robustness_score) h += ` | Robustness: ${d.metrics.robustness_score}`;
         }
         if (d.ml_integration) {
             const ml = d.ml_integration;
-            h += `<br><br><strong style="color:#8b5cf6;">ML Integration:</strong>`;
-            if (ml.uncertainty) h += `<br>MC Dropout: ${ml.uncertainty.high_uncertainty_patients || 0} high-uncertainty patients (${ml.uncertainty.buffer_applied || ''})`;
-            if (ml.fairness) h += `<br>Fairness: ${JSON.stringify(ml.fairness.priority_distribution || {})}`;
-            if (ml.rl_feedback && ml.rl_feedback.learned) h += `<br>RL Agent: reward=${ml.rl_feedback.reward}, epsilon=${ml.rl_feedback.epsilon}`;
+            h += `<br><br><strong style="color:#8b5cf6;">ML integration:</strong>`;
+            if (ml.uncertainty) h += `<br>MC Dropout: ${ml.uncertainty.high_uncertainty_patients || 0} high-uncertainty patients (${escapeHtml(ml.uncertainty.buffer_applied || '')})`;
+            if (ml.rl_feedback && ml.rl_feedback.learned) h += `<br>RL agent: reward=${ml.rl_feedback.reward}, epsilon=${ml.rl_feedback.epsilon}`;
         }
         h += '</div>';
         r.innerHTML = h;
-        init(); // Reload all data
-    }).catch(e => { r.innerHTML = '<span style="color:#ef4444;">Optimization failed: '+e.message+'</span>'; });
+        loadOptimizeHistory();
+        // Refresh appointments + backup queue so the Schedule tab is up-to-date
+        refreshBackupQueue().then(() => { /* schedule re-renders next time the tab is opened */ });
+    }).catch(e => { r.innerHTML = '<span style="color:#ef4444;">Optimisation failed: '+escapeHtml(e.message)+'</span>'; });
 }
 
-function runParetoFromTab() {
-    const r = document.getElementById('pareto-tab-result');
-    r.style.display = 'block';
-    r.innerHTML = '<span style="color:#8b5cf6;">Generating Pareto frontier (5 profiles, ~2 min)...</span>';
-    fetch('/api/optimize/pareto', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({time_limit_per_run:30})}).then(r=>r.json()).then(d => {
-        if (d.pareto_frontier && d.pareto_frontier.length > 0) {
-            let h = `<strong style="color:#8b5cf6;">Frontier: ${d.frontier_size} non-dominated solutions</strong><br><br>`;
-            h += '<table style="width:100%;font-size:0.85em;border-collapse:collapse;">';
-            h += '<tr style="border-bottom:2px solid #e2e8f0;"><th style="padding:6px;text-align:left;">Profile</th><th>Scheduled</th><th>Utilization</th><th>Risk</th><th>Waiting</th></tr>';
-            d.pareto_frontier.forEach(s => {
-                h += `<tr style="border-bottom:1px solid #f0f0f0;">
-                    <td style="padding:6px;font-weight:600;color:#8b5cf6;">${s.name}</td>
-                    <td style="text-align:center;">${s.scheduled}</td>
-                    <td style="text-align:center;">${(s.utilization*100).toFixed(0)}%</td>
-                    <td style="text-align:center;">${((s.noshow_exposure||0)*100).toFixed(1)}%</td>
-                    <td style="text-align:center;">${s.avg_waiting||'--'}</td>
-                </tr>`;
-            });
-            h += '</table>';
-            r.innerHTML = h;
-        } else {
-            r.innerHTML = '<span style="color:#f59e0b;">'+(d.error||'No patients to optimize')+'</span>';
-        }
-    }).catch(e => { r.innerHTML = '<span style="color:#ef4444;">Error: '+e.message+'</span>'; });
-}
+// Legacy Pareto-tab handler kept as a no-op so any stale call sites
+// (e.g. cached browser sessions) don't throw. The Pareto Frontier
+// section was removed from the Optimize tab in the redesign.
+function runParetoFromTab() { /* removed in redesign */ }
 
 function runFairnessFromTab() {
     const r = document.getElementById('fairness-tab-result');
     r.innerHTML = '<span style="color:#06b6d4;">Running fairness audit...</span>';
     fetch('/api/fairness/audit', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({})}).then(r=>r.json()).then(d => {
-        if (d.results) {
-            let h = `<strong style="color:${d.passes_all?'#10b981':'#ef4444'};">${d.passes_all?'PASSED':'VIOLATIONS FOUND'}</strong> across ${d.groups_audited.length} protected attributes<br><br>`;
-            Object.entries(d.results).forEach(([group, result]) => {
-                const icon = result.passes ? '&#10004;' : '&#10008;';
-                const color = result.passes ? '#10b981' : '#ef4444';
-                h += `<div style="padding:6px 10px;margin:4px 0;background:${result.passes?'#f0fdf4':'#fef2f2'};border-radius:4px;border-left:3px solid ${color};">
-                    <span style="color:${color};">${icon}</span> <strong>${group}</strong>: ${result.passes?'Pass':'FAIL — '+result.violations.length+' violations'}
-                </div>`;
-                if (result.violations && result.violations.length > 0) {
-                    result.violations.forEach(v => { h += `<div style="padding:2px 10px 2px 30px;font-size:0.9em;color:#888;">${v}</div>`; });
-                }
-            });
-            r.innerHTML = h;
+        if (!d.results) {
+            r.innerHTML = '<span style="color:#ef4444;">' + escapeHtml((d && d.error) || 'No fairness results') + '</span>';
+            return;
         }
-    }).catch(e => { r.innerHTML = '<span style="color:#ef4444;">Error: '+e.message+'</span>'; });
+        // Equal Opportunity is a *fairness metric*, not a protected attribute.
+        // It is computed across Age + Gender simultaneously, so render it
+        // separately so the per-attribute list stays clean. Everything
+        // else in d.results is a Four-Fifths-Rule audit by attribute.
+        const eo = d.results['Equal_Opportunity'];
+        const attrEntries = Object.entries(d.results).filter(([k]) => k !== 'Equal_Opportunity');
+        const allAttrPass = attrEntries.every(([, v]) => v.passes);
+        const eoPasses = eo ? eo.passes : true;
+        const overallPasses = allAttrPass && eoPasses;
+
+        let h = `<strong style="color:${overallPasses?'#10b981':'#ef4444'};">${overallPasses?'PASSED':'VIOLATIONS FOUND'}</strong> across ${attrEntries.length} protected attributes`;
+        if (eo) h += ' + 1 fairness metric';
+        h += '<br><br>';
+        h += '<div style="font-size:0.65em;color:#94a3b8;text-transform:uppercase;letter-spacing:0.5px;font-weight:600;margin-bottom:4px;">Protected attributes (Four-Fifths Rule)</div>';
+        attrEntries.forEach(([group, result]) => {
+            const icon = result.passes ? '&#10004;' : '&#10008;';
+            const color = result.passes ? '#10b981' : '#ef4444';
+            h += `<div style="padding:6px 10px;margin:4px 0;background:${result.passes?'#f0fdf4':'#fef2f2'};border-radius:4px;border-left:3px solid ${color};">
+                <span style="color:${color};">${icon}</span> <strong>${escapeHtml(group)}</strong>: ${result.passes?'Pass':'FAIL — '+result.violations.length+' violations'}
+            </div>`;
+            if (result.violations && result.violations.length > 0) {
+                result.violations.forEach(v => { h += `<div style="padding:2px 10px 2px 30px;font-size:0.9em;color:#888;">${escapeHtml(v)}</div>`; });
+            }
+        });
+        if (eo) {
+            const icon = eo.passes ? '&#10004;' : '&#10008;';
+            const color = eo.passes ? '#10b981' : '#ef4444';
+            h += '<div style="font-size:0.65em;color:#94a3b8;text-transform:uppercase;letter-spacing:0.5px;font-weight:600;margin:10px 0 4px;">Fairness metric</div>';
+            h += `<div style="padding:6px 10px;margin:4px 0;background:${eo.passes?'#f0fdf4':'#fef2f2'};border-radius:4px;border-left:3px solid ${color};" title="True-positive-rate parity across Age and Gender combined">
+                <span style="color:${color};">${icon}</span> <strong>Equal Opportunity</strong> <span style="color:#64748b;font-size:0.9em;">(across Age + Gender)</span>: ${eo.passes?'Pass':'FAIL — '+eo.violations.length+' violations'}
+            </div>`;
+            if (eo.violations && eo.violations.length > 0) {
+                eo.violations.forEach(v => { h += `<div style="padding:2px 10px 2px 30px;font-size:0.9em;color:#888;">${escapeHtml(v)}</div>`; });
+            }
+        }
+        r.innerHTML = h;
+    }).catch(e => { r.innerHTML = '<span style="color:#ef4444;">Error: '+escapeHtml(e.message)+'</span>'; });
 }
 
 // ================================================================

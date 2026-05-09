@@ -311,8 +311,10 @@ class FairnessAuditor:
             dist_patients.append(p_copy)
         results['Distance_Group'] = self.audit_schedule(dist_patients, scheduled_ids, 'Distance_Group')
 
-        # Audit by deprivation proxy (travel distance as proxy)
-        results['Travel_Distance'] = self.audit_schedule(dist_patients, scheduled_ids, 'Distance_Group')
+        # NOTE: A duplicate `Travel_Distance` key was previously added here
+        # auditing the same `dist_patients`/`Distance_Group` pair as above;
+        # it inflated the displayed protected-attribute count from 3 to 4
+        # without measuring anything new. Removed in the redesign.
 
         # Equal Opportunity audit — P(scheduled | attended, group) should be constant
         # Among patients who WOULD attend, scheduling rates must be equal across groups

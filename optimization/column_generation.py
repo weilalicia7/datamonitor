@@ -372,6 +372,12 @@ class ColumnGenerator:
         lam = [solver.NumVar(0.0, 1.0, f'lam_{k}') for k in range(n_cols)]
 
         # Patient coverage constraints: Σ_k a_{p,k} · λ_k ≤ 1
+        # (Slack-Big-M lives in the monolithic CP-SAT path only — see
+        # optimizer.py § OBJECTIVE 7. CG's column-budget bottleneck made
+        # the slack version slower than the unconstrained version on
+        # large days, so for >threshold instances we revert to the
+        # original ≤1 coverage and rely on the runtime overflow path
+        # to backfill any patients CG dropped at the time-limit.)
         pi_constraints = []
         for pi in range(self.n_patients):
             ct = solver.Constraint(0.0, 1.0, f'cover_p{pi}')

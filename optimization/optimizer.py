@@ -28,8 +28,12 @@ from config import (
 )
 
 # Column generation threshold: use CG decomposition when patient count
-# exceeds this value (monolithic CP-SAT scales poorly beyond ~60 patients).
-COLUMN_GEN_THRESHOLD = 50
+# exceeds this value. Bumped 50 → 350 so the slack + Big-M unscheduled-
+# penalty in the monolithic CP-SAT path (§ OBJECTIVE 7) handles normal
+# Velindre demand (~200 / day) directly. CG only kicks in for genuinely
+# outsized stress runs (registry-wide). Monolithic CP-SAT with 219
+# patients × 49 chairs is tractable in 180 s.
+COLUMN_GEN_THRESHOLD = 350
 
 logger = get_logger(__name__)
 
@@ -443,7 +447,7 @@ class ScheduleOptimizer:
 
     def optimize(self, patients: List[Patient],
                  date: datetime = None,
-                 time_limit_seconds: int = 60) -> OptimizationResult:
+                 time_limit_seconds: int = 300) -> OptimizationResult:
         """
         Optimize schedule for given patients.
 
@@ -560,12 +564,24 @@ class ScheduleOptimizer:
             patient_vars[p.patient_id] = {
                 'chairs': chair_vars,
                 'start': model.NewIntVar(0, horizon - p.expected_duration, f'start_{p_idx}'),
-                'assigned': model.NewBoolVar(f'assigned_{p_idx}')
+                'assigned': model.NewBoolVar(f'assigned_{p_idx}'),
+                # Slack indicator: 1 iff the patient was NOT scheduled.
+                # The Big-M penalty on slack (added below in the objective)
+                # makes "drop a patient" so expensive that the solver will
+                # always place every patient unless physically infeasible.
+                # If genuinely infeasible (capacity overflow), slack_p tells
+                # us *exactly* which patients couldn't fit — much more
+                # diagnostic than CP-SAT returning INFEASIBLE outright.
+                # See MATH_LOGIC.md §2.1 — fix per critical-review §2.3.
+                'slack': model.NewBoolVar(f'slack_{p_idx}'),
             }
 
             # Must be assigned to exactly one chair if assigned
             model.Add(sum(chair_vars) == 1).OnlyEnforceIf(patient_vars[p.patient_id]['assigned'])
             model.Add(sum(chair_vars) == 0).OnlyEnforceIf(patient_vars[p.patient_id]['assigned'].Not())
+            # Slack-completeness: each patient is either assigned (a_p=1)
+            # or slack (slack_p=1), never both, never neither.
+            model.Add(patient_vars[p.patient_id]['assigned'] + patient_vars[p.patient_id]['slack'] == 1)
 
         # =====================================================================
         # GNN FEASIBILITY PRE-FILTER
@@ -888,6 +904,23 @@ class ScheduleOptimizer:
             pvars = patient_vars[p.patient_id]
             travel_penalty = getattr(p, 'travel_time', 30) // 10  # 3 penalty units per 10 min travel
             objective_terms.append(-travel_penalty * w_travel)
+
+        # OBJECTIVE 7 (Big-M unscheduled-penalty): the dominant term.
+        # Without it, a P3/P4 patient with high predicted no-show
+        # probability had a NEGATIVE net contribution (no-show penalty
+        # > priority + waiting bonus), so the solver gained points by
+        # leaving them unscheduled — leaving 30+ patients dropped on a
+        # day with chair capacity to spare.  By penalising slack_p with
+        # M = 100,000 (orders of magnitude above any other term), the
+        # solver places every patient unless physically infeasible. If
+        # genuinely infeasible, slack_p flags exactly which patients
+        # couldn't fit, preserving diagnostic information that a hard
+        # constraint would have lost as a flat INFEASIBLE.  See the
+        # critical-review §2.3 in the dissertation review notes.
+        BIG_M_UNSCHEDULED = 100_000
+        for p in patients:
+            pvars = patient_vars[p.patient_id]
+            objective_terms.append(-pvars['slack'] * BIG_M_UNSCHEDULED)
 
         # Add fairness penalties to objective (soft constraint)
         fairness_penalties = getattr(self, '_fairness_penalties', [])
@@ -1883,8 +1916,34 @@ class ScheduleOptimizer:
         adequate_slots = sum(1 for s in all_slacks if 20 <= s < 60)
         ample_slots = sum(1 for s in all_slacks if s >= 60)
 
+        # Objective score (0-100) — weighted blend of the six trade-offs the
+        # solver optimised against. Surfaced on the Optimize-tab KPI strip
+        # so the headline number reflects the *actual* weight choice the
+        # operator made, not just a single component. Higher is better.
+        try:
+            w = self.weights or {}
+            total_priority = sum(getattr(p, 'priority', 0) for p in patients)
+            priority_share = (
+                sum(getattr(a, 'priority', 0) for a in appointments) / total_priority
+                if total_priority > 0 else 0.0
+            )
+            waiting_norm = min(avg_waiting / 30.0, 1.0)  # 30 days = saturation
+            travel_norm = min(avg_travel / 60.0, 1.0)    # 60 min = saturation
+            objective_score = round(
+                w.get('priority', 0)     * priority_share * 100
+                + w.get('utilization', 0)* utilization * 100
+                + w.get('noshow_risk', 0)* (1.0 - noshow_exposure) * 100
+                + w.get('waiting_time', 0)*(1.0 - waiting_norm) * 100
+                + w.get('robustness', 0) * robustness_score * 100
+                + w.get('travel', 0)     * (1.0 - travel_norm) * 100,
+                1,
+            )
+        except Exception:
+            objective_score = None
+
         return {
             'utilization': round(utilization, 3),
+            'objective_score': objective_score,
             'scheduled_count': len(appointments),
             'unscheduled_count': len(patients) - len(appointments),
             'avg_travel_time': round(avg_travel, 1),

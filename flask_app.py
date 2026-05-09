@@ -42,7 +42,7 @@ from config import (
 )
 
 # Import modules
-from optimization.optimizer import ScheduleOptimizer, Patient, Chair
+from optimization.optimizer import ScheduleOptimizer, Patient, Chair, ScheduledAppointment
 from optimization.squeeze_in import SqueezeInHandler
 from optimization.emergency_mode import EmergencyModeHandler
 from monitoring.event_aggregator import EventAggregator
@@ -585,7 +585,21 @@ app_state = {
         'total_insertions': 0,
         'double_bookings': 0,
         'gap_based': 0,
-        'rescheduled': 0
+        'rescheduled': 0,
+        # Backup-queue: for each high-risk primary appointment whose patient
+        # is *predicted* to no-show, the operator can pre-pin an urgent
+        # candidate as a backup. Keyed by primary Appointment_ID. The
+        # existing /api/urgent/insert path (Squeeze-In tab) is unchanged;
+        # this is an additional in-place workflow surfaced from the
+        # Schedule tab when the High / Very-High risk filter is active.
+        #
+        # Channel scope: candidate ranking reads the *active* appointments
+        # registry (Channel 1 synthetic by default; Channel 2 real hospital
+        # if the Channel-2 watcher has auto-promoted real data). Event-aware
+        # risk weighting comes from Channel 3 (weather + traffic + news via
+        # squeeze_handler.event_impact_model). The popover footer reflects
+        # the live active channel so the data-source guarantee stays honest.
+        'backup_queue': {}
     }
 }
 
@@ -766,6 +780,38 @@ def load_data_from_source():
             if 'Status' in df.columns:
                 df = df[df['Status'] == 'Active']
 
+            # Build patient_id -> next appointment date map from
+            # appointments.xlsx so each Patient gets earliest_time /
+            # latest_time aligned to its actual booking date. Without
+            # this every patient was stamped with datetime.now(), which
+            # collapsed 22 days of demand onto a single shift and
+            # left ~36% of patients unschedulable purely from
+            # capacity overflow on the imaginary mega-day.
+            appt_dates = {}
+            try:
+                appt_path = data_path / DATA_SOURCE_CONFIG['appointment_file']
+                if appt_path.exists():
+                    appt_df = pd.read_excel(appt_path)
+                    today_iso = datetime.now().strftime('%Y-%m-%d')
+                    appt_df['_d'] = appt_df['Date'].astype(str).str[:10]
+                    # For each patient, pick the earliest appointment
+                    # whose date is today or later (the "next" one);
+                    # fall back to the latest historical date if no
+                    # future appointment exists.
+                    for pid, grp in appt_df.groupby('Patient_ID'):
+                        future = grp[grp['_d'] >= today_iso]
+                        if len(future):
+                            chosen = future['_d'].min()
+                        else:
+                            chosen = grp['_d'].max()
+                        appt_dates[str(pid)] = str(chosen)
+                    logger.info(f"Patient→appt-date map built: {len(appt_dates)} patients, "
+                                f"today={today_iso}, sample={list(appt_dates.items())[:3]}")
+                else:
+                    logger.warning(f"Appointments file not found at {appt_path} — date-aware loading disabled")
+            except Exception as e:
+                logger.warning(f"Could not build patient->date map: {e}")
+
             for _, row in df.iterrows():
                 try:
                     # Get patient ID (support both old and new column names)
@@ -802,14 +848,36 @@ def load_data_from_source():
                     # Determine if urgent (P1 patients are always urgent)
                     is_urgent = priority == 1 or bool(row.get('is_urgent', False))
 
+                    # Date-aware loading: use the patient's next appointment
+                    # date (built above) so the optimiser can be filtered
+                    # to a single day's demand. Patients without any
+                    # appointment in the registry are NOT phantom-fallen-
+                    # back to today (that inflated demand by ~30 patients
+                    # who weren't actually booked, hurting placement rate
+                    # and confusing the Optimize tab demand display);
+                    # they are stamped at a far-future sentinel date so
+                    # the date filter excludes them cleanly.
+                    appt_iso = appt_dates.get(patient_id)
+                    if appt_iso is None:
+                        # Sentinel: patient has no appointment booked.
+                        # Stamp at year-2099 so date filters skip them.
+                        appt_dt = datetime(2099, 1, 1)
+                    else:
+                        try:
+                            appt_dt = datetime.strptime(appt_iso, '%Y-%m-%d')
+                        except Exception:
+                            appt_dt = datetime(2099, 1, 1)
+                    earliest = appt_dt.replace(hour=8, minute=0)
+                    latest = appt_dt.replace(hour=17, minute=0)
+
                     patient = Patient(
                         patient_id=patient_id,
                         priority=priority,
                         protocol=regimen_code,
                         expected_duration=duration,
                         postcode=postcode,
-                        earliest_time=datetime.now().replace(hour=8, minute=0),
-                        latest_time=datetime.now().replace(hour=17, minute=0),
+                        earliest_time=earliest,
+                        latest_time=latest,
                         long_infusion=long_infusion,
                         is_urgent=is_urgent
                     )
@@ -1217,7 +1285,15 @@ def run_ml_predictions():
             # CRITICAL: Assign noshow prediction to Patient object for optimizer
             patient.noshow_probability = noshow_prob
             if tft_used and tft_duration:
-                patient.expected_duration = int(round(tft_duration))
+                # Clamp TFT duration to ±25% of the regimen-based baseline.
+                # Without this, an under-trained TFT predicts a flat ~150 min
+                # for everyone (e.g. PEMBRO regimen=30 min was being inflated
+                # to 156 min), pushing total chair-min demand above capacity
+                # even though the appointment mix should physically fit.
+                _baseline = patient.expected_duration
+                _lo = int(_baseline * 0.75)
+                _hi = int(_baseline * 1.25)
+                patient.expected_duration = max(_lo, min(_hi, int(round(tft_duration))))
 
             rec = {
                 'patient_id': patient.patient_id,
@@ -1819,8 +1895,34 @@ def refresh_events():
         app_state['active_events'] = events
         app_state['metrics']['events_count'] = len(events)
 
-        # Check for mode changes based on event severity
-        max_severity = max([e.severity for e in events], default=0)
+        # Auto-escalate operating mode --- but ONLY on events whose source
+        # is an authoritative operational signal (weather API, traffic API,
+        # or an operator-added manual alert). News-feed events are
+        # informational and must not flip the mode, because the BBC RSS
+        # keyword classifier in monitoring/news_monitor.py is too loose:
+        # it tags celebrity-hospital news as HEALTH_ALERT, generic mentions
+        # of "Cardiff" as TRAFFIC_INCIDENT, and so on. Those false-positive
+        # operational tags previously force-escalated the dropdown to
+        # EMERGENCY on every page load.
+        #
+        # Allow-listed sources (Event.source string):
+        #   - 'weather'  --- WeatherMonitor (Open-Meteo API; severe weather
+        #                    real)
+        #   - 'traffic'  --- TrafficMonitor (motorway / road API; closures
+        #                    are real)
+        #   - 'manual'   --- operator-added alert (operator has explicitly
+        #                    chosen to elevate)
+        #
+        # Excluded source: 'news' --- BBC RSS feed; informational only.
+        # If a real NHS critical incident or outbreak occurs, the operator
+        # can manually escalate via the dropdown / POST /api/mode, which
+        # is the right deliberate, auditable action for that case.
+        OPERATIONAL_SOURCES = {'weather', 'traffic', 'manual'}
+        operational_events = [
+            e for e in events
+            if getattr(e, 'source', '') in OPERATIONAL_SOURCES
+        ]
+        max_severity = max([e.severity for e in operational_events], default=0)
         if max_severity >= 0.8:
             app_state['mode'] = OperatingMode.EMERGENCY
         elif max_severity >= 0.5:
@@ -2432,6 +2534,80 @@ def train_advanced_ml_models():
         traceback.print_exc()
 
 
+# Helpers used by both initialize_data and the backup-queue endpoints.
+# Defined here (above initialize_data) because module-level startup at
+# the bottom of the file calls initialize_data() before Python reaches
+# the rest of the file — placing the helpers below caused a NameError.
+def _load_appointments_df():
+    """Read the active appointments registry (Channel 1 synthetic, or
+    Channel 2 real hospital if the watcher has auto-promoted)."""
+    appt_path = Path(app_state.get('data_dir', 'datasets/sample_data')) / 'appointments.xlsx'
+    if not appt_path.exists():
+        return None
+    return pd.read_excel(appt_path)
+
+
+def _build_regimen_site_map():
+    """Derive {regimen_code -> set(site_codes)} from the active channel's
+    appointments history. Used by the cross-site overflow path: a patient
+    can only be re-routed to a site that has historically delivered their
+    regimen. Channel-aware (re-derived on Ch1 ⇄ Ch2 swaps via the
+    initialize_data flow that calls this function)."""
+    df = _load_appointments_df()
+    if df is None or 'Regimen_Code' not in df.columns or 'Site_Code' not in df.columns:
+        app_state['regimen_site_map'] = {}
+        return
+    rs_map = {}
+    for reg, grp in df.groupby('Regimen_Code'):
+        rs_map[str(reg)] = set(grp['Site_Code'].astype(str).unique())
+    app_state['regimen_site_map'] = rs_map
+    logger.info(f"Regimen→site eligibility map built: {len(rs_map)} regimens, "
+                f"avg {sum(len(v) for v in rs_map.values()) / max(1, len(rs_map)):.1f} sites/regimen")
+
+
+def _first_fit_overflow(patient, existing_appts, eligible_sites, target_dt,
+                        op_start_hour=8, op_end_hour=17, step_min=15):
+    """Brute-force first-fit chair search across the eligible sites.
+
+    Scans every chair in `optimizer.chairs` whose `site_code` is in
+    `eligible_sites`, walking each chair from `op_start_hour` to
+    `op_end_hour - patient.expected_duration` in `step_min` steps and
+    returning the first slot that doesn't overlap any existing
+    appointment on that chair. Used as a fallback when the squeeze-in
+    handler's gap-based search returns zero options (which happens
+    when no single contiguous gap is wide enough but free time is
+    fragmented). Cross-site overflow only — eligibility is enforced
+    by the caller via the regimen→site map.
+    """
+    duration_min = patient.expected_duration
+    day_start = target_dt.replace(hour=op_start_hour, minute=0)
+    last_start_min = (op_end_hour - op_start_hour) * 60 - duration_min
+    if last_start_min < 0:
+        return None
+
+    # Group existing appointments by chair_id
+    by_chair = {}
+    for a in existing_appts:
+        by_chair.setdefault(a.chair_id, []).append(a)
+
+    for chair in optimizer.chairs:
+        if chair.site_code not in eligible_sites:
+            continue
+        booked = by_chair.get(chair.chair_id, [])
+        for offset in range(0, last_start_min + 1, step_min):
+            cand_start = day_start + timedelta(minutes=offset)
+            cand_end = cand_start + timedelta(minutes=duration_min)
+            # Check for overlap with any booked appointment on this chair
+            conflict = False
+            for a in booked:
+                if cand_start < a.end_time and cand_end > a.start_time:
+                    conflict = True
+                    break
+            if not conflict:
+                return {'chair_id': chair.chair_id, 'site_code': chair.site_code, 'start_time': cand_start}
+    return None
+
+
 # Initialize data on startup
 def initialize_data():
     """
@@ -2452,6 +2628,7 @@ def initialize_data():
 
     load_data_from_source()
     run_ml_predictions()
+    _build_regimen_site_map()
 
     refresh_events()
     if DATA_SOURCE_CONFIG['auto_optimize'] and app_state['patients']:
@@ -6578,17 +6755,61 @@ def api_add_patient():
 
 @app.route('/api/optimize', methods=['POST'])
 def api_optimize():
-    """Run schedule optimization with full ML integration."""
+    """Run schedule optimization with full ML integration.
+
+    Body params (all optional):
+      - target_date: ISO yyyy-mm-dd. Defaults to today's calendar date.
+        Only patients whose earliest_time falls on this date are passed
+        to the solver, so daily demand never exceeds daily capacity.
+    """
     try:
         if app_state['patients']:
+            data = request.json or {}
+            # Wall-clock timer for the run-history strip on the Optimize tab
+            _opt_t0 = datetime.now()
+            # Date-aware filter: only schedule patients whose earliest_time
+            # matches the requested date. Without this filter the solver
+            # was being handed all 213 active patients as if they all
+            # needed a chair *today*, which is ~109% of single-day
+            # capacity — hence the 76 unscheduled.
+            target_date_str = (data.get('target_date') or '').strip() or datetime.now().strftime('%Y-%m-%d')
+            try:
+                target_date_obj = datetime.strptime(target_date_str, '%Y-%m-%d').date()
+            except Exception:
+                target_date_obj = datetime.now().date()
+            full_patients = app_state['patients']
+            day_patients = [p for p in full_patients if getattr(p, 'earliest_time', None) and p.earliest_time.date() == target_date_obj]
+            if not day_patients:
+                return jsonify({
+                    'success': True,
+                    'message': f'No patients booked on {target_date_str}',
+                    'scheduled': 0,
+                    'unscheduled': 0,
+                    'target_date': target_date_str,
+                })
+            # Swap in the day's slice for the existing ML helpers (they
+            # iterate app_state['patients']). The optimiser itself is
+            # called with the LOCAL day_patients list so that even if a
+            # concurrent endpoint (/api/refresh, weight POSTs, periodic
+            # data reload) resets app_state['patients'] back to the full
+            # registry mid-call, the solver can never see it — preventing
+            # the 48-demand → 213-input race that surfaced 136/77 results.
+            app_state['patients'] = day_patients
+            # Stash today's cohort IDs so the fairness audit can scope its
+            # group-rate denominator to "patients booked today" instead of
+            # "every patient in the registry".  Without this scoping the
+            # audit reported FAILs whenever today's booking mix didn't match
+            # the registry-wide age-band distribution, which it never does.
+            app_state['today_patient_ids'] = set(p.patient_id for p in day_patients)
+
             # Step 1: Run ML predictions and assign to Patient objects
             run_ml_predictions()
 
             # Step 2: Apply MC Dropout uncertainty (if available)
-            uncertainty_info = _apply_uncertainty_to_patients(app_state['patients'])
+            uncertainty_info = _apply_uncertainty_to_patients(day_patients)
 
-            # Step 3: Run CP-SAT optimization with ML-informed patients
-            result = optimizer.optimize(app_state['patients'])
+            # Step 3: Run CP-SAT optimization on the local day-filtered list
+            result = optimizer.optimize(day_patients)
             # REPLACE the day's schedule, do NOT extend.  /api/optimize/run
             # (line ~1523), /api/optimize/autoscale (~9093), and the
             # micro-batch handler (~7245) all use = list(...).  The previous
@@ -6598,19 +6819,241 @@ def api_optimize():
             # each slot as a duplicate row.
             app_state['appointments'] = list(result.appointments)
 
+            # Step 3b: Cross-site overflow (option B). For any patient
+            # the solver couldn't fit at their preferred site, try every
+            # site that historically delivers their regimen (eligibility
+            # map built at startup) and gap-fill via the existing
+            # squeeze-in engine. Skipped when lock_to_home_site is set
+            # (operator wants the strict baseline). Each successful
+            # overflow placement carries +14 min travel by default and
+            # incurs a small objective_score penalty so the headline
+            # number reflects the real cost.
+            lock_to_home_site = bool(data.get('lock_to_home_site', False))
+            overflow_assignments = []
+            if not lock_to_home_site and result.unscheduled:
+                rs_map = app_state.get('regimen_site_map') or {}
+                target_dt = datetime.strptime(target_date_str, '%Y-%m-%d')
+                logger.info(f"[overflow] starting for {len(result.unscheduled)} unscheduled, eligibility map has {len(rs_map)} regimens")
+                # Pre-compute the high-no-show slot ranking ONCE for the
+                # whole overflow loop. Without caching, find_best_slot_for_urgent
+                # rebuilt this list per patient (~9s each) — at 70+
+                # unscheduled that ballooned overflow runtime to 11 min.
+                # The ranking is invariant across the leftover patients
+                # (we only append new appointments to result.appointments,
+                # we never modify the existing high-no-show ones), so a
+                # single computation is correct.
+                # Build the no-show cache from the dataset's ground-truth
+                # ML_NoShow_Probability column (0.01-0.59 range, varied
+                # across all durations). The squeeze handler's live
+                # predict() was clipping all values to ~0.22 and only
+                # surfacing long infusions, which made the
+                # expected-wait guard impossible to satisfy — see the
+                # diagnostic that prompted this change. The data-column
+                # path is also faster (no per-appt model call).
+                noshow_slots = []
+                try:
+                    appt_df = _load_appointments_df()
+                    if appt_df is not None and 'ML_NoShow_Probability' in appt_df.columns:
+                        # Patient_ID → ML probability for today's date
+                        prob_lookup = dict(
+                            zip(
+                                appt_df[appt_df['Date'].astype(str).str.startswith(target_date_str)]['Patient_ID'].astype(str),
+                                appt_df[appt_df['Date'].astype(str).str.startswith(target_date_str)]['ML_NoShow_Probability'].astype(float),
+                            )
+                        )
+                    else:
+                        prob_lookup = {}
+
+                    class _Slot:
+                        __slots__ = ('chair_id', 'site_code', 'start_time', 'duration', 'noshow_probability')
+                        def __init__(self, **kw):
+                            for k, v in kw.items():
+                                setattr(self, k, v)
+
+                    for a in result.appointments:
+                        p_noshow = prob_lookup.get(str(a.patient_id), 0.0)
+                        if p_noshow >= 0.10:
+                            noshow_slots.append(_Slot(
+                                chair_id=a.chair_id,
+                                site_code=a.site_code,
+                                start_time=a.start_time,
+                                duration=a.duration,
+                                noshow_probability=p_noshow,
+                            ))
+                    # Sort by *expected wait* ascending — that's what
+                    # determines whether a slot is double-bookable, not
+                    # raw probability. A 30-min slot at p=0.10 (wait
+                    # 27 min) is a better double-book host than a
+                    # 156-min slot at p=0.5 (wait 78 min), even though
+                    # the latter has higher headline probability.
+                    noshow_slots.sort(key=lambda s: (1.0 - s.noshow_probability) * s.duration)
+                    logger.info(f"[overflow] cached {len(noshow_slots)} high-noshow slots (probability >= 0.10) from dataset column")
+                    qualify_30 = sum(1 for s in noshow_slots if (1-s.noshow_probability)*s.duration <= 30)
+                    qualify_45 = sum(1 for s in noshow_slots if (1-s.noshow_probability)*s.duration <= 45)
+                    qualify_60 = sum(1 for s in noshow_slots if (1-s.noshow_probability)*s.duration <= 60)
+                    sample = [(s.duration, round(s.noshow_probability,2), round((1-s.noshow_probability)*s.duration,1))
+                              for s in noshow_slots[:8]]
+                    logger.info(f"[overflow] qualifiers: <=30:{qualify_30}, <=45:{qualify_45}, <=60:{qualify_60}; sample(dur,p,wait)={sample}")
+                except Exception as exc:
+                    logger.warning(f"[overflow] could not pre-compute noshow slots: {exc}")
+                used_double_book_keys = set()  # (chair_id, start_time) — at most one overbook per slot
+                # Per-site capacity diagnostic: how full is each site's
+                # chair-time before overflow runs? If WC is 95% full and
+                # POW/CWM are 20%, first-fit should easily place leftover
+                # patients at the empty sites.
+                _site_load = {}
+                for a in result.appointments:
+                    _site_load.setdefault(a.site_code, 0)
+                    _site_load[a.site_code] += a.duration
+                _site_capacity = {}
+                for ch in optimizer.chairs:
+                    _site_capacity.setdefault(ch.site_code, 0)
+                    _site_capacity[ch.site_code] += 540  # 9-hr day
+                _ff_attempts = 0
+                _ff_succ = 0
+                logger.info(f"[overflow] site loads pre-overflow: " + ", ".join(
+                    f"{s}={_site_load.get(s,0)}/{_site_capacity.get(s,0)}min ({100*_site_load.get(s,0)/max(_site_capacity.get(s,1),1):.0f}%)"
+                    for s in sorted(_site_capacity)
+                ))
+                for pid in list(result.unscheduled):
+                    p = next((pp for pp in day_patients if pp.patient_id == pid), None)
+                    if not p:
+                        continue
+                    eligible_sites = rs_map.get(getattr(p, 'protocol', ''), set())
+                    if not eligible_sites:
+                        continue
+
+                    placed = False
+                    place_method = None
+                    place_chair = place_site = place_start = None
+
+                    # 1) Cross-site first-fit (find a contiguous gap on a
+                    # chair at any eligible site). Cheapest path; runs in
+                    # milliseconds.
+                    _ff_attempts += 1
+                    ff = _first_fit_overflow(p, list(result.appointments), eligible_sites, target_dt)
+                    if ff:
+                        _ff_succ += 1
+                        place_method = 'first_fit'
+                        place_chair = ff['chair_id']
+                        place_site = ff['site_code']
+                        place_start = ff['start_time']
+                        placed = True
+                    elif _ff_attempts <= 3:
+                        # Log first 3 failures so we can see why first-fit
+                        # rejected an apparently feasible patient
+                        chairs_in_eligible = [c for c in optimizer.chairs if c.site_code in eligible_sites]
+                        logger.info(f"[overflow] first-fit MISS for {pid} ({p.protocol}, dur={p.expected_duration}min): {len(chairs_in_eligible)} chairs in eligible sites {sorted(eligible_sites)}; existing appts on those chairs={sum(1 for a in result.appointments if a.site_code in eligible_sites)}")
+
+                    # 2) Reasonable double-booking on a high-no-show slot
+                    # (cached). Pick the highest-probability unbooked
+                    # slot whose chair is in our patient's eligible-site
+                    # set. Buffer guard: bound the *expected* wait at
+                    # 30 min — the threshold a chemotherapy day-unit
+                    # accepts as a "patient bumped, but doesn't need
+                    # rebooking" delay. Tighter caps reduce false-
+                    # positive overbookings so the system doesn't
+                    # over-promise placement at the cost of clinical
+                    # realism — a 50-65 % chair util in steady state is
+                    # healthy for Velindre (it leaves slack for urgent
+                    # insertions and equipment turnaround), not a
+                    # signal to keep adding overbooks.
+                    MAX_EXPECTED_WAIT_MIN = 30
+                    if not placed:
+                        for slot in noshow_slots:
+                            if slot.site_code not in eligible_sites:
+                                continue
+                            slot_dur = float(getattr(slot, 'duration', 0) or 0)
+                            slot_p_noshow = float(getattr(slot, 'noshow_probability', 0) or 0)
+                            expected_wait = (1.0 - slot_p_noshow) * slot_dur
+                            if expected_wait > MAX_EXPECTED_WAIT_MIN:
+                                continue
+                            slot_key = (slot.chair_id, slot.start_time)
+                            if slot_key in used_double_book_keys:
+                                continue
+                            place_method = 'double_book'
+                            place_chair = slot.chair_id
+                            place_site = slot.site_code
+                            place_start = slot.start_time
+                            used_double_book_keys.add(slot_key)
+                            placed = True
+                            break
+
+                    if not placed:
+                        continue
+
+                    new_appt = ScheduledAppointment(
+                        patient_id=p.patient_id,
+                        chair_id=place_chair,
+                        site_code=place_site,
+                        start_time=place_start,
+                        end_time=place_start + timedelta(minutes=p.expected_duration),
+                        duration=p.expected_duration,
+                        priority=p.priority,
+                        travel_time=int(getattr(p, 'travel_time_minutes', 30)) + 14,
+                    )
+                    result.appointments.append(new_appt)
+                    result.unscheduled.remove(p.patient_id)
+                    overflow_assignments.append({
+                        'patient_id': p.patient_id,
+                        'placed_site': place_site,
+                        'chair_id': place_chair,
+                        'start_time': place_start.strftime('%H:%M'),
+                        'added_travel_min': 14,
+                        'method': place_method,
+                    })
+                if overflow_assignments:
+                    app_state['appointments'] = list(result.appointments)
+                    if result.metrics is not None and result.metrics.get('objective_score') is not None:
+                        # Soft penalty: -2 per overflowed patient
+                        result.metrics['objective_score'] = round(
+                            result.metrics['objective_score'] - 2 * len(overflow_assignments), 1
+                        )
+                    logger.info(f"Cross-site overflow placed {len(overflow_assignments)} patients")
+
             # Step 4: Post-optimization fairness check
             fairness_check = _post_optimization_fairness(result)
 
             # Step 5: RL agent feedback (learn from this scheduling decision)
             rl_feedback = _rl_learn_from_schedule(result)
 
-            app_state['patients'] = []  # Clear pending
+            # Restore the full patient registry — we'd swapped in the
+            # day-filtered slice for the run. Without this restore the
+            # registry would be empty after the first /api/optimize and
+            # subsequent runs (or other API calls) would see no patients.
+            app_state['patients'] = full_patients
+
+            runtime_ms = int((datetime.now() - _opt_t0).total_seconds() * 1000)
+            # Append to the rolling run history (last 5) used by the
+            # Optimize-tab "Recent runs" strip. We keep weight-snapshots
+            # so an examiner can see weights at the time of each run.
+            history = app_state.setdefault('optimization_history', [])
+            history.append({
+                'timestamp': datetime.now().isoformat(timespec='seconds'),
+                'target_date': target_date_str,
+                'demand': len(day_patients),
+                'scheduled': len(result.appointments),
+                'unscheduled': len(result.unscheduled),
+                'overflow_count': len(overflow_assignments),
+                'utilization': (result.metrics or {}).get('utilization', 0),
+                'objective_score': (result.metrics or {}).get('objective_score'),
+                'runtime_ms': runtime_ms,
+                'weights': dict(optimizer.weights),
+                'channel': app_state.get('active_channel', 'synthetic'),
+            })
+            del history[:-5]
 
             response = {
                 'success': result.success,
+                'target_date': target_date_str,
+                'demand': len(day_patients),
                 'scheduled': len(result.appointments),
                 'unscheduled': len(result.unscheduled),
+                'lock_to_home_site': lock_to_home_site,
+                'overflow_count': len(overflow_assignments),
+                'overflow_assignments': overflow_assignments,
                 'metrics': result.metrics,
+                'runtime_ms': runtime_ms,
                 'ml_integration': {
                     'noshow_predictions_applied': sum(1 for a in result.appointments if hasattr(a, 'priority')),
                     'uncertainty': uncertainty_info,
@@ -6626,6 +7069,15 @@ def api_optimize():
 
     except Exception as e:
         return jsonify({'success': False, 'message': str(e)})
+
+
+@app.route('/api/optimize/recent', methods=['GET'])
+def api_optimize_recent():
+    """Last 5 optimization runs, used by the Optimize-tab history strip."""
+    return jsonify({
+        'success': True,
+        'runs': app_state.get('optimization_history', []),
+    })
 
 
 def _apply_uncertainty_to_patients(patients):
@@ -6759,6 +7211,21 @@ def api_optimize_weights():
         data = request.json or {}
         new_weights = data.get('weights', {})
         if new_weights:
+            # Auto-normalise so the stored weights always sum to 1.0,
+            # regardless of how the operator dragged the sliders. Without
+            # this the CP-SAT objective uses raw coefficients that don't
+            # form a proper weight vector — fine for relative ordering but
+            # inconsistent with the dissertation macro \optimweights and
+            # the IRL preference learner which both assume a normalised
+            # simplex. The frontend sliders are unconstrained at the UX
+            # level (drag freely up to 1.0 each); the normaliser here is
+            # what keeps the math clean.
+            try:
+                total = sum(float(v) for v in new_weights.values())
+                if total > 0:
+                    new_weights = {k: float(v) / total for k, v in new_weights.items()}
+            except (TypeError, ValueError):
+                pass
             optimizer.weights.update(new_weights)
             logger.info(f"Optimization weights updated: {optimizer.weights}")
         return jsonify({
@@ -8066,8 +8533,19 @@ def api_fairness_audit():
         patients_list = patients_df.to_dict('records')
         scheduled_ids = set(app_state.get('scheduled_patients', []))
 
+        # Scope the audit to today's cohort. Without this the denominator
+        # is the full 1,037-patient registry, so a date-filtered placement
+        # of 188/188 looks like 188/1037 = 18% per group, with spurious
+        # Four-Fifths violations whenever the day's age-band mix differs
+        # from the registry-wide mix (which it always does). Falls back to
+        # the full registry if /api/optimize hasn't been called yet.
+        today_ids = app_state.get('today_patient_ids') or set()
+        if today_ids:
+            patients_list = [p for p in patients_list
+                             if p.get('Patient_ID', p.get('patient_id', '')) in today_ids]
+
         if not scheduled_ids:
-            # Use all patients as scheduled if no optimization has run
+            # Use all (today's) patients as scheduled if no optimization has run
             scheduled_ids = set(p.get('Patient_ID', '') for p in patients_list[:200])
 
         # -------- §4.1 DRO Wasserstein fairness certificate (invisible) -----
@@ -10057,6 +10535,164 @@ def api_find_best_slot():
     except Exception as e:
         logger.error(f"Error finding best slot: {e}")
         return jsonify({'success': False, 'message': str(e)})
+
+
+# ============================================================================
+# Backup-queue endpoints (Schedule-tab integration of Squeeze-In)
+# ============================================================================
+# When the operator filters the Schedule tab to High / Very-High no-show
+# risk, each visible appointment can have an "urgent backup" pre-pinned in
+# case the primary patient does not attend. The existing Squeeze-In tab
+# endpoints (above) are unchanged — these four routes are additive and the
+# UI pathways are independent.
+#
+# Channel-data behaviour (matches the rest of the system, see
+# `docs/THREE_CHANNEL_DATA_STRATEGY.md`):
+#   - Candidate ranking reads the *active* appointments registry. With the
+#     default synthetic mode this is Channel 1 (`datasets/sample_data/
+#     appointments.xlsx`). If the Channel-2 watcher has auto-promoted
+#     real hospital data, the same `app_state['data_dir']` path resolves
+#     to `datasets/real_data/appointments.xlsx` and the endpoint reads
+#     from there — exactly mirroring how the existing Squeeze-In tab
+#     behaves on Ch2 (with the same Patient-ID enforcement guard).
+#   - Event-aware risk weighting comes from Channel 3 (weather + traffic
+#     + news via `squeeze_handler.event_impact_model`). Channel 3 gates
+#     which slots qualify as "high risk" via the ML model upstream — it
+#     does not appear in the +5/+3/+2/+1 ranking arithmetic itself.
+# The popover footer reflects the live `app_state['active_channel']` so
+# the data-source guarantee surfaces on screen and is always honest.
+
+@app.route('/api/urgent/candidates-for-slot/<appt_id>', methods=['GET'])
+def api_candidates_for_slot(appt_id):
+    """Top-3 backup candidates for a high-risk slot.
+
+    Ranks Channel 1 patients by:
+      +5 same regimen as the primary slot (clinical match)
+      +3 duration within 15 min of slot duration (chair fit)
+      +2 priority is P1 / Urgent (clinical urgency)
+      +1 same site (logistics)
+    Excludes the primary patient and any patient already booked on the
+    same calendar date. Returns at most 3 rows (empty list is valid).
+    """
+    try:
+        df = _load_appointments_df()
+        if df is None:
+            return jsonify({'success': False, 'error': 'Appointments table not available'}), 500
+
+        slot_match = df[df['Appointment_ID'].astype(str) == str(appt_id)]
+        if slot_match.empty:
+            return jsonify({'success': False, 'error': 'Slot not found'}), 404
+
+        slot = slot_match.iloc[0]
+        slot_date = str(slot['Date'])[:10]
+        slot_regimen = str(slot.get('Regimen_Code', ''))
+        slot_duration = int(slot.get('Duration_Minutes', 60) or 60)
+        slot_site = str(slot.get('Site_Code', ''))
+        primary_pid = str(slot.get('Patient_ID', ''))
+
+        same_day_pids = set(
+            df[df['Date'].astype(str).str.startswith(slot_date)]['Patient_ID'].astype(str)
+        )
+
+        cand = df[
+            (df['Patient_ID'].astype(str) != primary_pid)
+            & (~df['Patient_ID'].astype(str).isin(same_day_pids))
+        ].copy()
+        if cand.empty:
+            return jsonify({'success': True, 'slot': {'appointment_id': str(appt_id)}, 'candidates': []})
+
+        cand['_score'] = 0.0
+        cand.loc[cand['Regimen_Code'].astype(str) == slot_regimen, '_score'] += 5.0
+        dur_diff = (cand['Duration_Minutes'].astype(float) - float(slot_duration)).abs()
+        cand.loc[dur_diff <= 15, '_score'] += 3.0
+        cand.loc[cand['Priority'].astype(str).str.upper().isin(['P1', 'URGENT', '1']), '_score'] += 2.0
+        cand.loc[cand['Site_Code'].astype(str) == slot_site, '_score'] += 1.0
+
+        cand = cand.sort_values('Date', ascending=False).drop_duplicates(subset=['Patient_ID'])
+        top3 = cand.nlargest(3, '_score')
+
+        candidates = []
+        for _, row in top3.iterrows():
+            candidates.append({
+                'patient_id': str(row['Patient_ID']),
+                'patient_name': str(row.get('Patient_Name', '')),
+                'regimen': str(row.get('Regimen_Code', '')),
+                'duration': int(row.get('Duration_Minutes', slot_duration) or slot_duration),
+                'priority': str(row.get('Priority', 'P3')),
+                'site': str(row.get('Site_Code', '')),
+                'score': round(float(row['_score']), 1),
+            })
+
+        active_channel = app_state.get('active_channel', 'synthetic')
+        # The candidate registry follows whichever channel is live —
+        # Channel 1 in synthetic mode, Channel 2 if the watcher has
+        # promoted real data. The risk gate that decides which slots
+        # qualify is event-aware via Channel 3 upstream.
+        return jsonify({
+            'success': True,
+            'slot': {
+                'appointment_id': str(appt_id),
+                'date': slot_date,
+                'time': str(slot.get('Start_Time', '')),
+                'chair': int(slot.get('Chair_Number', 0) or 0),
+                'regimen': slot_regimen,
+                'duration': slot_duration,
+                'site': slot_site,
+            },
+            'candidates': candidates,
+            'data_sources': {
+                'active_channel': active_channel,  # 'synthetic' (Ch1) or 'real' (Ch2)
+                'registry_channel': 'CH2' if active_channel == 'real' else 'CH1',
+                'event_channel_3': squeeze_handler.event_impact_model is not None,
+            },
+        })
+    except Exception as e:
+        logger.error(f"candidates-for-slot error: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/urgent/queue-backup', methods=['POST'])
+def api_queue_backup():
+    """Pin an urgent patient as backup for a high-risk primary slot."""
+    data = request.json or {}
+    appt_id = str(data.get('appointment_id', '')).strip()
+    patient_id = str(data.get('urgent_patient_id', '')).strip()
+    if not appt_id or not patient_id:
+        return jsonify({'success': False, 'error': 'appointment_id and urgent_patient_id required'}), 400
+
+    backup_queue = app_state['urgent_insertion'].setdefault('backup_queue', {})
+    backup_queue[appt_id] = {
+        'urgent_patient_id': patient_id,
+        'urgent_patient_name': str(data.get('urgent_patient_name', '')),
+        'urgent_priority': str(data.get('urgent_priority', 'P1')),
+        'urgent_duration': int(data.get('urgent_duration', 60) or 60),
+        'urgent_regimen': str(data.get('urgent_regimen', '')),
+        'queued_at': datetime.now().isoformat(),
+    }
+    return jsonify({
+        'success': True,
+        'message': f'Backup queued for slot {appt_id}',
+        'queued_count': len(backup_queue),
+        'entry': backup_queue[appt_id],
+    })
+
+
+@app.route('/api/urgent/backups', methods=['GET'])
+def api_list_backups():
+    """List every queued backup (used by the Schedule tab to render indicators)."""
+    backup_queue = app_state['urgent_insertion'].get('backup_queue', {})
+    return jsonify({'success': True, 'backups': backup_queue, 'count': len(backup_queue)})
+
+
+@app.route('/api/urgent/queue-backup/<appt_id>', methods=['DELETE'])
+def api_cancel_backup(appt_id):
+    """Cancel a queued backup."""
+    backup_queue = app_state['urgent_insertion'].get('backup_queue', {})
+    appt_id = str(appt_id).strip()
+    if appt_id in backup_queue:
+        removed = backup_queue.pop(appt_id)
+        return jsonify({'success': True, 'message': 'Backup cancelled', 'removed': removed})
+    return jsonify({'success': False, 'error': 'No backup queued for this slot'}), 404
 
 
 @app.route('/api/events')

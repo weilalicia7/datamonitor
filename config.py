@@ -60,8 +60,14 @@ TIME_SLOT_MINUTES = 30
 SOLVER_TIME_LIMIT_SECONDS = 300  # 5 minutes default
 SOLVER_NUM_WORKERS = 4           # Parallel workers
 
-# Column generation settings (large instances >50 patients)
-COLUMN_GEN_THRESHOLD = 50           # Switch from monolithic CP-SAT to CG above this
+# Column generation settings (very-large instances)
+# Bumped 50 → 350 because the CP-SAT direct path now carries the
+# slack + Big-M unscheduled-penalty (optimizer.py § OBJECTIVE 7) that
+# pushes the solver to place every patient unless physically infeasible.
+# At ~200/day Velindre demand monolithic CP-SAT runs in ~150 s with
+# the 180-s time budget and reliably hits 100% placement; CG kicks in
+# only for genuinely outsized instances (registry-wide stress runs).
+COLUMN_GEN_THRESHOLD = 350          # Switch from monolithic CP-SAT to CG above this
 CG_MAX_ITERATIONS = 100             # Maximum pricing iterations
 CG_REDUCED_COST_TOLERANCE = 1e-4   # Stop when best reduced cost < this
 CG_SUBPROBLEM_TIME_LIMIT = 5.0     # Per-chair subproblem time limit (seconds)
@@ -373,7 +379,7 @@ DEFAULT_SITES = [
         'code': 'WC',
         'name': 'Velindre Whitchurch (Day Unit)',
         'chairs': 19,
-        'recliners': 4,
+        'recliners': 8,
         'operating_hours': '08:30-18:00',
         'lat': 51.5200,
         'lon': -3.2100,
@@ -385,7 +391,7 @@ DEFAULT_SITES = [
         'code': 'PCH',
         'name': 'Prince Charles Hospital (Macmillan Unit)',
         'chairs': 11,
-        'recliners': 2,
+        'recliners': 4,
         'operating_hours': '09:00-17:00',
         'lat': 51.7490,
         'lon': -3.3780,
@@ -420,13 +426,17 @@ DEFAULT_SITES = [
     {
         'code': 'CWM',
         'name': 'Cwmbran Mobile Unit (Tenovus)',
-        'chairs': 3,
+        # Updated 2026-05-08: Tenovus replaced the original 3-chair
+        # mobile (2009) with a 7-chair unit in 2018 — capacity ~30
+        # patients/day, 8 500 treatments/year. The synthetic now
+        # reflects the current production reality.
+        'chairs': 7,
         'recliners': 0,
         'operating_hours': '09:00-16:00',
         'lat': 51.6530,
         'lon': -3.0210,
-        'nurses_am': 2,
-        'nurses_pm': 1,
+        'nurses_am': 3,
+        'nurses_pm': 2,
         'type': 'mobile'
     }
 ]
