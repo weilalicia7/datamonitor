@@ -348,11 +348,6 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-
 <div class="content">
     <!-- TAB: SCHEDULE (Gantt Chart) -->
     <div id="tab-schedule" class="tab-content">
-        <!-- Mode banner: hidden when mode == NORMAL; populated by
-             refreshScheduleModeBanner() from the most recent /api/optimize
-             response so the operator can see which mode produced the
-             schedule on screen and how many patients were deferred. -->
-        <div id="sched-mode-banner" style="display:none;margin:0 0 10px;padding:10px 14px;border-radius:6px;font-size:0.85em;line-height:1.45;"></div>
         <div class="controls">
             <label>Date:</label>
             <input type="date" id="date-select" style="width:160px;">
@@ -2042,7 +2037,7 @@ function previewSlots() {
                 window._autoOptimiseTried = true;
                 document.getElementById('sq-result').innerHTML =
                     `<div style="padding:10px 12px;background:#fff7ed;border-radius:5px;border-left:3px solid #f59e0b;font-size:0.85em;color:#7c2d12;">
-                        Auto-running optimiser to populate today's schedule (this can take about 5 min on first load), then re-trying Preview...
+                        Auto-running optimiser to populate today&apos;s schedule (this can take ~5 min on first load), then re-trying Preview&hellip;
                     </div>`;
                 const optDateEl = document.getElementById('opt-date');
                 const datePickerEl = document.getElementById('date-select');
@@ -2155,10 +2150,6 @@ function insertUrgent(forceRescheduling) {
             h += '</div>';
             r.innerHTML = h;
             loadSqueezeTab();
-            // Also refresh the Schedule-tab mode banner so an operator
-            // who switches to that view sees the just-inserted walk-in
-            // attributed to the current mode.
-            try { paintScheduleModeBanner(d); } catch (e) { /* swallow */ }
         } else {
             // If the cascade exhausted gaps + double-book and the user had
             // rescheduling off, surface a one-click retry that turns it on
@@ -2215,7 +2206,7 @@ function loadSqueezeTab() {
                 window._autoOptimiseTried = true;
                 document.getElementById('noshow-slots').innerHTML =
                     `<div style="padding:10px 12px;background:#fff7ed;border-radius:5px;border-left:3px solid #f59e0b;font-size:0.85em;color:#7c2d12;">
-                        Auto-running optimiser to populate today's schedule (this can take about 5 min on first load)...
+                        Auto-running optimiser to populate today&apos;s schedule (this can take ~5 min on first load)&hellip;
                     </div>`;
                 const optDateEl = document.getElementById('opt-date');
                 const datePickerEl = document.getElementById('date-select');
@@ -2336,40 +2327,6 @@ async function saveWeightsAndRun() {
 
 function _setKPI(id, v) { const e = document.getElementById(id); if (e) e.textContent = v; }
 
-// Show a mode banner on the Schedule tab summarising the run that
-// produced the visible Gantt. Hidden when mode is NORMAL (no deltas
-// applied). Shown with mode-coloured border + deferred-patient count
-// when ELEVATED / CRISIS / EMERGENCY.
-function paintScheduleModeBanner(d) {
-    const el = document.getElementById('sched-mode-banner');
-    if (!el) return;
-    const mode = (d && d.mode) || 'normal';
-    if (mode === 'normal') {
-        el.style.display = 'none';
-        el.innerHTML = '';
-        return;
-    }
-    const palette = {
-        elevated:  {bg: '#fef3c7', border: '#f59e0b', fg: '#92400e'},
-        crisis:    {bg: '#fed7aa', border: '#f97316', fg: '#7c2d12'},
-        emergency: {bg: '#fee2e2', border: '#ef4444', fg: '#7f1d1d'},
-    };
-    const c = palette[mode] || palette.elevated;
-    el.style.display = 'block';
-    el.style.background = c.bg;
-    el.style.borderLeft = '4px solid ' + c.border;
-    el.style.color = c.fg;
-    const actions = (d.mode_actions || []).map(escapeHtml).join(' &middot; ') || '(none recorded)';
-    const deferred = d.deferred_count || 0;
-    const deferredHtml = deferred > 0
-        ? `<strong>${deferred}</strong> patients deferred this run.`
-        : 'No patients deferred this run.';
-    el.innerHTML =
-        `<strong>${mode.toUpperCase()} mode active.</strong> `
-        + `Schedule below was produced under ${escapeHtml(mode)} settings: ${actions}. `
-        + deferredHtml;
-}
-
 function populateOptKPIs(d, runtime_ms_hint) {
     const m = d && d.metrics ? d.metrics : {};
     _setKPI('kpi-last', new Date().toLocaleTimeString('en-GB', {hour:'2-digit', minute:'2-digit', second:'2-digit'}));
@@ -2423,10 +2380,6 @@ function runOptimize() {
     fetch('/api/optimize', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)}).then(r=>r.json()).then(d => {
         const elapsed = Date.now() - t0;
         populateOptKPIs(d, elapsed);
-        // Mirror the run's mode + deferred count onto the Schedule tab so
-        // an operator who flips to that view immediately sees what mode
-        // produced the visible Gantt and how many patients were deferred.
-        try { paintScheduleModeBanner(d); } catch (e) { /* swallow */ }
         const placedTotal = (d.scheduled || 0);
         const homeSitePlaced = placedTotal - (d.overflow_count || 0);
         let h = `<div style="padding:10px;background:#f0fdf4;border-radius:6px;border-left:3px solid #10b981;">
@@ -2642,92 +2595,12 @@ function loadDataChannelStatus() {
     }).catch(() => {});
 }
 
-// Re-fetch /api/schedule/full and refresh the in-memory appointments
-// list + Gantt. Called from switchMode() so flipping mode also flips
-// the visible schedule, and from anywhere else that needs the Gantt
-// to reflect the latest live state without a full page reload.
-function reloadAppointments() {
-    return fetch('/api/schedule/full').then(r => r.json()).then(schedRes => {
-        appointments = (schedRes.schedule || []).map(a => ({
-            id: a.Appointment_ID || '',
-            pid: a.Patient_ID || '',
-            name: a.Patient_Name || '',
-            nhs: a.NHS_Number || '',
-            date: a.Date || '',
-            start: a.Start_Time || '',
-            end: a.End_Time || '',
-            dur: a.Duration_Minutes || 60,
-            site: a.Site_Code || '',
-            siteName: a.Site_Name || '',
-            chair: a.Chair_Number || 1,
-            chairId: a.Chair_ID || '',
-            reg: a.Regimen_Code || '',
-            regName: a.Regimen_Name || '',
-            cancer: a.Cancer_Type || '',
-            cycle: a.Cycle_Number || 1,
-            totalCycles: a.Total_Cycles || 1,
-            dayInCycle: a.Day_In_Cycle || 1,
-            priority: a.Priority || 'P3',
-            bed: a.Requires_Bed || false,
-            oneToOne: a.Requires_1to1_Nursing || false,
-            nurse: a.Nurse_Name || '',
-            nurseId: a.Nurse_ID || '',
-            status: a.Status || 'Scheduled',
-            noshow: a.noshow_probability || a.ML_NoShow_Probability || 0,
-            risk: a.risk_level || 'unknown',
-            ps: a.Performance_Status || 0,
-        }));
-        renderSchedule();
-        renderAppointments();
-    }).catch(() => {});
-}
-
 function switchMode(mode) {
-    fetch('/api/mode', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({mode:mode})}).then(r=>r.json()).then(() => {
+    fetch('/api/mode', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({mode:mode})}).then(r=>r.json()).then(d => {
         const modeColors = {normal:'#22c55e',elevated:'#f59e0b',crisis:'#f97316',emergency:'#ef4444'};
         const mb = document.getElementById('mode-badge');
         mb.textContent = mode.toUpperCase();
         mb.style.background = modeColors[mode] || '#22c55e';
-
-        // Auto re-optimise so the Schedule tab actually reflects the
-        // chosen mode's deltas (priority floor + duration buffer +
-        // community sites). Without this the dropdown only repaints
-        // the badge while the Gantt continues showing the prior mode's
-        // schedule.  Long-running call (~5 min) — surface a progress
-        // banner so the operator knows why the page is busy.
-        const banner = document.getElementById('sched-mode-banner');
-        if (banner) {
-            banner.style.display = 'block';
-            banner.style.background = '#dbeafe';
-            banner.style.borderLeft = '4px solid #3b82f6';
-            banner.style.color = '#1e40af';
-            banner.innerHTML =
-                `<strong>Re-optimising schedule for ${mode.toUpperCase()} mode...</strong> `
-                + `This typically takes about 5 minutes; the Gantt will refresh automatically when done.`;
-        }
-
-        const optDateEl = document.getElementById('opt-date');
-        const datePickerEl = document.getElementById('date-select');
-        const target_date = (optDateEl && optDateEl.value)
-                            || (datePickerEl && datePickerEl.value)
-                            || undefined;
-
-        fetch('/api/optimize', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({target_date}),
-        }).then(r => r.json()).then(d => {
-            return reloadAppointments().then(() => {
-                try { paintScheduleModeBanner(d); } catch (e) { /* swallow */ }
-            });
-        }).catch(e => {
-            if (banner) {
-                banner.style.background = '#fee2e2';
-                banner.style.borderLeft = '4px solid #ef4444';
-                banner.style.color = '#7f1d1d';
-                banner.innerHTML = `<strong>Re-optimise failed:</strong> ${escapeHtml(e.message)}`;
-            }
-        });
     });
 }
 
