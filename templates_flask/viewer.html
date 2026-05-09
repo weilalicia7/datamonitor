@@ -628,9 +628,20 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-
 
     <!-- TAB: STAFF -->
     <div id="tab-staff" class="tab-content hidden">
+        <div class="controls">
+            <span style="font-size:0.75em;color:#94a3b8;margin-left:auto;">Click any column header to sort &middot; click again to reverse</span>
+        </div>
         <div style="overflow-x: auto; max-height: 70vh; overflow-y: auto;">
-            <table class="data-table">
-                <thead><tr><th>ID</th><th>Name</th><th>Role</th><th>Band</th><th>Site</th><th>SACT Trained</th><th>1:1 Capable</th></tr></thead>
+            <table class="data-table sortable-table" id="staff-table">
+                <thead><tr>
+                    <th data-col="id"      onclick="sortStaff('id')">ID<span class="sort-ind"></span></th>
+                    <th data-col="name"    onclick="sortStaff('name')">Name<span class="sort-ind"></span></th>
+                    <th data-col="role"    onclick="sortStaff('role')">Role<span class="sort-ind"></span></th>
+                    <th data-col="band"    onclick="sortStaff('band')">Band<span class="sort-ind"></span></th>
+                    <th data-col="site"    onclick="sortStaff('site')">Site<span class="sort-ind"></span></th>
+                    <th data-col="sact"    onclick="sortStaff('sact')">SACT Trained<span class="sort-ind"></span></th>
+                    <th data-col="oneOne"  onclick="sortStaff('oneOne')">1:1 Capable<span class="sort-ind"></span></th>
+                </tr></thead>
                 <tbody id="staff-body"></tbody>
             </table>
         </div>
@@ -1809,9 +1820,54 @@ function renderPatients() {
 // ================================================================
 // STAFF TABLE
 // ================================================================
+// Per-column sort state for the Staff table — same pattern as Appointments
+// and Patients. Booleans (SACT trained, 1:1 capable) become 1/0 so they
+// group cleanly when sorted.
+let _staffSort = { col: null, dir: 'asc' };
+
+const _staffName = s => (s.Name || ((s.First_Name || '') + ' ' + (s.Surname || ''))).trim().toLowerCase();
+const _staffSortGetters = {
+    id:     s => String(s.Staff_ID || s.id || ''),
+    name:   s => _staffName(s),
+    role:   s => (s.Role || s.role || '').toLowerCase(),
+    band:   s => String(s.Band || s.band || ''),
+    site:   s => (s.Site_Code || s.site_id || '').toLowerCase(),
+    sact:   s => (s.SACT_Trained || s.Chemotherapy_Trained) ? 1 : 0,
+    oneOne: s => s.Can_Administer_1to1 ? 1 : 0,
+};
+
+function sortStaff(col) {
+    if (!_staffSortGetters[col]) return;
+    if (_staffSort.col === col) {
+        _staffSort.dir = _staffSort.dir === 'asc' ? 'desc' : 'asc';
+    } else {
+        _staffSort.col = col;
+        _staffSort.dir = 'asc';
+    }
+    renderStaff();
+}
+
 function renderStaff() {
+    let rows = staff;
+    if (_staffSort.col && _staffSortGetters[_staffSort.col]) {
+        const getter = _staffSortGetters[_staffSort.col];
+        const sign = _staffSort.dir === 'asc' ? 1 : -1;
+        rows = rows.slice().sort((x, y) => {
+            const xv = getter(x), yv = getter(y);
+            if (typeof xv === 'number' && typeof yv === 'number') return (xv - yv) * sign;
+            return String(xv).localeCompare(String(yv), undefined, {numeric: true}) * sign;
+        });
+    }
+
+    document.querySelectorAll('#staff-table thead th').forEach(th => {
+        th.classList.remove('sort-asc', 'sort-desc');
+        if (th.dataset.col === _staffSort.col) {
+            th.classList.add(_staffSort.dir === 'asc' ? 'sort-asc' : 'sort-desc');
+        }
+    });
+
     const tbody = document.getElementById('staff-body');
-    tbody.innerHTML = staff.map(s => `<tr>
+    tbody.innerHTML = rows.map(s => `<tr>
         <td>${s.Staff_ID||s.id||''}</td>
         <td>${s.Name||((s.First_Name||'')+' '+(s.Surname||''))}</td>
         <td>${s.Role||s.role||''}</td>
