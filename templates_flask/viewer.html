@@ -1989,19 +1989,30 @@ function previewSlots() {
         } else {
             // Distinguish "schedule empty" (operator just needs to run the
             // optimiser) from "schedule full" (genuine no-fit) so the empty
-            // state isn't read as a bug.
+            // state isn't read as a bug. Auto-run the optimiser once on
+            // empty so the operator doesn't have to bounce to Optimize tab.
             const total = (d.total_options !== undefined) ? d.total_options : 0;
-            if (d.success && total === 0) {
+            if (d.success && total === 0 && !window._autoOptimiseTried) {
+                window._autoOptimiseTried = true;
                 document.getElementById('sq-result').innerHTML =
                     `<div style="padding:10px 12px;background:#fff7ed;border-radius:5px;border-left:3px solid #f59e0b;font-size:0.85em;color:#7c2d12;">
-                        <strong>No optimised schedule loaded.</strong>
-                        Preview Best Slots scores existing scheduled appointments by no-show probability,
-                        but the day's schedule is currently empty (e.g. immediately after a fresh boot
-                        or after &lsquo;Insert urgent patient&rsquo; reset state).
-                        Run the optimiser from the <em>Optimize</em> tab (or POST /api/optimize/run)
-                        to populate the day, then click <em>Preview Best Slots</em> again.
-                        This is expected behaviour, not a bug.
+                        Auto-running optimiser to populate today&apos;s schedule (this can take ~5 min on first load), then re-trying Preview&hellip;
                     </div>`;
+                const optDateEl = document.getElementById('opt-date');
+                const datePickerEl = document.getElementById('date-select');
+                const target_date = (optDateEl && optDateEl.value)
+                                    || (datePickerEl && datePickerEl.value)
+                                    || undefined;
+                fetch('/api/optimize', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({target_date}),
+                }).then(r => r.json()).then(() => {
+                    previewSlots();
+                }).catch(e => {
+                    document.getElementById('sq-result').innerHTML =
+                        '<span style="color:#ef4444;">Auto-optimise failed: '+e.message+'</span>';
+                });
             } else {
                 document.getElementById('sq-result').innerHTML =
                     '<span style="color:#ef4444;">No slots available: ' + (d.message || 'Schedule may be full') + '</span>';
@@ -2128,21 +2139,40 @@ function loadSqueezeTab() {
             });
             document.getElementById('noshow-slots').innerHTML = h;
         } else {
-            // Empty state: distinguish "no schedule loaded" from "schedule loaded
-            // but no high-risk slots".  total_slots = 0 means there's nothing
-            // to score (the day's optimised schedule is empty), which usually
-            // means the operator needs to run the optimiser first.
-            const empty = totalRaw === 0
-                ? `<div style="padding:10px 12px;background:#fff7ed;border-radius:5px;border-left:3px solid #f59e0b;font-size:0.85em;color:#7c2d12;">
-                    <strong>No optimised schedule loaded.</strong>
-                    The squeeze-in handler scores existing scheduled appointments by no-show probability,
-                    but the day's schedule is currently empty (e.g. immediately after a fresh boot
-                    or after ‘Insert urgent patient’ reset state).
-                    Run the optimiser from the <em>Optimize</em> tab (or POST /api/optimize/run)
-                    to populate the day, then return here. This is expected behaviour, not a bug.
-                </div>`
-                : `<span style="color:#888;">Schedule has ${totalRaw} appointments, but none crossed the 0.20 medium-risk threshold.</span>`;
-            document.getElementById('noshow-slots').innerHTML = empty;
+            // Empty state. Two cases:
+            //   totalRaw === 0  → no schedule loaded yet; auto-run the optimiser
+            //                    once on the active date so the panel populates
+            //                    without the operator having to bounce to the
+            //                    Optimize tab (the prior message read as a bug).
+            //   totalRaw  > 0   → schedule is loaded but no slot crossed the
+            //                    0.20 risk threshold; just say so.
+            if (totalRaw === 0 && !window._autoOptimiseTried) {
+                window._autoOptimiseTried = true;
+                document.getElementById('noshow-slots').innerHTML =
+                    `<div style="padding:10px 12px;background:#fff7ed;border-radius:5px;border-left:3px solid #f59e0b;font-size:0.85em;color:#7c2d12;">
+                        Auto-running optimiser to populate today&apos;s schedule (this can take ~5 min on first load)&hellip;
+                    </div>`;
+                const optDateEl = document.getElementById('opt-date');
+                const datePickerEl = document.getElementById('date-select');
+                const target_date = (optDateEl && optDateEl.value)
+                                    || (datePickerEl && datePickerEl.value)
+                                    || undefined;
+                fetch('/api/optimize', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({target_date}),
+                }).then(r => r.json()).then(() => {
+                    loadSqueezeTab();
+                }).catch(e => {
+                    document.getElementById('noshow-slots').innerHTML =
+                        '<span style="color:#ef4444;">Auto-optimise failed: '+e.message+'</span>';
+                });
+            } else {
+                const empty = totalRaw === 0
+                    ? `<span style="color:#888;">Auto-optimise returned no appointments for the selected date — try a different date.</span>`
+                    : `<span style="color:#888;">Schedule has ${totalRaw} appointments, but none crossed the 0.20 medium-risk threshold.</span>`;
+                document.getElementById('noshow-slots').innerHTML = empty;
+            }
         }
     }).catch(() => { document.getElementById('noshow-slots').innerHTML = '<span style="color:#888;">Could not load slots</span>'; });
 
