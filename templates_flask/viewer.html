@@ -606,10 +606,21 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-
         <div class="controls">
             <label>Search:</label>
             <input type="text" id="pt-search" placeholder="Name or NHS Number..." oninput="renderPatients()">
+            <span style="font-size:0.75em;color:#94a3b8;margin-left:auto;">Click any column header to sort &middot; click again to reverse</span>
         </div>
         <div style="overflow-x: auto; max-height: 70vh; overflow-y: auto;">
-            <table class="data-table">
-                <thead><tr><th>NHS#</th><th>Name</th><th>Age</th><th>Regimen</th><th>Cycle</th><th>Priority</th><th>Performance</th><th>No-Show Rate</th><th>Travel</th></tr></thead>
+            <table class="data-table sortable-table" id="pt-table">
+                <thead><tr>
+                    <th data-col="nhs"         onclick="sortPatients('nhs')">NHS#<span class="sort-ind"></span></th>
+                    <th data-col="name"        onclick="sortPatients('name')">Name<span class="sort-ind"></span></th>
+                    <th data-col="age"         onclick="sortPatients('age')">Age<span class="sort-ind"></span></th>
+                    <th data-col="regimen"     onclick="sortPatients('regimen')">Regimen<span class="sort-ind"></span></th>
+                    <th data-col="cycle"       onclick="sortPatients('cycle')">Cycle<span class="sort-ind"></span></th>
+                    <th data-col="priority"    onclick="sortPatients('priority')">Priority<span class="sort-ind"></span></th>
+                    <th data-col="performance" onclick="sortPatients('performance')">Performance<span class="sort-ind"></span></th>
+                    <th data-col="noshow"      onclick="sortPatients('noshow')">No-Show Rate<span class="sort-ind"></span></th>
+                    <th data-col="travel"      onclick="sortPatients('travel')">Travel<span class="sort-ind"></span></th>
+                </tr></thead>
                 <tbody id="pt-body"></tbody>
             </table>
         </div>
@@ -1714,10 +1725,67 @@ function renderAppointments() {
 // ================================================================
 // PATIENTS TABLE
 // ================================================================
+// Per-column sort state for the Patients table — same pattern as
+// _apptSort. Priority extracts a numeric rank from "P1"/"P2"/"P3"/"P4"
+// or accepts a raw integer; PS uses the numeric Performance_Status; rate
+// fields fall back to Historical_NoShow_Rate when no live ML pred exists.
+let _ptSort = { col: null, dir: 'asc' };
+
+const _ptPriorityRank = v => {
+    if (v == null || v === '') return 99;
+    const s = String(v).toUpperCase();
+    const m = s.match(/(\d+)/);
+    return m ? Number(m[1]) : 99;
+};
+const _ptNoshowVal = p => {
+    const pred = mlPredictions[p.Patient_ID || p.patient_id];
+    if (pred && typeof pred.probability === 'number') return pred.probability;
+    return Number(p.Historical_NoShow_Rate) || 0;
+};
+const _ptSortGetters = {
+    nhs:         p => String(p.NHS_Number || ''),
+    name:        p => ((p.Person_Family_Name || p.Surname || '') + ' ' + (p.Person_Given_Name || p.First_Name || '')).toLowerCase(),
+    age:         p => Number(p.Age) || 0,
+    regimen:     p => (p.Regimen_Name || p.Regimen_Code || '').toLowerCase(),
+    cycle:       p => Number(p.Cycle_Number) || 0,
+    priority:    p => _ptPriorityRank(p.Priority),
+    performance: p => Number(p.Performance_Status) || 99,
+    noshow:      p => _ptNoshowVal(p),
+    travel:      p => Number(p.Travel_Time_Min) || 0,
+};
+
+function sortPatients(col) {
+    if (!_ptSortGetters[col]) return;
+    if (_ptSort.col === col) {
+        _ptSort.dir = _ptSort.dir === 'asc' ? 'desc' : 'asc';
+    } else {
+        _ptSort.col = col;
+        _ptSort.dir = 'asc';
+    }
+    renderPatients();
+}
+
 function renderPatients() {
     const search = (document.getElementById('pt-search').value || '').toLowerCase();
     let filtered = patients;
     if (search) filtered = filtered.filter(p => ((p.Person_Given_Name||'')+(p.Person_Family_Name||'')+(p.NHS_Number||'')+(p.Patient_ID||'')).toLowerCase().includes(search));
+
+    if (_ptSort.col && _ptSortGetters[_ptSort.col]) {
+        const getter = _ptSortGetters[_ptSort.col];
+        const sign = _ptSort.dir === 'asc' ? 1 : -1;
+        filtered = filtered.slice().sort((x, y) => {
+            const xv = getter(x), yv = getter(y);
+            if (typeof xv === 'number' && typeof yv === 'number') return (xv - yv) * sign;
+            return String(xv).localeCompare(String(yv), undefined, {numeric: true}) * sign;
+        });
+    }
+
+    document.querySelectorAll('#pt-table thead th').forEach(th => {
+        th.classList.remove('sort-asc', 'sort-desc');
+        if (th.dataset.col === _ptSort.col) {
+            th.classList.add(_ptSort.dir === 'asc' ? 'sort-asc' : 'sort-desc');
+        }
+    });
 
     const tbody = document.getElementById('pt-body');
     tbody.innerHTML = filtered.slice(0, 200).map(p => {
