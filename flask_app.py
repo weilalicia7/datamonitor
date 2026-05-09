@@ -6808,8 +6808,78 @@ def api_optimize():
             # Step 2: Apply MC Dropout uncertainty (if available)
             uncertainty_info = _apply_uncertainty_to_patients(day_patients)
 
-            # Step 3: Run CP-SAT optimization on the local day-filtered list
-            result = optimizer.optimize(day_patients)
+            # Step 3: Mode-aware CP-SAT optimization. NORMAL mode runs the
+            # solver as-is. ELEVATED/CRISIS/EMERGENCY apply the deltas
+            # specified in EmergencyModeHandler.MODE_SETTINGS — duration
+            # buffer (1.15/1.25/1.5x), priority floor (P4/P3/P2 cut-off),
+            # and community-site chairs (EMERGENCY only). Mutations to
+            # patient.expected_duration and optimizer.chairs are
+            # snapshotted and restored after the solve so switching back
+            # to NORMAL doesn't carry over inflated durations or extra
+            # chairs.
+            current_mode = app_state.get('mode', OperatingMode.NORMAL)
+            mode_actions = []
+            deferred_ids = []
+            if current_mode != OperatingMode.NORMAL:
+                settings = EmergencyModeHandler.MODE_SETTINGS[current_mode]
+                min_priority = settings['min_priority']
+                eligible = [p for p in day_patients if p.priority <= min_priority]
+                deferred = [p for p in day_patients if p.priority > min_priority]
+                deferred_ids = [p.patient_id for p in deferred]
+
+                duration_snapshot = {p.patient_id: p.expected_duration for p in eligible}
+                buffer_mult = settings['buffer_multiplier']
+                if buffer_mult != 1.0:
+                    for p in eligible:
+                        p.expected_duration = int(p.expected_duration * buffer_mult)
+                    mode_actions.append(
+                        f"Inflated durations by {int((buffer_mult-1)*100)}% "
+                        f"({current_mode.value} mode buffer)"
+                    )
+                if deferred:
+                    mode_actions.append(
+                        f"Deferred {len(deferred)} patients with priority > P{min_priority} "
+                        f"({current_mode.value} mode floor)"
+                    )
+
+                chairs_snapshot = list(optimizer.chairs)
+                if settings['community_sites']:
+                    from config import OPERATING_HOURS as _oh
+                    sh_, eh_ = _oh
+                    _target_dt = datetime.strptime(target_date_str, '%Y-%m-%d')
+                    community_chairs = []
+                    for site in EmergencyModeHandler.COMMUNITY_SITES:
+                        for i in range(site['chairs']):
+                            community_chairs.append(Chair(
+                                chair_id=f"{site['code']}-C{i+1:02d}",
+                                site_code=site['code'],
+                                is_recliner=False,
+                                available_from=_target_dt.replace(hour=sh_, minute=0),
+                                available_until=_target_dt.replace(hour=eh_, minute=0),
+                            ))
+                    optimizer.set_chairs(chairs_snapshot + community_chairs)
+                    mode_actions.append(
+                        f"Activated {len(EmergencyModeHandler.COMMUNITY_SITES)} community sites "
+                        f"(+{len(community_chairs)} chairs)"
+                    )
+
+                emergency_handler.set_mode(current_mode)
+                logger.info(
+                    f"[mode] {current_mode.value}: eligible={len(eligible)}, "
+                    f"deferred={len(deferred)}, buffer={buffer_mult}, "
+                    f"community={settings['community_sites']}"
+                )
+                try:
+                    result = optimizer.optimize(eligible)
+                finally:
+                    # Restore mutations regardless of solver outcome so a
+                    # subsequent NORMAL-mode run sees clean state.
+                    for p in eligible:
+                        if p.patient_id in duration_snapshot:
+                            p.expected_duration = duration_snapshot[p.patient_id]
+                    optimizer.set_chairs(chairs_snapshot)
+            else:
+                result = optimizer.optimize(day_patients)
             # REPLACE the day's schedule, do NOT extend.  /api/optimize/run
             # (line ~1523), /api/optimize/autoscale (~9093), and the
             # micro-batch handler (~7245) all use = list(...).  The previous
@@ -7054,6 +7124,10 @@ def api_optimize():
                 'overflow_assignments': overflow_assignments,
                 'metrics': result.metrics,
                 'runtime_ms': runtime_ms,
+                'mode': current_mode.value,
+                'mode_actions': mode_actions,
+                'deferred_count': len(deferred_ids),
+                'deferred_patients': deferred_ids,
                 'ml_integration': {
                     'noshow_predictions_applied': sum(1 for a in result.appointments if hasattr(a, 'priority')),
                     'uncertainty': uncertainty_info,
