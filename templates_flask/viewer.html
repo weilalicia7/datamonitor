@@ -264,6 +264,24 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-
 .data-table td { padding: 8px 12px; border-bottom: 1px solid #f0f0f0; }
 .data-table tr:hover { background: #f8fafc; }
 
+/* Sortable table headers (Appointments tab). The cursor and the
+   ▲/▼ indicator make it obvious any column can be ordered. */
+.sortable-table thead th {
+    cursor: pointer;
+    user-select: none;
+    position: sticky;
+    top: 0;
+    background: #f8fafc;
+    z-index: 1;
+}
+.sortable-table thead th:hover { background: #e2e8f0; }
+.sortable-table thead th .sort-ind {
+    display: inline-block; width: 10px; margin-left: 4px;
+    color: #94a3b8; font-size: 0.85em;
+}
+.sortable-table thead th.sort-asc  .sort-ind::after { content: '\25B2'; color: #1e40af; }
+.sortable-table thead th.sort-desc .sort-ind::after { content: '\25BC'; color: #1e40af; }
+
 .tooltip {
     display: none; position: fixed; background: #1a1a2e; color: white;
     padding: 12px 16px; border-radius: 8px; font-size: 0.8em;
@@ -560,10 +578,24 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-
             <input type="text" id="appt-search" placeholder="Patient name or ID..." oninput="renderAppointments()">
             <label>Regimen:</label>
             <select id="appt-reg" onchange="renderAppointments()"><option value="">All</option></select>
+            <span style="font-size:0.75em;color:#94a3b8;margin-left:auto;">Click any column header to sort &middot; click again to reverse</span>
         </div>
         <div style="overflow-x: auto; max-height: 70vh; overflow-y: auto;">
-            <table class="data-table" id="appt-table">
-                <thead><tr><th>ID</th><th>Date</th><th>Time</th><th>Patient</th><th>Site</th><th>Chair</th><th>Regimen</th><th>Cycle</th><th>Duration</th><th>Nurse</th><th>1:1</th><th>Risk</th></tr></thead>
+            <table class="data-table sortable-table" id="appt-table">
+                <thead><tr>
+                    <th data-col="id"       onclick="sortAppointments('id')">ID<span class="sort-ind"></span></th>
+                    <th data-col="date"     onclick="sortAppointments('date')">Date<span class="sort-ind"></span></th>
+                    <th data-col="time"     onclick="sortAppointments('time')">Time<span class="sort-ind"></span></th>
+                    <th data-col="name"     onclick="sortAppointments('name')">Patient<span class="sort-ind"></span></th>
+                    <th data-col="site"     onclick="sortAppointments('site')">Site<span class="sort-ind"></span></th>
+                    <th data-col="chair"    onclick="sortAppointments('chair')">Chair<span class="sort-ind"></span></th>
+                    <th data-col="regName"  onclick="sortAppointments('regName')">Regimen<span class="sort-ind"></span></th>
+                    <th data-col="cycle"    onclick="sortAppointments('cycle')">Cycle<span class="sort-ind"></span></th>
+                    <th data-col="dur"      onclick="sortAppointments('dur')">Duration<span class="sort-ind"></span></th>
+                    <th data-col="nurse"    onclick="sortAppointments('nurse')">Nurse<span class="sort-ind"></span></th>
+                    <th data-col="oneToOne" onclick="sortAppointments('oneToOne')">1:1<span class="sort-ind"></span></th>
+                    <th data-col="risk"     onclick="sortAppointments('risk')">Risk<span class="sort-ind"></span></th>
+                </tr></thead>
                 <tbody id="appt-body"></tbody>
             </table>
         </div>
@@ -1597,6 +1629,39 @@ function hideTooltip() { document.getElementById('tooltip').style.display = 'non
 // ================================================================
 // APPOINTMENTS TABLE
 // ================================================================
+// Per-column sort state for the Appointments table.
+// dir is 'asc' | 'desc'; col is one of the data-col values on the <th>s.
+let _apptSort = { col: null, dir: 'asc' };
+
+// Map of col -> getter that returns a sortable value (number or string).
+// Strings are compared with localeCompare(numeric:true) so "Chair 2"
+// orders before "Chair 10" naturally; numbers compare directly.
+const _apptSortGetters = {
+    id:       a => a.id || '',
+    date:     a => a.date || '',
+    time:     a => a.start || '',
+    name:     a => (a.name || '').toLowerCase(),
+    site:     a => a.site || '',
+    chair:    a => String(a.chair || ''),
+    regName:  a => (a.regName || a.reg || '').toLowerCase(),
+    cycle:    a => Number(a.cycle) || 0,
+    dur:      a => Number(a.dur) || 0,
+    nurse:    a => (a.nurse || '').toLowerCase(),
+    oneToOne: a => a.oneToOne ? 1 : 0,
+    risk:     a => Number(a.noshow || (mlPredictions[a.pid] ? mlPredictions[a.pid].probability : 0)) || 0,
+};
+
+function sortAppointments(col) {
+    if (!_apptSortGetters[col]) return;
+    if (_apptSort.col === col) {
+        _apptSort.dir = _apptSort.dir === 'asc' ? 'desc' : 'asc';
+    } else {
+        _apptSort.col = col;
+        _apptSort.dir = 'asc';
+    }
+    renderAppointments();
+}
+
 function renderAppointments() {
     const search = (document.getElementById('appt-search').value || '').toLowerCase();
     const regFilter = document.getElementById('appt-reg').value;
@@ -1604,6 +1669,25 @@ function renderAppointments() {
     let filtered = appointments;
     if (search) filtered = filtered.filter(a => (a.name + a.pid).toLowerCase().includes(search));
     if (regFilter) filtered = filtered.filter(a => a.reg === regFilter);
+
+    // Apply sort if a column is active.
+    if (_apptSort.col && _apptSortGetters[_apptSort.col]) {
+        const getter = _apptSortGetters[_apptSort.col];
+        const sign = _apptSort.dir === 'asc' ? 1 : -1;
+        filtered = filtered.slice().sort((x, y) => {
+            const xv = getter(x), yv = getter(y);
+            if (typeof xv === 'number' && typeof yv === 'number') return (xv - yv) * sign;
+            return String(xv).localeCompare(String(yv), undefined, {numeric: true}) * sign;
+        });
+    }
+
+    // Update header indicator classes (one column highlighted at a time).
+    document.querySelectorAll('#appt-table thead th').forEach(th => {
+        th.classList.remove('sort-asc', 'sort-desc');
+        if (th.dataset.col === _apptSort.col) {
+            th.classList.add(_apptSort.dir === 'asc' ? 'sort-asc' : 'sort-desc');
+        }
+    });
 
     const tbody = document.getElementById('appt-body');
     tbody.innerHTML = filtered.slice(0, 300).map(a => {
