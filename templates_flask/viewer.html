@@ -676,71 +676,21 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-
         <h3 style="font-size:0.9em;color:#888;text-transform:uppercase;letter-spacing:0.05em;margin:20px 0 12px;">Tier 3: Causal Inference & Uncertainty</h3>
         <div class="stats" id="ml-causal"></div>
 
-        <!-- Model Descriptions -->
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-top:20px;">
-            <!-- How the Pipeline Works -->
-            <div style="background:white;border-radius:10px;padding:20px 24px;box-shadow:0 1px 3px rgba(0,0,0,0.08);">
-                <h3 style="font-size:0.95em;margin-bottom:14px;color:#1a1a2e;">How the ML Pipeline Works</h3>
-                <div style="font-size:0.8em;color:#555;line-height:1.7;">
-                    <div style="margin-bottom:10px;padding:8px 12px;background:#f0f7ff;border-radius:6px;border-left:3px solid #3b82f6;">
-                        <strong>Step 1: Feature Engineering</strong><br>
-                        22 raw patient fields are transformed into 92 ML features including temporal patterns,
-                        geographic risk, behavioral history, and interaction terms (e.g., distance &times; weather).
-                    </div>
-                    <div style="margin-bottom:10px;padding:8px 12px;background:#f0fdf4;border-radius:6px;border-left:3px solid #22c55e;">
-                        <strong>Step 2: Ensemble Prediction</strong><br>
-                        Three base models (Random Forest + Gradient Boosting + XGBoost) are combined via stacking.
-                        A GRU sequence model captures patient attendance trajectories for those with 5+ appointments.
-                    </div>
-                    <div style="margin-bottom:10px;padding:8px 12px;background:#fef3c7;border-radius:6px;border-left:3px solid #f59e0b;">
-                        <strong>Step 3: Uncertainty Quantification</strong><br>
-                        Conformal Prediction provides guaranteed coverage intervals (P(Y&isin;C) &ge; 90%).
-                        MC Dropout decomposes uncertainty into epistemic (model) vs aleatoric (data noise).
-                    </div>
-                    <div style="padding:8px 12px;background:#fdf2f8;border-radius:6px;border-left:3px solid #ec4899;">
-                        <strong>Step 4: Multi-Objective Optimization</strong><br>
-                        OR-Tools CP-SAT solver maximizes a weighted objective across 6 goals: priority, utilization,
-                        no-show risk, waiting time, robustness, and travel distance. Fairness constraints ensure
-                        scheduling doesn't disadvantage patients by age, gender, or location.
-                    </div>
-                </div>
-            </div>
-
-            <!-- Optimization Weights -->
-            <div style="background:white;border-radius:10px;padding:20px 24px;box-shadow:0 1px 3px rgba(0,0,0,0.08);">
-                <h3 style="font-size:0.95em;margin-bottom:14px;color:#1a1a2e;">Multi-Objective Optimization Weights</h3>
-                <p style="font-size:0.78em;color:#888;margin-bottom:14px;">
-                    The scheduler balances 6 competing objectives. Weights can be adjusted from the
-                    Optimize tab to shift the trade-off; the NHS 62-day target drives the waiting-time weight.
-                </p>
-                <div id="weights-chart"></div>
-            </div>
+        <!-- Optimization Weights (full width — pipeline-explanation panel removed
+             to avoid duplicating the Overview banner above) -->
+        <div style="background:white;border-radius:10px;padding:20px 24px;box-shadow:0 1px 3px rgba(0,0,0,0.08);margin-top:20px;">
+            <h3 style="font-size:0.95em;margin-bottom:14px;color:#1a1a2e;">Multi-Objective Optimization Weights</h3>
+            <p style="font-size:0.78em;color:#888;margin-bottom:14px;">
+                The scheduler balances 6 competing objectives. Weights can be adjusted from the
+                Optimize tab to shift the trade-off; the NHS 62-day target drives the waiting-time weight.
+            </p>
+            <div id="weights-chart"></div>
         </div>
 
-        <!-- Bottom Row: Model Details & NHS Pipeline -->
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-top:20px;">
-            <!-- Model Technical Details -->
-            <div style="background:white;border-radius:10px;padding:20px 24px;box-shadow:0 1px 3px rgba(0,0,0,0.08);">
-                <h3 style="font-size:0.95em;margin-bottom:14px;color:#1a1a2e;">Model Technical Details</h3>
-                <div style="font-size:0.78em;color:#555;line-height:1.6;" id="model-details">
-                    <table style="width:100%;border-collapse:collapse;">
-                        <tr style="border-bottom:1px solid #eee;"><td style="padding:6px 0;font-weight:600;">No-Show Ensemble</td><td>RF + GB + XGBoost stacking, AUC-ROC 0.82</td></tr>
-                        <tr style="border-bottom:1px solid #eee;"><td style="padding:6px 0;font-weight:600;">Duration Ensemble</td><td>Regression ensemble, MAE 11.3 min</td></tr>
-                        <tr style="border-bottom:1px solid #eee;"><td style="padding:6px 0;font-weight:600;">Sequence (GRU)</td><td>Patient attendance trajectories, 64 hidden units</td></tr>
-                        <tr style="border-bottom:1px solid #eee;"><td style="padding:6px 0;font-weight:600;">Survival (Cox PH)</td><td>h(t|X) = h&#8320;(t)&middot;exp(&beta;&#7511;X), hazard ratios</td></tr>
-                        <tr style="border-bottom:1px solid #eee;"><td style="padding:6px 0;font-weight:600;">Uplift (S+T Learner)</td><td>&tau;(x) = E[Y(1)-Y(0)|X=x], intervention targeting</td></tr>
-                        <tr style="border-bottom:1px solid #eee;"><td style="padding:6px 0;font-weight:600;">Multi-Task (PyTorch)</td><td>Joint no-show + duration, shared layers 128&rarr;64</td></tr>
-                        <tr style="border-bottom:1px solid #eee;"><td style="padding:6px 0;font-weight:600;">Quantile Forest</td><td>Distribution-free prediction intervals, 100 trees</td></tr>
-                        <tr style="border-bottom:1px solid #eee;"><td style="padding:6px 0;font-weight:600;">Hierarchical (PyMC)</td><td>y&#7522;&#11388; ~ N(&mu;+&alpha;&#7522;+X&beta;, &sigma;&sup2;), MCMC NUTS</td></tr>
-                        <tr style="border-bottom:1px solid #eee;"><td style="padding:6px 0;font-weight:600;">Causal DAG</td><td>11 nodes, 16 edges, do-calculus P(Y|do(X))</td></tr>
-                        <tr style="border-bottom:1px solid #eee;"><td style="padding:6px 0;font-weight:600;">IV (2SLS)</td><td>Weather&rarr;Traffic&rarr;NoShow, F-stat rule &gt;10</td></tr>
-                        <tr style="border-bottom:1px solid #eee;"><td style="padding:6px 0;font-weight:600;">DML</td><td>&theta;&#770; with cross-fitting, &radic;n-consistent</td></tr>
-                        <tr><td style="padding:6px 0;font-weight:600;">MC Dropout</td><td>Var[y] = E[Var[y|w]] + Var[E[y|w]], 100 passes</td></tr>
-                    </table>
-                </div>
-            </div>
-
-            <!-- NHS Data Pipeline -->
+        <!-- NHS Data Pipeline (full width — Model Technical Details table
+             removed: it duplicated the Tier 1/2/3 cards above and its
+             literal numbers (AUC, MAE) drift over time) -->
+        <div style="margin-top:20px;">
             <div style="background:white;border-radius:10px;padding:20px 24px;box-shadow:0 1px 3px rgba(0,0,0,0.08);">
                 <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
                 <h3 style="font-size:0.95em;color:#1a1a2e;margin:0;">NHS Open Data & Auto-Learning Pipeline</h3>
@@ -790,13 +740,6 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-
                     <button onclick="runMultitask()" style="padding:5px 10px;background:#8b5cf6;color:white;border:none;border-radius:4px;cursor:pointer;font-size:0.75em;">Multi-Task</button>
                     <button onclick="runConformal()" style="padding:5px 10px;background:#06b6d4;color:white;border:none;border-radius:4px;cursor:pointer;font-size:0.75em;">Conformal</button>
                     <button onclick="runMCDropout()" style="padding:5px 10px;background:#8b5cf6;color:white;border:none;border-radius:4px;cursor:pointer;font-size:0.75em;">MC Dropout</button>
-                    <button onclick="runHierarchical()" style="padding:5px 10px;background:#10b981;color:white;border:none;border-radius:4px;cursor:pointer;font-size:0.75em;">Hierarchical</button>
-                    <button onclick="runSurvival()" style="padding:5px 10px;background:#3b82f6;color:white;border:none;border-radius:4px;cursor:pointer;font-size:0.75em;">Survival</button>
-                    <button onclick="runUplift()" style="padding:5px 10px;background:#f97316;color:white;border:none;border-radius:4px;cursor:pointer;font-size:0.75em;">Uplift</button>
-                    <button onclick="runQRF()" style="padding:5px 10px;background:#eab308;color:white;border:none;border-radius:4px;cursor:pointer;font-size:0.75em;">QRF</button>
-                    <button onclick="runDMLEstimate()" style="padding:5px 10px;background:#ec4899;color:white;border:none;border-radius:4px;cursor:pointer;font-size:0.75em;">DML</button>
-                    <button onclick="runQRFNoshow()" style="padding:5px 10px;background:#eab308;color:white;border:none;border-radius:4px;cursor:pointer;font-size:0.75em;">QRF No-Show</button>
-                    <button onclick="runUpliftImpact()" style="padding:5px 10px;background:#f97316;color:white;border:none;border-radius:4px;cursor:pointer;font-size:0.75em;">Uplift Impact</button>
                     <button onclick="runAllModels()" style="padding:5px 10px;background:#1a1a2e;color:white;border:none;border-radius:4px;cursor:pointer;font-size:0.75em;font-weight:700;">Run ALL</button>
                 </div>
                 <div id="ml-predict-result" style="margin-top:10px;font-size:0.78em;max-height:300px;overflow-y:auto;"></div>
@@ -807,38 +750,11 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-
                 <h3 style="font-size:0.95em;margin-bottom:10px;color:#1a1a2e;">Causal Analysis & Counterfactuals</h3>
                 <div style="display:flex;gap:6px;margin-bottom:10px;flex-wrap:wrap;">
                     <button onclick="loadDAG()" style="padding:5px 10px;background:#f59e0b;color:white;border:none;border-radius:4px;cursor:pointer;font-size:0.75em;">Causal DAG</button>
-                    <button onclick="runIVDiag()" style="padding:5px 10px;background:#f59e0b;color:white;border:none;border-radius:4px;cursor:pointer;font-size:0.75em;">IV Diagnostics</button>
                     <button onclick="runCounterfactual()" style="padding:5px 10px;background:#f59e0b;color:white;border:none;border-radius:4px;cursor:pointer;font-size:0.75em;">Counterfactual</button>
-                    <button onclick="runCFExplanation()" style="padding:5px 10px;background:#dc2626;color:white;border:none;border-radius:4px;cursor:pointer;font-size:0.75em;">CF Explanation</button>
-                    <button onclick="runCausalEffect()" style="padding:5px 10px;background:#f59e0b;color:white;border:none;border-radius:4px;cursor:pointer;font-size:0.75em;">Causal Effect</button>
-                    <button onclick="runOptimalTime()" style="padding:5px 10px;background:#f59e0b;color:white;border:none;border-radius:4px;cursor:pointer;font-size:0.75em;">Optimal Time</button>
-                    <button onclick="runDriftCheck()" style="padding:5px 10px;background:#ef4444;color:white;border:none;border-radius:4px;cursor:pointer;font-size:0.75em;">Drift Check</button>
                     <button onclick="runIVEstimate()" style="padding:5px 10px;background:#f59e0b;color:white;border:none;border-radius:4px;cursor:pointer;font-size:0.75em;">IV Estimate</button>
                     <button onclick="runInterventionCompare()" style="padding:5px 10px;background:#f59e0b;color:white;border:none;border-radius:4px;cursor:pointer;font-size:0.75em;">Compare Interventions</button>
-                    <button onclick="runDMLCompare()" style="padding:5px 10px;background:#ec4899;color:white;border:none;border-radius:4px;cursor:pointer;font-size:0.75em;">DML Compare</button>
-                    <button onclick="runHierVariance()" style="padding:5px 10px;background:#10b981;color:white;border:none;border-radius:4px;cursor:pointer;font-size:0.75em;">Variance Decomp</button>
-                    <button onclick="runConformalCalibrate()" style="padding:5px 10px;background:#06b6d4;color:white;border:none;border-radius:4px;cursor:pointer;font-size:0.75em;">Calibrate Conformal</button>
-                    <button onclick="loadValidation()" style="padding:5px 10px;background:#888;color:white;border:none;border-radius:4px;cursor:pointer;font-size:0.75em;">Validation</button>
-                    <button onclick="loadEnsembleConfig()" style="padding:5px 10px;background:#888;color:white;border:none;border-radius:4px;cursor:pointer;font-size:0.75em;">Ensemble Config</button>
-                    <button onclick="loadSequenceModel()" style="padding:5px 10px;background:#888;color:white;border:none;border-radius:4px;cursor:pointer;font-size:0.75em;">Sequence Model</button>
-                    <button onclick="loadOnlineLearning()" style="padding:5px 10px;background:#10b981;color:white;border:none;border-radius:4px;cursor:pointer;font-size:0.75em;">Online Learning</button>
-                    <button onclick="testOnlineUpdate()" style="padding:5px 10px;background:#3b82f6;color:white;border:none;border-radius:4px;cursor:pointer;font-size:0.75em;">Test SGD Update</button>
-                    <!-- RL Agent / MARL Chairs / RL Recommend buttons hidden to align with dissertation scope; backend /api/ml/rl-scheduler and /api/ml/marl-scheduler routes remain active.
-                    <button onclick="loadRLAgent()" style="padding:5px 10px;background:#7c3aed;color:white;border:none;border-radius:4px;cursor:pointer;font-size:0.75em;">RL Agent</button>
-                    <button onclick="loadMARLAgent()" style="padding:5px 10px;background:#6d28d9;color:white;border:none;border-radius:4px;cursor:pointer;font-size:0.75em;">MARL Chairs</button>
-                    <button onclick="rlRecommend()" style="padding:5px 10px;background:#6d28d9;color:white;border:none;border-radius:4px;cursor:pointer;font-size:0.75em;">RL Recommend</button>
-                    -->
-
-                    <button onclick="loadRobustness()" style="padding:5px 10px;background:#059669;color:white;border:none;border-radius:4px;cursor:pointer;font-size:0.75em;">Robustness</button>
-                    <button onclick="runCausalValidation()" style="padding:5px 10px;background:#b91c1c;color:white;border:none;border-radius:4px;cursor:pointer;font-size:0.75em;">Causal Validation</button>
-                    <button onclick="runSensitivityLocal()" style="padding:5px 10px;background:#0e7490;color:white;border:none;border-radius:4px;cursor:pointer;font-size:0.75em;">Sensitivity (Local)</button>
-                    <button onclick="runSensitivityGlobal()" style="padding:5px 10px;background:#155e75;color:white;border:none;border-radius:4px;cursor:pointer;font-size:0.75em;">Sensitivity (Global)</button>
-                    <button onclick="runSensitivityFull()" style="padding:5px 10px;background:#164e63;color:white;border:none;border-radius:4px;cursor:pointer;font-size:0.75em;font-weight:700;">Full Sensitivity</button>
                     <button onclick="runDROEvaluate()" style="padding:5px 10px;background:#7e22ce;color:white;border:none;border-radius:4px;cursor:pointer;font-size:0.75em;">DRO Evaluate</button>
-                    <button onclick="runDROCalibrate()" style="padding:5px 10px;background:#6b21a8;color:white;border:none;border-radius:4px;cursor:pointer;font-size:0.75em;">Calibrate Epsilon</button>
-                    <button onclick="runDROMetrics()" style="padding:5px 10px;background:#581c87;color:white;border:none;border-radius:4px;cursor:pointer;font-size:0.75em;font-weight:700;">Worst-Case Metrics</button>
                     <button onclick="showModelCards()" style="padding:5px 10px;background:#4338ca;color:white;border:none;border-radius:4px;cursor:pointer;font-size:0.75em;font-weight:700;">Model Cards</button>
-                    <button onclick="showModelCard('noshow_ensemble')" style="padding:5px 10px;background:#5b21b6;color:white;border:none;border-radius:4px;cursor:pointer;font-size:0.75em;">NoShow Card</button>
                 </div>
                 <div id="causal-result" style="font-size:0.78em;max-height:300px;overflow-y:auto;"></div>
             </div>
