@@ -265,16 +265,16 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-
 .data-table tr:hover { background: #f8fafc; }
 
 /* Sortable table headers (Appointments / Patients / Staff tabs).
-   Every sortable header carries a permanent ⇅ glyph so the operator
-   can SEE the column is interactive without having to read the hint
-   above the table. The glyph turns into a coloured ▲/▼ once a column
-   is active, and into a brighter ⇅ on hover. */
+   The interactivity cue is the indigo header background plus the hint
+   badge above each table — no arrow glyphs (per UX preference); the
+   .sort-ind span stays in the markup but renders empty so existing
+   sort logic still toggles the .sort-asc / .sort-desc classes. */
 .sortable-table thead th {
     cursor: pointer;
     user-select: none;
     position: sticky;
     top: 0;
-    background: #e0e7ff;          /* light indigo so it reads as "interactive header" */
+    background: #e0e7ff;
     color: #1e293b;
     border-bottom: 2px solid #6366f1;
     z-index: 1;
@@ -283,16 +283,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-
 .sortable-table thead th:hover {
     background: #c7d2fe;
 }
-.sortable-table thead th:hover .sort-ind {
-    color: #4338ca;
-}
-.sortable-table thead th .sort-ind {
-    display: inline-block; margin-left: 6px;
-    color: #6366f1; font-size: 0.85em; font-weight: 700;
-}
-.sortable-table thead th .sort-ind::after { content: '\21C5'; }   /* ⇅ neutral */
-.sortable-table thead th.sort-asc  .sort-ind::after { content: '\25B2'; color: #1e40af; }
-.sortable-table thead th.sort-desc .sort-ind::after { content: '\25BC'; color: #1e40af; }
+.sortable-table thead th .sort-ind { display: none; }
 
 .tooltip {
     display: none; position: fixed; background: #1a1a2e; color: white;
@@ -590,7 +581,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-
             <input type="text" id="appt-search" placeholder="Patient name or ID..." oninput="renderAppointments()">
             <label>Regimen:</label>
             <select id="appt-reg" onchange="renderAppointments()"><option value="">All</option></select>
-            <span style="font-size:0.78em;color:#3730a3;margin-left:auto;background:#e0e7ff;padding:5px 12px;border-radius:6px;border:1px solid #818cf8;font-weight:600;">&#8645; Click any column header to sort &middot; click again to reverse</span>
+            <span style="font-size:0.78em;color:#3730a3;margin-left:auto;background:#e0e7ff;padding:5px 12px;border-radius:6px;border:1px solid #818cf8;font-weight:600;">Click any column header to sort &middot; click again to reverse</span>
         </div>
         <div style="overflow-x: auto; max-height: 70vh; overflow-y: auto;">
             <table class="data-table sortable-table" id="appt-table">
@@ -618,7 +609,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-
         <div class="controls">
             <label>Search:</label>
             <input type="text" id="pt-search" placeholder="Name or NHS Number..." oninput="renderPatients()">
-            <span style="font-size:0.78em;color:#3730a3;margin-left:auto;background:#e0e7ff;padding:5px 12px;border-radius:6px;border:1px solid #818cf8;font-weight:600;">&#8645; Click any column header to sort &middot; click again to reverse</span>
+            <span style="font-size:0.78em;color:#3730a3;margin-left:auto;background:#e0e7ff;padding:5px 12px;border-radius:6px;border:1px solid #818cf8;font-weight:600;">Click any column header to sort &middot; click again to reverse</span>
         </div>
         <div style="overflow-x: auto; max-height: 70vh; overflow-y: auto;">
             <table class="data-table sortable-table" id="pt-table">
@@ -641,7 +632,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-
     <!-- TAB: STAFF -->
     <div id="tab-staff" class="tab-content hidden">
         <div class="controls">
-            <span style="font-size:0.78em;color:#3730a3;margin-left:auto;background:#e0e7ff;padding:5px 12px;border-radius:6px;border:1px solid #818cf8;font-weight:600;">&#8645; Click any column header to sort &middot; click again to reverse</span>
+            <span style="font-size:0.78em;color:#3730a3;margin-left:auto;background:#e0e7ff;padding:5px 12px;border-radius:6px;border:1px solid #818cf8;font-weight:600;">Click any column header to sort &middot; click again to reverse</span>
         </div>
         <div style="overflow-x: auto; max-height: 70vh; overflow-y: auto;">
             <table class="data-table sortable-table" id="staff-table">
