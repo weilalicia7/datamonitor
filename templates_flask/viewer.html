@@ -649,7 +649,41 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-
 
     <!-- TAB: ML MODELS -->
     <div id="tab-ml" class="tab-content hidden">
-        <!-- Overview -->
+
+        <!-- NHS Open Data & Auto-Learning Pipeline (moved to top — operational
+             controls + recalibration buttons should land in the operator's
+             eye line first). -->
+        <div style="background:white;border-radius:10px;padding:20px 24px;box-shadow:0 1px 3px rgba(0,0,0,0.08);margin-bottom:20px;">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
+                <h3 style="font-size:0.95em;color:#1a1a2e;margin:0;">NHS Open Data &amp; Auto-Learning Pipeline</h3>
+                <div style="display:flex;gap:8px;">
+                    <button onclick="checkNHSNow()" style="padding:5px 12px;background:#3b82f6;color:white;border:none;border-radius:5px;font-size:0.75em;cursor:pointer;">Check Now</button>
+                    <select id="recal-level" style="padding:4px 8px;border:1px solid #d0d5dd;border-radius:5px;font-size:0.75em;background:white;">
+                        <option value="0">Level 0 - Parameter Refresh</option>
+                        <option value="1" selected>Level 1 - Baseline Recalibration</option>
+                        <option value="2">Level 2 - Feature Weight Update</option>
+                        <option value="3">Level 3 - Full Model Retrain</option>
+                    </select>
+                    <button onclick="runRecalNow()" style="padding:5px 12px;background:#10b981;color:white;border:none;border-radius:5px;font-size:0.75em;cursor:pointer;">Run</button>
+                </div>
+            </div>
+            <p style="font-size:0.78em;color:#888;margin-bottom:14px;">
+                <strong>Auto-update is active.</strong> Background scheduler checks NHS sources every 24 hours (first check 5 min after startup).
+                When new data is found, drift detection runs automatically. If distribution shift is detected, models recalibrate at the appropriate level.
+                8 datasets available now; SACT v4.0 collection commenced 1 April 2026 (rollout phase &mdash; first complete dataset August 2026).
+            </p>
+            <div id="auto-update-status" style="font-size:0.75em;color:#888;margin-bottom:10px;display:none;"></div>
+            <div id="nhs-status"></div>
+            <div style="margin-top:14px;padding:10px 14px;background:#f0fdf4;border-radius:6px;font-size:0.78em;color:#555;border-left:3px solid #22c55e;">
+                <strong>Recalibration Levels:</strong><br>
+                Level 0: Real-time parameter refresh (weather/traffic) &mdash; no downtime<br>
+                Level 1: Monthly baseline recalibration (CWT data) &mdash; no downtime<br>
+                Level 2: Quarterly feature weight update &mdash; &lt;1 min<br>
+                Level 3: Full model retrain (on drift) &mdash; 2-5 min
+            </div>
+        </div>
+
+        <!-- Pipeline overview / "preview" -->
         <div style="background:white;border-radius:10px;padding:20px 24px;box-shadow:0 1px 3px rgba(0,0,0,0.08);margin-bottom:20px;">
             <h2 style="font-size:1.1em;color:#1a1a2e;margin-bottom:8px;">Machine Learning Pipeline Overview</h2>
             <p style="font-size:0.85em;color:#666;line-height:1.6;margin-bottom:12px;">
@@ -664,145 +698,15 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-
             </p>
         </div>
 
-        <!-- Model Cards Row 1: Prediction Models -->
+        <!-- Tier 1 / 2 / 3 model cards (the only "what's running" surface) -->
         <h3 style="font-size:0.9em;color:#888;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:12px;">Tier 1: Core Prediction Models</h3>
         <div class="stats" id="ml-stats"></div>
 
-        <!-- Model Cards Row 2: Advanced Models -->
         <h3 style="font-size:0.9em;color:#888;text-transform:uppercase;letter-spacing:0.05em;margin:20px 0 12px;">Tier 2: Advanced Statistical Models</h3>
         <div class="stats" id="ml-advanced"></div>
 
-        <!-- Model Cards Row 3: Causal & Uncertainty -->
-        <h3 style="font-size:0.9em;color:#888;text-transform:uppercase;letter-spacing:0.05em;margin:20px 0 12px;">Tier 3: Causal Inference & Uncertainty</h3>
+        <h3 style="font-size:0.9em;color:#888;text-transform:uppercase;letter-spacing:0.05em;margin:20px 0 12px;">Tier 3: Causal Inference &amp; Uncertainty</h3>
         <div class="stats" id="ml-causal"></div>
-
-        <!-- Optimization Weights (full width — pipeline-explanation panel removed
-             to avoid duplicating the Overview banner above) -->
-        <div style="background:white;border-radius:10px;padding:20px 24px;box-shadow:0 1px 3px rgba(0,0,0,0.08);margin-top:20px;">
-            <h3 style="font-size:0.95em;margin-bottom:14px;color:#1a1a2e;">Multi-Objective Optimization Weights</h3>
-            <p style="font-size:0.78em;color:#888;margin-bottom:14px;">
-                The scheduler balances 6 competing objectives. Weights can be adjusted from the
-                Optimize tab to shift the trade-off; the NHS 62-day target drives the waiting-time weight.
-            </p>
-            <div id="weights-chart"></div>
-        </div>
-
-        <!-- NHS Data Pipeline (full width — Model Technical Details table
-             removed: it duplicated the Tier 1/2/3 cards above and its
-             literal numbers (AUC, MAE) drift over time) -->
-        <div style="margin-top:20px;">
-            <div style="background:white;border-radius:10px;padding:20px 24px;box-shadow:0 1px 3px rgba(0,0,0,0.08);">
-                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
-                <h3 style="font-size:0.95em;color:#1a1a2e;margin:0;">NHS Open Data & Auto-Learning Pipeline</h3>
-                <div style="display:flex;gap:8px;">
-                    <button onclick="checkNHSNow()" style="padding:5px 12px;background:#3b82f6;color:white;border:none;border-radius:5px;font-size:0.75em;cursor:pointer;">Check Now</button>
-                    <select id="recal-level" style="padding:4px 8px;border:1px solid #d0d5dd;border-radius:5px;font-size:0.75em;background:white;">
-                        <option value="0">Level 0 - Parameter Refresh</option>
-                        <option value="1" selected>Level 1 - Baseline Recalibration</option>
-                        <option value="2">Level 2 - Feature Weight Update</option>
-                        <option value="3">Level 3 - Full Model Retrain</option>
-                    </select>
-                    <button onclick="runRecalNow()" style="padding:5px 12px;background:#10b981;color:white;border:none;border-radius:5px;font-size:0.75em;cursor:pointer;">Run</button>
-                </div>
-                </div>
-                <p style="font-size:0.78em;color:#888;margin-bottom:14px;">
-                    <strong>Auto-update is active.</strong> Background scheduler checks NHS sources every 24 hours (first check 5 min after startup).
-                    When new data is found, drift detection runs automatically. If distribution shift is detected, models recalibrate at the appropriate level.
-                    8 datasets available now; SACT v4.0 collection commenced 1 April 2026 (rollout phase — first complete dataset August 2026).
-                </p>
-                <div id="auto-update-status" style="font-size:0.75em;color:#888;margin-bottom:10px;display:none;"></div>
-                <div id="nhs-status"></div>
-                <div style="margin-top:14px;padding:10px 14px;background:#f0fdf4;border-radius:6px;font-size:0.78em;color:#555;border-left:3px solid #22c55e;">
-                    <strong>Recalibration Levels:</strong><br>
-                    Level 0: Real-time parameter refresh (weather/traffic) &mdash; no downtime<br>
-                    Level 1: Monthly baseline recalibration (CWT data) &mdash; no downtime<br>
-                    Level 2: Quarterly feature weight update &mdash; &lt;1 min<br>
-                    Level 3: Full model retrain (on drift) &mdash; 2-5 min
-                </div>
-            </div>
-        </div>
-
-        <!-- Interactive ML Tools -->
-        <h3 style="font-size:0.9em;color:#888;text-transform:uppercase;letter-spacing:0.05em;margin:20px 0 12px;">Interactive ML Tools — Individual Patient Prediction</h3>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:20px;">
-            <!-- Patient Prediction Tool -->
-            <div style="background:white;border-radius:10px;padding:20px 24px;box-shadow:0 1px 3px rgba(0,0,0,0.08);">
-                <h3 style="font-size:0.95em;margin-bottom:10px;color:#1a1a2e;">Predict for Patient</h3>
-                <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:0.82em;">
-                    <div><label style="font-size:0.75em;color:#888;">Patient ID</label><input type="text" id="ml-pid" value="P93810" style="width:100%;padding:5px;border:1px solid #d0d5dd;border-radius:4px;"></div>
-                    <div><label style="font-size:0.75em;color:#888;">Age</label><input type="number" id="ml-age" value="65" style="width:100%;padding:5px;border:1px solid #d0d5dd;border-radius:4px;"></div>
-                    <div><label style="font-size:0.75em;color:#888;">Distance (km)</label><input type="number" id="ml-dist" value="20" style="width:100%;padding:5px;border:1px solid #d0d5dd;border-radius:4px;"></div>
-                    <div><label style="font-size:0.75em;color:#888;">No-Show Rate</label><input type="number" id="ml-rate" value="0.15" step="0.01" style="width:100%;padding:5px;border:1px solid #d0d5dd;border-radius:4px;"></div>
-                    <div><label style="font-size:0.75em;color:#888;">Duration (min)</label><input type="number" id="ml-dur2" value="180" style="width:100%;padding:5px;border:1px solid #d0d5dd;border-radius:4px;"></div>
-                    <div><label style="font-size:0.75em;color:#888;">Cycle</label><input type="number" id="ml-cycle" value="3" style="width:100%;padding:5px;border:1px solid #d0d5dd;border-radius:4px;"></div>
-                </div>
-                <div style="display:flex;gap:6px;margin-top:10px;flex-wrap:wrap;">
-                    <button onclick="runMultitask()" style="padding:5px 10px;background:#8b5cf6;color:white;border:none;border-radius:4px;cursor:pointer;font-size:0.75em;">Multi-Task</button>
-                    <button onclick="runConformal()" style="padding:5px 10px;background:#06b6d4;color:white;border:none;border-radius:4px;cursor:pointer;font-size:0.75em;">Conformal</button>
-                    <button onclick="runMCDropout()" style="padding:5px 10px;background:#8b5cf6;color:white;border:none;border-radius:4px;cursor:pointer;font-size:0.75em;">MC Dropout</button>
-                    <button onclick="runAllModels()" style="padding:5px 10px;background:#1a1a2e;color:white;border:none;border-radius:4px;cursor:pointer;font-size:0.75em;font-weight:700;">Run ALL</button>
-                </div>
-                <div id="ml-predict-result" style="margin-top:10px;font-size:0.78em;max-height:300px;overflow-y:auto;"></div>
-            </div>
-
-            <!-- Causal Analysis Tools -->
-            <div style="background:white;border-radius:10px;padding:20px 24px;box-shadow:0 1px 3px rgba(0,0,0,0.08);">
-                <h3 style="font-size:0.95em;margin-bottom:10px;color:#1a1a2e;">Causal Analysis & Counterfactuals</h3>
-                <div style="display:flex;gap:6px;margin-bottom:10px;flex-wrap:wrap;">
-                    <button onclick="loadDAG()" style="padding:5px 10px;background:#f59e0b;color:white;border:none;border-radius:4px;cursor:pointer;font-size:0.75em;">Causal DAG</button>
-                    <button onclick="runCounterfactual()" style="padding:5px 10px;background:#f59e0b;color:white;border:none;border-radius:4px;cursor:pointer;font-size:0.75em;">Counterfactual</button>
-                    <button onclick="runIVEstimate()" style="padding:5px 10px;background:#f59e0b;color:white;border:none;border-radius:4px;cursor:pointer;font-size:0.75em;">IV Estimate</button>
-                    <button onclick="runInterventionCompare()" style="padding:5px 10px;background:#f59e0b;color:white;border:none;border-radius:4px;cursor:pointer;font-size:0.75em;">Compare Interventions</button>
-                    <button onclick="runDROEvaluate()" style="padding:5px 10px;background:#7e22ce;color:white;border:none;border-radius:4px;cursor:pointer;font-size:0.75em;">DRO Evaluate</button>
-                    <button onclick="showModelCards()" style="padding:5px 10px;background:#4338ca;color:white;border:none;border-radius:4px;cursor:pointer;font-size:0.75em;font-weight:700;">Model Cards</button>
-                </div>
-                <div id="causal-result" style="font-size:0.78em;max-height:300px;overflow-y:auto;"></div>
-            </div>
-        </div>
-
-        <!-- Sentiment Analysis & Event Impact Tools -->
-        <div style="background:white;border-radius:10px;padding:20px 24px;box-shadow:0 1px 3px rgba(0,0,0,0.08);margin-bottom:20px;">
-            <h3 style="font-size:0.95em;margin-bottom:10px;color:#1a1a2e;">Sentiment Analysis & Event Impact</h3>
-            <div style="display:grid;grid-template-columns:2fr 1fr;gap:12px;margin-bottom:10px;">
-                <div>
-                    <label style="font-size:0.75em;color:#888;">Event Description (NLP sentiment analysis)</label>
-                    <input type="text" id="ml-evt-text" placeholder="e.g., M4 motorway closed due to major accident near Cardiff" style="width:100%;padding:6px;border:1px solid #d0d5dd;border-radius:4px;font-size:0.85em;">
-                </div>
-                <div style="display:flex;gap:6px;align-items:flex-end;">
-                    <button onclick="runSentiment()" style="padding:6px 12px;background:#f59e0b;color:white;border:none;border-radius:4px;cursor:pointer;font-size:0.8em;">Analyse Sentiment</button>
-                    <button onclick="runFullImpact()" style="padding:6px 12px;background:#ef4444;color:white;border:none;border-radius:4px;cursor:pointer;font-size:0.8em;">Full Impact</button>
-                </div>
-            </div>
-            <div id="sentiment-result" style="font-size:0.78em;"></div>
-        </div>
-
-        <!-- Fairness -->
-        <div style="background:white;border-radius:10px;padding:20px 24px;box-shadow:0 1px 3px rgba(0,0,0,0.08);margin-top:20px;">
-            <h3 style="font-size:0.95em;margin-bottom:10px;color:#1a1a2e;">Fairness Constraints (Equality Act 2010)</h3>
-            <p style="font-size:0.78em;color:#888;margin-bottom:14px;">
-                The optimizer enforces scheduling fairness across protected characteristics.
-                Demographic Parity ensures equal scheduling rates across age, gender, and distance groups.
-                The Disparate Impact Ratio (Four-Fifths Rule) guarantees no group is scheduled at less than 80% the rate of any other.
-                Equal Opportunity ensures that among patients who would attend, scheduling rates are equal regardless of group.
-            </p>
-            <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;" id="fairness-info">
-                <div style="padding:12px;background:#f8fafc;border-radius:6px;text-align:center;">
-                    <div style="font-size:0.7em;color:#888;text-transform:uppercase;">Demographic Parity</div>
-                    <div style="font-size:1.1em;font-weight:700;color:#1a1a2e;margin:4px 0;" id="f-dp2">--</div>
-                    <div style="font-size:0.7em;color:#888;">|P(sched|A) - P(sched|B)| &lt; 0.15</div>
-                </div>
-                <div style="padding:12px;background:#f8fafc;border-radius:6px;text-align:center;">
-                    <div style="font-size:0.7em;color:#888;text-transform:uppercase;">Disparate Impact</div>
-                    <div style="font-size:1.1em;font-weight:700;color:#1a1a2e;margin:4px 0;" id="f-di2">--</div>
-                    <div style="font-size:0.7em;color:#888;">P(sched|min)/P(sched|maj) &ge; 0.80</div>
-                </div>
-                <div style="padding:12px;background:#f8fafc;border-radius:6px;text-align:center;">
-                    <div style="font-size:0.7em;color:#888;text-transform:uppercase;">Protected Attributes</div>
-                    <div style="font-size:1.1em;font-weight:700;color:#1a1a2e;margin:4px 0;">3</div>
-                    <div style="font-size:0.7em;color:#888;">Age, Gender, Distance</div>
-                </div>
-            </div>
-        </div>
     </div>
 
     <!-- TAB: IRL PREFERENCES — entire tab hidden to align with dissertation scope; backend /api/irl routes remain active.
@@ -1910,7 +1814,11 @@ function loadMLTab() {
                     </div>
                 </div>`;
             });
-            document.getElementById('weights-chart').innerHTML = wHtml;
+            // weights-chart panel was removed from the ML tab; null-guard
+            // here so a missing element doesn't throw when the JS still
+            // computes wHtml. Weights remain editable on the Optimize tab.
+            const wEl = document.getElementById('weights-chart');
+            if (wEl) wEl.innerHTML = wHtml;
         }
 
         // NHS data sources
