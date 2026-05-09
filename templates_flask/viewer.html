@@ -2042,7 +2042,7 @@ function previewSlots() {
                 window._autoOptimiseTried = true;
                 document.getElementById('sq-result').innerHTML =
                     `<div style="padding:10px 12px;background:#fff7ed;border-radius:5px;border-left:3px solid #f59e0b;font-size:0.85em;color:#7c2d12;">
-                        Auto-running optimiser to populate today&apos;s schedule (this can take ~5 min on first load), then re-trying Preview&hellip;
+                        Auto-running optimiser to populate today's schedule (this can take about 5 min on first load), then re-trying Preview...
                     </div>`;
                 const optDateEl = document.getElementById('opt-date');
                 const datePickerEl = document.getElementById('date-select');
@@ -2215,7 +2215,7 @@ function loadSqueezeTab() {
                 window._autoOptimiseTried = true;
                 document.getElementById('noshow-slots').innerHTML =
                     `<div style="padding:10px 12px;background:#fff7ed;border-radius:5px;border-left:3px solid #f59e0b;font-size:0.85em;color:#7c2d12;">
-                        Auto-running optimiser to populate today&apos;s schedule (this can take ~5 min on first load)&hellip;
+                        Auto-running optimiser to populate today's schedule (this can take about 5 min on first load)...
                     </div>`;
                 const optDateEl = document.getElementById('opt-date');
                 const datePickerEl = document.getElementById('date-select');
@@ -2702,8 +2702,8 @@ function switchMode(mode) {
             banner.style.borderLeft = '4px solid #3b82f6';
             banner.style.color = '#1e40af';
             banner.innerHTML =
-                `<strong>Re-optimising schedule for ${mode.toUpperCase()} mode&hellip;</strong> `
-                + `This typically takes ~5 minutes; the Gantt will refresh automatically when done.`;
+                `<strong>Re-optimising schedule for ${mode.toUpperCase()} mode...</strong> `
+                + `This typically takes about 5 minutes; the Gantt will refresh automatically when done.`;
         }
 
         const optDateEl = document.getElementById('opt-date');
