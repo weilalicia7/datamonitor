@@ -6981,7 +6981,22 @@ def api_optimize():
             # leak into the Gantt merge, and so /api/refresh's
             # load_data_from_source() (which clears `appointments` but
             # leaves `live_schedule` alone) doesn't wipe today's run.
-            app_state.setdefault('live_schedule', {})[target_date_str] = list(result.appointments)
+            # De-duplicate by patient_id before storing — the solver
+            # has been observed producing the same patient_id twice in
+            # result.appointments (warm-start cache replay path can
+            # rebuild an already-placed patient under high pack density).
+            # Without this dedup the Gantt renders the same patient at
+            # multiple slots, which surfaced as the P43552/P72251 ×2 bug.
+            # Keep first occurrence; drop subsequent.
+            _seen_pids = set()
+            _deduped = []
+            for _apt in result.appointments:
+                if _apt.patient_id in _seen_pids:
+                    logger.warning(f"[dedup] duplicate appointment for {_apt.patient_id} dropped from live_schedule")
+                    continue
+                _seen_pids.add(_apt.patient_id)
+                _deduped.append(_apt)
+            app_state.setdefault('live_schedule', {})[target_date_str] = _deduped
             _stage('cpsat_solve', _t_stage); _t_stage = datetime.now()
 
             # Step 3b: Cross-site overflow (option B). For any patient
@@ -7172,8 +7187,17 @@ def api_optimize():
                     # Re-publish into the live_schedule date bucket now
                     # that overflow placements have been appended to
                     # result.appointments, so the Gantt merge sees the
-                    # complete schedule for the target date.
-                    app_state.setdefault('live_schedule', {})[target_date_str] = list(result.appointments)
+                    # complete schedule for the target date.  Same
+                    # patient-id dedup as the pre-overflow publish.
+                    _seen_pids = set()
+                    _deduped = []
+                    for _apt in result.appointments:
+                        if _apt.patient_id in _seen_pids:
+                            logger.warning(f"[dedup-overflow] duplicate appointment for {_apt.patient_id} dropped from live_schedule")
+                            continue
+                        _seen_pids.add(_apt.patient_id)
+                        _deduped.append(_apt)
+                    app_state.setdefault('live_schedule', {})[target_date_str] = _deduped
                     if result.metrics is not None and result.metrics.get('objective_score') is not None:
                         # Soft penalty: -2 per overflowed patient
                         result.metrics['objective_score'] = round(
@@ -13279,8 +13303,17 @@ def api_schedule_full():
         live_records = []
         live_dates = set()
         live_sched = app_state.get('live_schedule', {}) or {}
+        # Defensive dedup at the merge layer too — even with the
+        # /api/optimize publish-time dedup, stale state from before
+        # this fix or any future write path can still introduce
+        # duplicates. Keep first occurrence per patient_id per date.
+        _seen_per_date = {}  # date -> set of patient_ids
         for date_key, apts in live_sched.items():
             for apt in apts:
+                _seen = _seen_per_date.setdefault(date_key, set())
+                if apt.patient_id in _seen:
+                    continue
+                _seen.add(apt.patient_id)
                 try:
                     d = apt.start_time.strftime('%Y-%m-%d')
                     live_dates.add(d)
