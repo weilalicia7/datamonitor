@@ -2778,7 +2778,7 @@ function showModeResultToast(mode, d) {
       + `<strong>${placed}</strong>/${demand} placed`
       + (deferred ? ` &middot; <strong style="color:#7c2d12;">${deferred} deferred</strong>` : '')
       + (overflow ? ` &middot; <span style="color:#0f766e;">${overflow} overflow</span>` : '')
-      + `<br>Utilisation ${util}% &middot; Schedule Gantt updated. Open the <em>Optimize</em> tab for the full breakdown + Recent runs.`
+      + `<br>Utilisation ${util}% &middot; Open the <em>Optimize</em> tab for full breakdown.`
       + `</div>`
       + `<button onclick="this.parentElement.parentElement.remove()" style="background:none;border:none;font-size:1.1em;cursor:pointer;color:#94a3b8;line-height:1;padding:0 0 0 8px;">&times;</button>`
       + `</div>`;
@@ -2842,7 +2842,7 @@ function showModeToast(mode) {
           + `<span style="color:#475569;">${deltas}</span><br><br>`
           + `<strong>Auto-running optimisation under ${upper}...</strong> `
           + `<span id="mode-toast-elapsed" style="color:#64748b;">0:00 elapsed</span><br>`
-          + `<span style="color:#64748b;font-size:0.85em;">Typically about 5 min on Ch1 synthetic. The Schedule tab Gantt and the Optimize tab will both refresh automatically when the solve completes.</span>`
+          + `<span style="color:#64748b;font-size:0.85em;">Typically about 5 min on Ch1 synthetic. Schedule tab stays as the disk baseline; results land on the Optimize tab.</span>`
           + `</div>`
           + `<button onclick="this.parentElement.parentElement.remove()" style="background:none;border:none;font-size:1.1em;cursor:pointer;color:#94a3b8;line-height:1;padding:0 0 0 8px;">&times;</button>`
           + `</div>`;
