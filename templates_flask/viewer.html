@@ -2645,15 +2645,109 @@ function switchMode(mode) {
         mb.textContent = mode.toUpperCase();
         mb.style.background = modeColors[mode] || '#22c55e';
 
-        // Mode is a planning lens — it does not auto-rewrite the
-        // Schedule Gantt (the system-of-record view). Surface a
-        // dismissible toast so the operator knows the mode is set
-        // but they still need to click Run optimisation on the
-        // Optimize tab to see the new schedule. Without this hint
-        // an operator who switches mode and stares at the Schedule
-        // tab will see no change and conclude the dropdown is broken.
+        // Show the explainer toast and auto-run /api/optimize for
+        // non-NORMAL modes so the operator doesn't have to navigate
+        // to the Optimize tab and click again. The toast doubles as
+        // the live progress indicator (elapsed counter + final
+        // result summary). NORMAL mode skips the auto-run because
+        // its result is the baseline — no buffer, no deferrals.
         showModeToast(mode);
+        if (mode !== 'normal') autoOptimiseForMode(mode);
     });
+}
+
+function autoOptimiseForMode(mode) {
+    const optDateEl = document.getElementById('opt-date');
+    const datePickerEl = document.getElementById('date-select');
+    const target_date = (optDateEl && optDateEl.value)
+                        || (datePickerEl && datePickerEl.value)
+                        || undefined;
+
+    const t0 = Date.now();
+    // Tick the elapsed counter inside the toast every second so the
+    // operator can see Flask is genuinely doing real work and not
+    // returning a hardcoded fake. Cleared on success or error.
+    const tickHandle = setInterval(() => {
+        const el = document.getElementById('mode-toast-elapsed');
+        if (!el) { clearInterval(tickHandle); return; }
+        const sec = Math.floor((Date.now() - t0) / 1000);
+        const mm = Math.floor(sec / 60);
+        const ss = String(sec % 60).padStart(2, '0');
+        el.textContent = `${mm}:${ss} elapsed`;
+    }, 1000);
+
+    fetch('/api/optimize', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({target_date}),
+    }).then(r => r.json()).then(d => {
+        clearInterval(tickHandle);
+        showModeResultToast(mode, d);
+        // Refresh the Recent runs strip if the operator is on Optimize tab
+        if (typeof loadOptimizeHistory === 'function') {
+            try { loadOptimizeHistory(); } catch (e) { /* swallow */ }
+        }
+    }).catch(e => {
+        clearInterval(tickHandle);
+        showModeErrorToast(mode, e && e.message);
+    });
+}
+
+function showModeResultToast(mode, d) {
+    const existing = document.getElementById('mode-toast');
+    if (existing) existing.remove();
+    const colors = {normal:'#22c55e',elevated:'#f59e0b',crisis:'#f97316',emergency:'#ef4444'};
+    const c = colors[mode] || '#22c55e';
+    const placed = d.scheduled || 0;
+    const demand = d.demand || 0;
+    const deferred = d.deferred_count || 0;
+    const overflow = d.overflow_count || 0;
+    const util = d.metrics ? Math.round((d.metrics.utilization || 0) * 100) : 0;
+    const totalSec = Math.round((d.runtime_ms || 0) / 1000);
+    const toast = document.createElement('div');
+    toast.id = 'mode-toast';
+    toast.style.cssText =
+        'position:fixed;top:64px;right:18px;z-index:9999;'
+      + 'max-width:420px;padding:14px 18px 14px 16px;'
+      + `background:white;border:1px solid ${c};border-left:5px solid ${c};`
+      + 'border-radius:8px;box-shadow:0 6px 20px rgba(15,23,42,0.18);'
+      + 'font-size:0.85em;color:#0f172a;line-height:1.55;';
+    toast.innerHTML =
+        `<div style="display:flex;align-items:flex-start;gap:8px;">`
+      + `<div style="flex:1;">`
+      + `<strong style="color:${c};">${mode.toUpperCase()} optimisation complete</strong> `
+      + `<span style="color:#64748b;font-size:0.85em;">(${totalSec}s)</span><br>`
+      + `<strong>${placed}</strong>/${demand} placed`
+      + (deferred ? ` &middot; <strong style="color:#7c2d12;">${deferred} deferred</strong>` : '')
+      + (overflow ? ` &middot; <span style="color:#0f766e;">${overflow} overflow</span>` : '')
+      + `<br>Utilisation ${util}% &middot; Open the <em>Optimize</em> tab for full breakdown.`
+      + `</div>`
+      + `<button onclick="this.parentElement.parentElement.remove()" style="background:none;border:none;font-size:1.1em;cursor:pointer;color:#94a3b8;line-height:1;padding:0 0 0 8px;">&times;</button>`
+      + `</div>`;
+    document.body.appendChild(toast);
+}
+
+function showModeErrorToast(mode, message) {
+    const existing = document.getElementById('mode-toast');
+    if (existing) existing.remove();
+    const toast = document.createElement('div');
+    toast.id = 'mode-toast';
+    toast.style.cssText =
+        'position:fixed;top:64px;right:18px;z-index:9999;'
+      + 'max-width:420px;padding:14px 18px 14px 16px;'
+      + 'background:white;border:1px solid #ef4444;border-left:5px solid #ef4444;'
+      + 'border-radius:8px;box-shadow:0 6px 20px rgba(15,23,42,0.18);'
+      + 'font-size:0.85em;color:#0f172a;line-height:1.55;';
+    toast.innerHTML =
+        `<div style="display:flex;align-items:flex-start;gap:8px;">`
+      + `<div style="flex:1;">`
+      + `<strong style="color:#ef4444;">${mode.toUpperCase()} auto-optimise failed</strong><br>`
+      + `<span style="color:#475569;">${escapeHtml(message || 'Unknown error')}</span><br>`
+      + `Try Run optimisation manually on the Optimize tab.`
+      + `</div>`
+      + `<button onclick="this.parentElement.parentElement.remove()" style="background:none;border:none;font-size:1.1em;cursor:pointer;color:#94a3b8;line-height:1;padding:0 0 0 8px;">&times;</button>`
+      + `</div>`;
+    document.body.appendChild(toast);
 }
 
 function showModeToast(mode) {
@@ -2688,9 +2782,9 @@ function showModeToast(mode) {
           + `<div style="flex:1;">`
           + `<strong style="color:${c};">Mode set: ${upper}</strong><br>`
           + `<span style="color:#475569;">${deltas}</span><br><br>`
-          + `<strong>Schedule tab will not change automatically.</strong> `
-          + `Open the <em>Optimize</em> tab and click <strong>Run optimisation</strong> `
-          + `to compute today's schedule under ${upper} settings (~5 min).`
+          + `<strong>Auto-running optimisation under ${upper}...</strong> `
+          + `<span id="mode-toast-elapsed" style="color:#64748b;">0:00 elapsed</span><br>`
+          + `<span style="color:#64748b;font-size:0.85em;">Typically ~5 min on Ch1 synthetic. Schedule tab stays as the disk baseline; results land on the Optimize tab.</span>`
           + `</div>`
           + `<button onclick="this.parentElement.parentElement.remove()" style="background:none;border:none;font-size:1.1em;cursor:pointer;color:#94a3b8;line-height:1;padding:0 0 0 8px;">&times;</button>`
           + `</div>`;
