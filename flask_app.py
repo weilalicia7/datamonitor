@@ -6728,6 +6728,12 @@ def api_add_patient():
 
             if result.success:
                 app_state['appointments'].append(result.appointment)
+                # Mirror the walk-in into the date-keyed live_schedule
+                # so the Gantt merge surfaces it the moment the operator
+                # accepts the insertion (no need to re-run /api/optimize).
+                _walkin_date = result.appointment.start_time.strftime('%Y-%m-%d')
+                _ls = app_state.setdefault('live_schedule', {})
+                _ls.setdefault(_walkin_date, []).append(result.appointment)
 
                 # Update urgent insertion statistics
                 app_state['urgent_insertion']['total_insertions'] += 1
@@ -6963,6 +6969,13 @@ def api_optimize():
             # No-Show Slots panel score every appointment twice and surface
             # each slot as a duplicate row.
             app_state['appointments'] = list(result.appointments)
+            # Also publish into the date-keyed `live_schedule` channel
+            # that /api/schedule/full's merge reads. Separate key so the
+            # warm-up CG (which writes to `appointments` only) cannot
+            # leak into the Gantt merge, and so /api/refresh's
+            # load_data_from_source() (which clears `appointments` but
+            # leaves `live_schedule` alone) doesn't wipe today's run.
+            app_state.setdefault('live_schedule', {})[target_date_str] = list(result.appointments)
             _stage('cpsat_solve', _t_stage); _t_stage = datetime.now()
 
             # Step 3b: Cross-site overflow (option B). For any patient
@@ -7150,6 +7163,11 @@ def api_optimize():
                     })
                 if overflow_assignments:
                     app_state['appointments'] = list(result.appointments)
+                    # Re-publish into the live_schedule date bucket now
+                    # that overflow placements have been appended to
+                    # result.appointments, so the Gantt merge sees the
+                    # complete schedule for the target date.
+                    app_state.setdefault('live_schedule', {})[target_date_str] = list(result.appointments)
                     if result.metrics is not None and result.metrics.get('objective_score') is not None:
                         # Soft penalty: -2 per overflowed patient
                         result.metrics['objective_score'] = round(
@@ -13197,26 +13215,118 @@ app.template_folder = str(templates_dir)
 def api_schedule_full():
     """
     Enriched schedule data for the viewer Gantt chart.
-    Serves the full appointments.xlsx data (34 fields) with ML predictions.
+
+    Channel-agnostic merge: the channel-active disk file (Ch1 synthetic
+    OR Ch2 real-hospital export, picked via app_state['data_dir'])
+    supplies the multi-day baseline; app_state['live_schedule'] (a
+    DEDICATED date-keyed dict populated only by user-triggered
+    /api/optimize and /api/add_patient) overrides per-date. For dates
+    the live overlay covers, live wins; other-day rows pass through
+    unchanged. Ch3 (NHS open data) is calibration only and never
+    enters this view.
+
+    The dedicated `live_schedule` key (rather than reusing
+    `app_state['appointments']`) is the safety guard that prevents the
+    f870b63 round of contamination bugs:
+      * Warm-up CG writes to `appointments` only — never enters merge
+      * /api/refresh's load_data_from_source clears `appointments`
+        but leaves `live_schedule` alone — no wipe race
+      * Concurrent /api/optimize calls last-write the same date key
+        cleanly; squeeze-in walk-ins append into the same date bucket
+    Sparse-field problem (empty Patient_Name etc.) is handled by
+    enriching each live entry with the patient registry row.
+    Chair_Number int parsing uses the trailing-digit regex so the
+    Gantt's strict-equality chair-row filter matches.
     """
     try:
-        # Use the rich appointments data from Excel (not the sparse optimizer output)
         data_dir = app_state.get('data_dir', 'datasets/sample_data')
         appt_path = Path(data_dir) / 'appointments.xlsx'
+
+        # ── Live overlay (translate ScheduledAppointment objects ──────
+        import re as _re
+        def _chair_num(cid):
+            if cid is None: return 0
+            m = _re.search(r'(\d+)\s*$', str(cid))
+            return int(m.group(1)) if m else 0
+        # Patient_ID -> registry row map for enrichment
+        _pdf = app_state.get('patients_df')
+        _pat_lookup = {}
+        if _pdf is not None and len(_pdf) > 0:
+            try:
+                _pat_lookup = _pdf.set_index('Patient_ID', drop=False).to_dict('index')
+            except Exception:
+                _pat_lookup = {}
+        _site_names = {s['code']: s['name'] for s in DEFAULT_SITES}
+        live_records = []
+        live_dates = set()
+        live_sched = app_state.get('live_schedule', {}) or {}
+        for date_key, apts in live_sched.items():
+            for apt in apts:
+                try:
+                    d = apt.start_time.strftime('%Y-%m-%d')
+                    live_dates.add(d)
+                    pat = _pat_lookup.get(apt.patient_id, {}) or {}
+                    name = (
+                        f"{pat.get('Person_Given_Name', pat.get('First_Name', ''))} "
+                        f"{pat.get('Person_Family_Name', pat.get('Surname', ''))}"
+                    ).strip() or apt.patient_id
+                    live_records.append({
+                        'Appointment_ID': f'LIVE_{apt.patient_id}_{apt.start_time.strftime("%H%M")}',
+                        'Patient_ID': apt.patient_id,
+                        'Patient_Name': name,
+                        'NHS_Number': pat.get('NHS_Number', ''),
+                        'Date': d,
+                        'Start_Time': apt.start_time.strftime('%H:%M'),
+                        'End_Time': apt.end_time.strftime('%H:%M'),
+                        'Duration_Minutes': apt.duration,
+                        'Site_Code': apt.site_code,
+                        'Site_Name': _site_names.get(apt.site_code, apt.site_code),
+                        'Chair_Number': _chair_num(apt.chair_id),
+                        'Chair_ID': apt.chair_id,
+                        'Regimen_Code': pat.get('Regimen_Code', ''),
+                        'Regimen_Name': pat.get('Regimen_Name', pat.get('Regimen_Code', '')),
+                        'Cancer_Type': pat.get('Cancer_Type', ''),
+                        'Cycle_Number': pat.get('Cycle_Number', 1),
+                        'Total_Cycles': pat.get('Total_Cycles', 1),
+                        'Day_In_Cycle': pat.get('Day_In_Cycle', 1),
+                        'Priority': apt.priority,
+                        'Performance_Status': pat.get('Performance_Status', 0),
+                        'Requires_1to1_Nursing': pat.get('Requires_1to1_Nursing', False),
+                        'Requires_Bed': pat.get('Requires_Bed', False),
+                        'Status': 'Scheduled',
+                        'source': 'live',
+                    })
+                except Exception:
+                    continue
+
+        # ── ML prediction map (shared across disk + live) ─────────────
+        raw_predictions = app_state.get('ml_predictions', {})
+        pred_map = {}
+        if isinstance(raw_predictions, dict) and 'noshow_predictions' in raw_predictions:
+            for p in raw_predictions.get('noshow_predictions', []):
+                pred_map[p['patient_id']] = p
+        elif isinstance(raw_predictions, dict):
+            pred_map = raw_predictions
+
+        for rec in live_records:
+            pid = rec.get('Patient_ID')
+            if pid and pid in pred_map:
+                rec['noshow_probability'] = pred_map[pid].get(
+                    'probability', pred_map[pid].get('noshow_probability', 0)
+                )
+                rec['risk_level'] = pred_map[pid].get('risk_level', 'unknown')
 
         if appt_path.exists():
             df = pd.read_excel(appt_path)
 
-            # Add ML predictions — build pid->prediction map from list
-            raw_predictions = app_state.get('ml_predictions', {})
-            pred_map = {}
-            if isinstance(raw_predictions, dict) and 'noshow_predictions' in raw_predictions:
-                for p in raw_predictions.get('noshow_predictions', []):
-                    pred_map[p['patient_id']] = p
-            elif isinstance(raw_predictions, dict):
-                pred_map = raw_predictions  # Already a map
+            # Drop disk rows for dates the live overlay covers, so a
+            # date that has been re-optimised under a mode shows the
+            # mode-aware result instead of the pre-optimise baseline.
+            if live_dates and 'Date' in df.columns:
+                df['_d'] = df['Date'].astype(str).str[:10]
+                df = df[~df['_d'].isin(live_dates)].drop(columns='_d')
 
-            if pred_map:
+            if pred_map and 'Patient_ID' in df.columns:
                 df['noshow_probability'] = df['Patient_ID'].map(
                     lambda pid: pred_map.get(pid, {}).get('probability', pred_map.get(pid, {}).get('noshow_probability', 0))
                 )
@@ -13224,36 +13334,29 @@ def api_schedule_full():
                     lambda pid: pred_map.get(pid, {}).get('risk_level', 'unknown')
                 )
 
-            # Convert to JSON-safe records
-            # Replace NaN/NaT with None, convert numpy types to Python native
-            df = df.fillna('')  # Replace all NaN with empty string
-            df = df.where(df.notna(), None)  # Belt and suspenders
-
-            # Use pandas to_dict which handles type conversion
-            records = json.loads(df.to_json(orient='records', date_format='iso', default_handler=str))
+            df = df.fillna('')
+            df = df.where(df.notna(), None)
+            disk_records = json.loads(df.to_json(orient='records', date_format='iso', default_handler=str))
+            records = disk_records + live_records
 
             return jsonify({
                 'schedule': records,
                 'count': len(records),
+                'live_count': len(live_records),
+                'live_dates': sorted(live_dates),
+                'channel': app_state.get('active_channel', 'synthetic'),
                 'has_ml_predictions': bool(pred_map)
             })
         else:
-            # Fallback to optimizer output
-            schedule = app_state.get('appointments', [])
-            enriched = []
-            for appt in schedule:
-                entry = {}
-                if hasattr(appt, '__dict__'):
-                    entry = {k: str(v) if hasattr(v, 'isoformat') else v
-                             for k, v in appt.__dict__.items() if not k.startswith('_')}
-                elif isinstance(appt, dict):
-                    entry = dict(appt)
-                enriched.append(entry)
-
+            # No disk file (Ch2 may not have one yet on a fresh hospital
+            # connection). Live overlay alone is the entire schedule.
             return jsonify({
-                'schedule': enriched,
-                'count': len(enriched),
-                'has_ml_predictions': False
+                'schedule': live_records,
+                'count': len(live_records),
+                'live_count': len(live_records),
+                'live_dates': sorted(live_dates),
+                'channel': app_state.get('active_channel', 'synthetic'),
+                'has_ml_predictions': bool(pred_map),
             })
     except Exception as e:
         logger.error(f"Schedule full error: {e}")
