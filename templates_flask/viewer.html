@@ -2644,7 +2644,62 @@ function switchMode(mode) {
         const mb = document.getElementById('mode-badge');
         mb.textContent = mode.toUpperCase();
         mb.style.background = modeColors[mode] || '#22c55e';
+
+        // Mode is a planning lens — it does not auto-rewrite the
+        // Schedule Gantt (the system-of-record view). Surface a
+        // dismissible toast so the operator knows the mode is set
+        // but they still need to click Run optimisation on the
+        // Optimize tab to see the new schedule. Without this hint
+        // an operator who switches mode and stares at the Schedule
+        // tab will see no change and conclude the dropdown is broken.
+        showModeToast(mode);
     });
+}
+
+function showModeToast(mode) {
+    const existing = document.getElementById('mode-toast');
+    if (existing) existing.remove();
+    const colors = {normal:'#22c55e',elevated:'#f59e0b',crisis:'#f97316',emergency:'#ef4444'};
+    const c = colors[mode] || '#22c55e';
+    const upper = mode.toUpperCase();
+    const toast = document.createElement('div');
+    toast.id = 'mode-toast';
+    toast.style.cssText =
+        'position:fixed;top:64px;right:18px;z-index:9999;'
+      + 'max-width:420px;padding:14px 18px 14px 16px;'
+      + `background:white;border:1px solid ${c};border-left:5px solid ${c};`
+      + 'border-radius:8px;box-shadow:0 6px 20px rgba(15,23,42,0.18);'
+      + 'font-size:0.85em;color:#0f172a;line-height:1.55;';
+    if (mode === 'normal') {
+        toast.innerHTML =
+            `<div style="display:flex;align-items:flex-start;gap:8px;">`
+          + `<div style="flex:1;"><strong style="color:${c};">Mode: NORMAL</strong><br>`
+          + `Standard scheduling rules apply. No deferrals, no buffer.</div>`
+          + `<button onclick="this.parentElement.parentElement.remove()" style="background:none;border:none;font-size:1.1em;cursor:pointer;color:#94a3b8;line-height:1;padding:0 0 0 8px;">&times;</button>`
+          + `</div>`;
+    } else {
+        const deltas = {
+            elevated:  'Duration buffer +15%. All priorities still eligible.',
+            crisis:    'Duration buffer +25%. Drops P4 walk-ins and bulk placements.',
+            emergency: 'Duration buffer +50%. Drops P3+P4. Activates 2 community sites (+8 chairs).',
+        }[mode];
+        toast.innerHTML =
+            `<div style="display:flex;align-items:flex-start;gap:8px;">`
+          + `<div style="flex:1;">`
+          + `<strong style="color:${c};">Mode set: ${upper}</strong><br>`
+          + `<span style="color:#475569;">${deltas}</span><br><br>`
+          + `<strong>Schedule tab will not change automatically.</strong> `
+          + `Open the <em>Optimize</em> tab and click <strong>Run optimisation</strong> `
+          + `to compute today's schedule under ${upper} settings (~5 min).`
+          + `</div>`
+          + `<button onclick="this.parentElement.parentElement.remove()" style="background:none;border:none;font-size:1.1em;cursor:pointer;color:#94a3b8;line-height:1;padding:0 0 0 8px;">&times;</button>`
+          + `</div>`;
+    }
+    document.body.appendChild(toast);
+    // Auto-dismiss NORMAL after 4s; keep escalated modes visible
+    // until the operator dismisses (they're more consequential).
+    if (mode === 'normal') setTimeout(() => toast.remove(), 4000);
+    else setTimeout(() => { if (toast.parentNode) toast.style.opacity = '0.6'; }, 12000);
 }
 
 // ================================================================
