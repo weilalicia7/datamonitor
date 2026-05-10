@@ -2685,14 +2685,13 @@ function switchMode(mode) {
         mb.textContent = mode.toUpperCase();
         mb.style.background = modeColors[mode] || '#22c55e';
 
-        // Show the explainer toast and auto-run /api/optimize for
-        // non-NORMAL modes so the operator doesn't have to navigate
-        // to the Optimize tab and click again. The toast doubles as
-        // the live progress indicator (elapsed counter + final
-        // result summary). NORMAL mode skips the auto-run because
-        // its result is the baseline — no buffer, no deferrals.
+        // Show the explainer toast and auto-run /api/optimize so
+        // the live_schedule overlay is rebuilt under the chosen
+        // mode. NORMAL also auto-runs (was previously skipped) —
+        // skipping it left the Gantt showing the prior mode's result
+        // when the operator switched back, which read as 'no change'.
         showModeToast(mode);
-        if (mode !== 'normal') autoOptimiseForMode(mode);
+        autoOptimiseForMode(mode);
     });
 }
 
@@ -2821,35 +2820,27 @@ function showModeToast(mode) {
       + `background:white;border:1px solid ${c};border-left:5px solid ${c};`
       + 'border-radius:8px;box-shadow:0 6px 20px rgba(15,23,42,0.18);'
       + 'font-size:0.85em;color:#0f172a;line-height:1.55;';
-    if (mode === 'normal') {
-        toast.innerHTML =
-            `<div style="display:flex;align-items:flex-start;gap:8px;">`
-          + `<div style="flex:1;"><strong style="color:${c};">Mode: NORMAL</strong><br>`
-          + `Standard scheduling rules apply. No deferrals, no buffer.</div>`
-          + `<button onclick="this.parentElement.parentElement.remove()" style="background:none;border:none;font-size:1.1em;cursor:pointer;color:#94a3b8;line-height:1;padding:0 0 0 8px;">&times;</button>`
-          + `</div>`;
-    } else {
-        const deltas = {
-            crisis:    'Duration buffer +25%. Drops P4 walk-ins and bulk placements.',
-            emergency: 'Duration buffer +50%. Drops P3+P4. Activates 2 community sites (+8 chairs).',
-        }[mode];
-        toast.innerHTML =
-            `<div style="display:flex;align-items:flex-start;gap:8px;">`
-          + `<div style="flex:1;">`
-          + `<strong style="color:${c};">Mode set: ${upper}</strong><br>`
-          + `<span style="color:#475569;">${deltas}</span><br><br>`
-          + `<strong>Auto-running optimisation under ${upper}...</strong> `
-          + `<span id="mode-toast-elapsed" style="color:#64748b;">0:00 elapsed</span><br>`
-          + `<span style="color:#64748b;font-size:0.85em;">Typically about 5 min on Ch1 synthetic. The Schedule tab Gantt and the Optimize tab will both refresh automatically when the solve completes.</span>`
-          + `</div>`
-          + `<button onclick="this.parentElement.parentElement.remove()" style="background:none;border:none;font-size:1.1em;cursor:pointer;color:#94a3b8;line-height:1;padding:0 0 0 8px;">&times;</button>`
-          + `</div>`;
-    }
+    const deltas = {
+        normal:    'Standard scheduling rules apply. No deferrals, no buffer.',
+        crisis:    'Duration buffer +25%. Drops P4 walk-ins and bulk placements.',
+        emergency: 'Duration buffer +50%. Drops P3+P4. Activates 2 community sites (+8 chairs).',
+    }[mode] || 'Standard scheduling rules apply.';
+    toast.innerHTML =
+        `<div style="display:flex;align-items:flex-start;gap:8px;">`
+      + `<div style="flex:1;">`
+      + `<strong style="color:${c};">Mode set: ${upper}</strong><br>`
+      + `<span style="color:#475569;">${deltas}</span><br><br>`
+      + `<strong>Auto-running optimisation under ${upper}...</strong> `
+      + `<span id="mode-toast-elapsed" style="color:#64748b;">0:00 elapsed</span><br>`
+      + `<span style="color:#64748b;font-size:0.85em;">Typically about 5 min on Ch1 synthetic. The Schedule tab Gantt and the Optimize tab will both refresh automatically when the solve completes.</span>`
+      + `</div>`
+      + `<button onclick="this.parentElement.parentElement.remove()" style="background:none;border:none;font-size:1.1em;cursor:pointer;color:#94a3b8;line-height:1;padding:0 0 0 8px;">&times;</button>`
+      + `</div>`;
     document.body.appendChild(toast);
-    // Auto-dismiss NORMAL after 4s; keep escalated modes visible
-    // until the operator dismisses (they're more consequential).
-    if (mode === 'normal') setTimeout(() => toast.remove(), 4000);
-    else setTimeout(() => { if (toast.parentNode) toast.style.opacity = '0.6'; }, 12000);
+    // Soft fade after 12s so the toast doesn't shout indefinitely;
+    // the operator can still see and click ×. The toast is replaced
+    // anyway by showModeResultToast / showModeErrorToast on completion.
+    setTimeout(() => { if (toast.parentNode) toast.style.opacity = '0.6'; }, 12000);
 }
 
 // ================================================================
