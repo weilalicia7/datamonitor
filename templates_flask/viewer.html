@@ -2638,47 +2638,6 @@ function loadDataChannelStatus() {
     }).catch(() => {});
 }
 
-// Re-fetch /api/schedule/full and refresh the in-memory appointments
-// list + Gantt + Appointments table. Called from autoOptimiseForMode
-// after a mode-aware solve completes so the Gantt picks up the new
-// live_schedule overlay merged onto the disk baseline. Mirror of the
-// init() loader, factored out for reuse.
-function reloadAppointments() {
-    return fetch('/api/schedule/full').then(r => r.json()).then(schedRes => {
-        appointments = (schedRes.schedule || []).map(a => ({
-            id: a.Appointment_ID || '',
-            pid: a.Patient_ID || '',
-            name: a.Patient_Name || '',
-            nhs: a.NHS_Number || '',
-            date: a.Date || '',
-            start: a.Start_Time || '',
-            end: a.End_Time || '',
-            dur: a.Duration_Minutes || 60,
-            site: a.Site_Code || '',
-            siteName: a.Site_Name || '',
-            chair: a.Chair_Number || 1,
-            chairId: a.Chair_ID || '',
-            reg: a.Regimen_Code || '',
-            regName: a.Regimen_Name || '',
-            cancer: a.Cancer_Type || '',
-            cycle: a.Cycle_Number || 1,
-            totalCycles: a.Total_Cycles || 1,
-            dayInCycle: a.Day_In_Cycle || 1,
-            priority: a.Priority || 'P3',
-            bed: a.Requires_Bed || false,
-            oneToOne: a.Requires_1to1_Nursing || false,
-            nurse: a.Nurse_Name || '',
-            nurseId: a.Nurse_ID || '',
-            status: a.Status || 'Scheduled',
-            noshow: a.noshow_probability || a.ML_NoShow_Probability || 0,
-            risk: a.risk_level || 'unknown',
-            ps: a.Performance_Status || 0,
-        }));
-        if (typeof renderSchedule === 'function') renderSchedule();
-        if (typeof renderAppointments === 'function') renderAppointments();
-    }).catch(() => {});
-}
-
 function switchMode(mode) {
     fetch('/api/mode', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({mode:mode})}).then(r=>r.json()).then(d => {
         const modeColors = {normal:'#22c55e',elevated:'#f59e0b',crisis:'#f97316',emergency:'#ef4444'};
@@ -2704,14 +2663,6 @@ function autoOptimiseForMode(mode) {
                         || (datePickerEl && datePickerEl.value)
                         || undefined;
 
-    // Guard against concurrent mode clicks: disable the mode dropdown
-    // while the auto-optimise is in flight. Without this two clicks
-    // in <5 min would interleave optimises and last-write the
-    // app_state — exactly the f870b63-era race that produced the
-    // CRISIS-shows-NORMAL bug. Re-enabled in success and error paths.
-    const ms = document.getElementById('mode-select');
-    if (ms) ms.disabled = true;
-
     const t0 = Date.now();
     // Tick the elapsed counter inside the toast every second so the
     // operator can see Flask is genuinely doing real work and not
@@ -2732,21 +2683,12 @@ function autoOptimiseForMode(mode) {
     }).then(r => r.json()).then(d => {
         clearInterval(tickHandle);
         showModeResultToast(mode, d);
-        if (ms) ms.disabled = false;
         // Refresh the Recent runs strip if the operator is on Optimize tab
         if (typeof loadOptimizeHistory === 'function') {
             try { loadOptimizeHistory(); } catch (e) { /* swallow */ }
         }
-        // Refresh the Schedule tab Gantt with the new live_schedule
-        // overlay. /api/schedule/full now merges per-date so the
-        // mode-aware result for `target_date` replaces the disk's
-        // same-date rows; other dates pass through unchanged.
-        if (typeof reloadAppointments === 'function') {
-            try { reloadAppointments(); } catch (e) { /* swallow */ }
-        }
     }).catch(e => {
         clearInterval(tickHandle);
-        if (ms) ms.disabled = false;
         showModeErrorToast(mode, e && e.message);
     });
 }
