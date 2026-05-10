@@ -6924,6 +6924,30 @@ def api_optimize():
                 )
                 try:
                     result = optimizer.optimize(eligible)
+                    # The solver used INFLATED durations to enforce
+                    # no-overlap — that's how the mode buffer becomes
+                    # implicit slack between appointments. But for
+                    # display + metrics, the appointment's recorded
+                    # duration should be the patient's REAL treatment
+                    # time (the buffer becomes a gap, not extra time
+                    # in the chair). Without this rewrite the
+                    # _calculate_metrics util can exceed 100% because
+                    # it divides inflated-minutes-served by raw
+                    # chair-capacity.
+                    from datetime import timedelta as _td
+                    for apt in result.appointments:
+                        if apt.patient_id in duration_snapshot:
+                            real_dur = duration_snapshot[apt.patient_id]
+                            apt.duration = real_dur
+                            apt.end_time = apt.start_time + _td(minutes=real_dur)
+                    # Recompute util on the now-corrected durations
+                    if result.metrics is not None:
+                        from config import OPERATING_HOURS as _oh2
+                        _sh, _eh = _oh2
+                        _cap = (_eh - _sh) * 60 * max(1, len(optimizer.chairs))
+                        _used = sum(a.duration for a in result.appointments)
+                        result.metrics['utilization'] = round(_used / _cap, 3)
+                        result.metrics['total_duration'] = _used
                 finally:
                     for p in eligible:
                         if p.patient_id in duration_snapshot:
