@@ -1923,12 +1923,18 @@ def refresh_events():
             if getattr(e, 'source', '') in OPERATIONAL_SOURCES
         ]
         max_severity = max([e.severity for e in operational_events], default=0)
+        # ELEVATED disabled — its dense buffered solve replays the
+        # warm-start cache and produces duplicate ScheduledAppointments
+        # (see flask_restart75.log analysis: 188 patients with x1.15
+        # buffer = highest pack density of the four modes, hits the
+        # 300s solver budget then hands cached hints back into the
+        # rebuild path which double-schedules patients). NORMAL absorbs
+        # the prior 0.30-0.50 severity range; CRISIS still triggers at
+        # 0.50+; EMERGENCY at 0.80+.
         if max_severity >= 0.8:
             app_state['mode'] = OperatingMode.EMERGENCY
         elif max_severity >= 0.5:
             app_state['mode'] = OperatingMode.CRISIS
-        elif max_severity >= 0.3:
-            app_state['mode'] = OperatingMode.ELEVATED
         else:
             app_state['mode'] = OperatingMode.NORMAL
 
@@ -10901,9 +10907,22 @@ def api_alerts():
 
 @app.route('/api/mode', methods=['POST'])
 def api_set_mode():
-    """Set operating mode"""
+    """Set operating mode.
+
+    ELEVATED is disabled — its dense x1.15 buffered solve interacts
+    badly with the warm-start cache replay path and produces duplicate
+    ScheduledAppointments under the live_schedule merge. Three modes
+    remain: NORMAL (baseline), CRISIS (P4 deferred + x1.25), EMERGENCY
+    (P3+P4 deferred + x1.5 + community sites).
+    """
     data = request.json
     mode_str = data.get('mode', 'normal')
+
+    if mode_str == 'elevated':
+        return jsonify({
+            'success': False,
+            'message': 'ELEVATED mode is disabled. Use NORMAL for baseline; CRISIS for major disruption (drops P4); EMERGENCY for severe (drops P3+P4 + community sites).'
+        }), 400
 
     try:
         app_state['mode'] = OperatingMode(mode_str)

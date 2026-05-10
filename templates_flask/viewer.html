@@ -324,7 +324,6 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-
     <div style="display:flex;gap:10px;align-items:center;">
         <select id="mode-select" onchange="switchMode(this.value)" style="padding:4px 8px;border:1px solid #a0aec0;border-radius:5px;font-size:0.8em;background:#16213e;color:white;">
             <option value="normal">Normal Mode</option>
-            <option value="elevated">Elevated Mode</option>
             <option value="crisis">Crisis Mode</option>
             <option value="emergency">Emergency Mode</option>
         </select>
@@ -2831,7 +2830,6 @@ function showModeToast(mode) {
           + `</div>`;
     } else {
         const deltas = {
-            elevated:  'Duration buffer +15%. All priorities still eligible.',
             crisis:    'Duration buffer +25%. Drops P4 walk-ins and bulk placements.',
             emergency: 'Duration buffer +50%. Drops P3+P4. Activates 2 community sites (+8 chairs).',
         }[mode];
