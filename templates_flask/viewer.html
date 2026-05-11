@@ -2000,8 +2000,7 @@ function previewSlots() {
         priority: document.getElementById('sq-priority').value,
         duration: parseInt(document.getElementById('sq-dur').value),
         postcode: document.getElementById('sq-postcode').value,
-        allow_double_booking: document.getElementById('sq-double').checked,
-        allow_rescheduling: document.getElementById('sq-resched').checked,
+        allow_double_booking: document.getElementById('sq-double').checked
     };
     fetch('/api/urgent/find-best-slot', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(_lastSqPatient)}).then(r=>r.json()).then(d => {
         if (d.success && d.options && d.options.length > 0) {
@@ -2013,23 +2012,14 @@ function previewSlots() {
                 // Safely embed chair_id + start_time into the data-attrs for the insert handler
                 const ci  = (opt.chair_id || '').replace(/"/g, '&quot;');
                 const st  = (opt.start_time || '').replace(/"/g, '&quot;');
-                const isResched = opt.requires_rescheduling && !opt.is_noshow_based;
-                const bg = isResched ? '#fef3c7' : '#f0fdf4';
-                const accent = isResched ? '#f59e0b' : '#10b981';
-                const reschedTag = isResched
-                    ? ` <span style="color:#92400e;">[Reschedule ${(opt.affected_patients||[]).join(', ')}]</span>`
-                    : '';
-                const dbookTag = opt.is_noshow_based
-                    ? ` <span style="color:#f59e0b;">[Double-book: ${nsPct} no-show]</span>`
-                    : '';
-                h += `<div style="display:flex;align-items:center;gap:8px;padding:6px 10px;margin:4px 0;background:${bg};border-radius:4px;border-left:3px solid ${accent};">
+                h += `<div style="display:flex;align-items:center;gap:8px;padding:6px 10px;margin:4px 0;background:#f0fdf4;border-radius:4px;border-left:3px solid #10b981;">
                         <div style="flex:1;">
                           ${i+1}. <strong>${opt.start_time}</strong> on ${opt.chair_id}
                           <span style="color:#888;"> (score: ${opt.score})</span>
-                          ${dbookTag}${reschedTag}
+                          ${opt.is_noshow_based ? ' <span style="color:#f59e0b;">[Double-book: '+nsPct+' no-show]</span>' : ''}
                         </div>
                         <button onclick="manualInsertSlot('${ci}', '${st}', this)"
-                                style="padding:5px 12px;background:${accent};color:white;border:none;border-radius:4px;cursor:pointer;font-size:0.82em;white-space:nowrap;">
+                                style="padding:5px 12px;background:#10b981;color:white;border:none;border-radius:4px;cursor:pointer;font-size:0.82em;white-space:nowrap;">
                           Insert here
                         </button>
                       </div>`;
