@@ -2760,6 +2760,36 @@ function showModeResultToast(mode, d) {
     const overflow = d.overflow_count || 0;
     const util = d.metrics ? Math.round((d.metrics.utilization || 0) * 100) : 0;
     const totalSec = Math.round((d.runtime_ms || 0) / 1000);
+
+    // 'No patients booked on YYYY-MM-DD' early-return case: the
+    // backend short-circuits with success=true, scheduled=0, demand=0
+    // and no metrics/runtime_ms. Render this as an INFO message
+    // instead of a misleading 'optimisation complete (0s) 0/0 placed'
+    // which the operator reads as a real run that produced nothing.
+    const noPatients = (d.message && /no patients/i.test(d.message)) || (demand === 0 && !d.metrics);
+    if (noPatients) {
+        const toast2 = document.createElement('div');
+        toast2.id = 'mode-toast';
+        toast2.style.cssText =
+            'position:fixed;top:64px;right:18px;z-index:9999;'
+          + 'max-width:420px;padding:14px 18px 14px 16px;'
+          + `background:white;border:1px solid #94a3b8;border-left:5px solid #94a3b8;`
+          + 'border-radius:8px;box-shadow:0 6px 20px rgba(15,23,42,0.18);'
+          + 'font-size:0.85em;color:#0f172a;line-height:1.55;';
+        toast2.innerHTML =
+            `<div style="display:flex;align-items:flex-start;gap:8px;">`
+          + `<div style="flex:1;">`
+          + `<strong style="color:${c};">${mode.toUpperCase()}</strong> &middot; `
+          + `<span style="color:#475569;">${escapeHtml(d.message || 'No patients to schedule')}</span><br>`
+          + `<span style="color:#64748b;font-size:0.85em;">Pick a date with bookings via the Schedule tab date picker, then re-select the mode.</span>`
+          + `</div>`
+          + `<button onclick="this.parentElement.parentElement.remove()" style="background:none;border:none;font-size:1.1em;cursor:pointer;color:#94a3b8;line-height:1;padding:0 0 0 8px;">&times;</button>`
+          + `</div>`;
+        document.body.appendChild(toast2);
+        setTimeout(() => { if (toast2.parentNode) toast2.style.opacity = '0.6'; }, 8000);
+        return;
+    }
+
     const toast = document.createElement('div');
     toast.id = 'mode-toast';
     toast.style.cssText =
