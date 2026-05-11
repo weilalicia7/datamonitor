@@ -6751,15 +6751,8 @@ def api_add_patient():
                 elif result.strategy_used == 'rescheduling':
                     app_state['urgent_insertion']['rescheduled'] += 1
 
-                # Get robustness alert appropriate to the strategy used.
-                # For double-booking the alert keys off the displaced
-                # patient's no-show probability, NOT the slack (which
-                # is always 0 by design for concurrent placements).
-                alert = squeeze_handler.get_robustness_alert(
-                    result.remaining_slack,
-                    strategy=result.strategy_used,
-                    noshow_prob=result.noshow_probability,
-                )
+                # Get robustness alert if applicable
+                alert = squeeze_handler.get_robustness_alert(result.remaining_slack)
 
                 return jsonify({
                     'success': True,

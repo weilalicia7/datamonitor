@@ -922,52 +922,8 @@ class SqueezeInHandler:
         else:
             return 10
 
-    def get_robustness_alert(self, remaining_slack: float,
-                              strategy: str = None,
-                              noshow_prob: float = None) -> dict:
-        """Return an alert appropriate to the insertion strategy.
-
-        For 'gap' / 'rescheduling' strategies the alert is keyed off
-        the remaining slack between the new appointment and its
-        neighbours (the original logic — 0 min slack really IS a
-        cascade risk because any overrun bleeds straight into the
-        next patient).
-
-        For 'double_booking' the slack is not a meaningful safety
-        signal because the new appointment is intentionally CONCURRENT
-        with an existing patient who has a high no-show probability.
-        The real risk is "what happens if the displaced patient
-        actually shows up?" — so the alert keys off the no-show
-        probability instead. The earlier 'CRITICAL — 0 min buffer'
-        message was confusing operators because it implied a
-        scheduling fragility when the strategy was working as designed.
-        """
-        if strategy == 'double_booking':
-            if noshow_prob is None:
-                return None
-            if noshow_prob >= 0.40:
-                # High no-show probability → low cascade risk: the
-                # displaced patient is unlikely to attend, so the chair
-                # is likely free for the walk-in alone.
-                return {
-                    'level': 'INFO',
-                    'message': f'Double-booked on a high-no-show slot ({noshow_prob:.0%}); displaced patient unlikely to attend.',
-                    'action': 'Standard double-booking practice; monitor on the day.'
-                }
-            elif noshow_prob >= 0.20:
-                return {
-                    'level': 'WARNING',
-                    'message': f'Double-booked on a medium-no-show slot ({noshow_prob:.0%}); some chance both patients arrive.',
-                    'action': 'Have a contingency chair available; remind the displaced patient.'
-                }
-            else:
-                return {
-                    'level': 'CRITICAL',
-                    'message': f'Double-booked on a low-no-show slot ({noshow_prob:.0%}); displaced patient is likely to attend.',
-                    'action': 'Reconsider — try rescheduling a lower-priority patient instead.'
-                }
-
-        # gap / rescheduling strategies — slack matters
+    def get_robustness_alert(self, remaining_slack: float) -> dict:
+        """Return alert if insertion degrades robustness significantly."""
         if remaining_slack is None:
             return None
         if remaining_slack < 10:
