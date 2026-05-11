@@ -13296,8 +13296,22 @@ def api_schedule_full():
         _pat_lookup = {}
         if _pdf is not None and len(_pdf) > 0:
             try:
-                _pat_lookup = _pdf.set_index('Patient_ID', drop=False).to_dict('index')
-            except Exception:
+                # patients.xlsx has duplicate Patient_IDs (1,200 rows
+                # but ~1,037 unique IDs); without drop_duplicates the
+                # set_index().to_dict('index') call raises ValueError
+                # ('DataFrame index must be unique for orient=index'),
+                # caught by the except below, leaving _pat_lookup={}.
+                # That made EVERY live record fall back to Patient_ID
+                # as the Name and empty Regimen_Code — visible in the
+                # Gantt as 'P36732 · · 46m' with no surname / no
+                # coloured regimen pill.
+                _pat_lookup = (
+                    _pdf.drop_duplicates(subset='Patient_ID', keep='first')
+                        .set_index('Patient_ID', drop=False)
+                        .to_dict('index')
+                )
+            except Exception as _le:
+                logger.warning(f"[merge] patient lookup build failed: {_le}; live records will fall back to IDs")
                 _pat_lookup = {}
         _site_names = {s['code']: s['name'] for s in DEFAULT_SITES}
         live_records = []
