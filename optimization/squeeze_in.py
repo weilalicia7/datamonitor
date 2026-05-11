@@ -1177,8 +1177,15 @@ class SqueezeInHandler:
             if noshow_options:
                 best = noshow_options[0]
 
-                # Only use if no-show probability is above threshold
-                if best.expected_noshow_prob >= self.NOSHOW_THRESHOLD_LOW:
+                # Only use if no-show probability is above the MEDIUM
+                # threshold (0.15). Previously this was NOSHOW_THRESHOLD_LOW
+                # (0.10), which accepted 10-15% double-books that the
+                # strategy-aware alert then labelled CRITICAL with
+                # 'Reconsider — try rescheduling instead' — operationally
+                # inconsistent (system performs the action it warns
+                # against). Below 0.15 we now fall through to Strategy 3
+                # (rescheduling) which is the alert's recommended action.
+                if best.expected_noshow_prob >= self.NOSHOW_THRESHOLD_MEDIUM:
                     appointment = ScheduledAppointment(
                         patient_id=patient.patient_id,
                         chair_id=best.chair_id,
