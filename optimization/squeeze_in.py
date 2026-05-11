@@ -967,8 +967,8 @@ class SqueezeInHandler:
             else:
                 return {
                     'level': 'CRITICAL',
-                    'message': f'Last-resort double-book at low confidence ({noshow_prob:.0%} no-show); displaced patient is likely to attend.',
-                    'action': 'Accepted only because gaps and rescheduling both failed on this packed day. Monitor closely; consider deferring if non-urgent.'
+                    'message': f'Low-confidence double-book ({noshow_prob:.0%} no-show); displaced patient is likely to attend.',
+                    'action': 'Reconsider — try rescheduling a lower-priority patient instead.'
                 }
 
         # gap / rescheduling strategies — slack matters
@@ -1239,52 +1239,6 @@ class SqueezeInHandler:
                     strategy_used="rescheduling",
                     noshow_probability=0.0,
                     confidence_level="N/A"
-                )
-
-        # Strategy 4: LAST-RESORT low-confidence double-book.
-        # If we reach here, gaps + medium/high double-book + rescheduling
-        # have all failed. Try double-booking at the 0.10-0.15 band that
-        # Strategy 2 deliberately skipped — the alert level will be
-        # CRITICAL but a low-confidence double-book is still better than
-        # turning an urgent walk-in away on a packed day. The acceptance
-        # gate is still NOSHOW_THRESHOLD_LOW (0.10) so we never accept a
-        # genuinely random slot.
-        if allow_double_booking and self.noshow_model and patient_data_map:
-            # noshow_options was computed earlier in Strategy 2 — reuse
-            # but find_best_slot_for_urgent rebuilds the ranking
-            lr_options = self.find_best_slot_for_urgent(
-                patient, existing_schedule, patient_data_map,
-                date, external_data, allow_double_booking=True
-            )
-            lr_options = [o for o in lr_options if o.noshow_based
-                          and self.NOSHOW_THRESHOLD_LOW <= o.expected_noshow_prob < self.NOSHOW_THRESHOLD_MEDIUM]
-            if lr_options:
-                best = lr_options[0]
-                appointment = ScheduledAppointment(
-                    patient_id=patient.patient_id,
-                    chair_id=best.chair_id,
-                    site_code=best.site_code,
-                    start_time=best.start_time,
-                    end_time=best.end_time,
-                    duration=patient.expected_duration,
-                    priority=patient.priority,
-                    travel_time=0
-                )
-                logger.warning(
-                    f"[squeeze] last-resort low-confidence double-book "
-                    f"({best.expected_noshow_prob:.0%}) for {patient.patient_id}"
-                )
-                return SqueezeInResult(
-                    success=True,
-                    appointment=appointment,
-                    options_evaluated=options_evaluated + len(lr_options),
-                    affected_patients=best.affected_appointments,
-                    message=f"Last-resort double-booking at {best.start_time.strftime('%H:%M')} "
-                           f"(LOW confidence, {best.expected_noshow_prob:.0%} no-show prob for "
-                           f"{best.affected_appointments[0]})",
-                    strategy_used="double_booking",
-                    noshow_probability=best.expected_noshow_prob,
-                    confidence_level="LOW"
                 )
 
         # Compose an actionable message that distinguishes "we tried and
