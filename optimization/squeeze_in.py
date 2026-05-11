@@ -945,25 +945,29 @@ class SqueezeInHandler:
         if strategy == 'double_booking':
             if noshow_prob is None:
                 return None
-            if noshow_prob >= 0.40:
-                # High no-show probability → low cascade risk: the
-                # displaced patient is unlikely to attend, so the chair
-                # is likely free for the walk-in alone.
+            # Thresholds align with the handler's own HIGH/MEDIUM/LOW
+            # confidence labels (NOSHOW_THRESHOLD_HIGH=0.25,
+            # NOSHOW_THRESHOLD_MEDIUM=0.15). Without this alignment the
+            # earlier alert called a 25% slot 'medium-no-show' even
+            # though the result message said 'HIGH confidence' — same
+            # number, contradictory label, operator confusion.
+            if noshow_prob >= self.NOSHOW_THRESHOLD_HIGH:
+                # HIGH confidence — displaced patient unlikely to attend
                 return {
                     'level': 'INFO',
-                    'message': f'Double-booked on a high-no-show slot ({noshow_prob:.0%}); displaced patient unlikely to attend.',
+                    'message': f'High-confidence double-book ({noshow_prob:.0%} no-show); displaced patient unlikely to attend.',
                     'action': 'Standard double-booking practice; monitor on the day.'
                 }
-            elif noshow_prob >= 0.20:
+            elif noshow_prob >= self.NOSHOW_THRESHOLD_MEDIUM:
                 return {
                     'level': 'WARNING',
-                    'message': f'Double-booked on a medium-no-show slot ({noshow_prob:.0%}); some chance both patients arrive.',
+                    'message': f'Medium-confidence double-book ({noshow_prob:.0%} no-show); some chance both patients arrive.',
                     'action': 'Have a contingency chair available; remind the displaced patient.'
                 }
             else:
                 return {
                     'level': 'CRITICAL',
-                    'message': f'Double-booked on a low-no-show slot ({noshow_prob:.0%}); displaced patient is likely to attend.',
+                    'message': f'Low-confidence double-book ({noshow_prob:.0%} no-show); displaced patient is likely to attend.',
                     'action': 'Reconsider — try rescheduling a lower-priority patient instead.'
                 }
 
