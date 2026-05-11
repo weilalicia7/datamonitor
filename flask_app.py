@@ -10700,6 +10700,23 @@ def api_find_best_slot():
             allow_double_booking=data.get('allow_double_booking', True)
         )
 
+        # Preview must be SYMMETRIC with Insert Now's cascade. find_best_slot_for_urgent
+        # only returns gap + double-booking options; if allow_rescheduling is on we also
+        # need to surface rescheduling candidates so the preview list reflects every
+        # strategy that Insert Now would actually try. Without this, unchecking
+        # 'Allow double-booking' could produce 0 preview options even when
+        # rescheduling would have succeeded.
+        if data.get('allow_rescheduling', True):
+            try:
+                resched_options = squeeze_handler.find_rescheduling_options(
+                    patient,
+                    existing_schedule=app_state['appointments'],
+                    date=datetime.now(),
+                )
+                options = list(options) + list(resched_options or [])
+            except Exception as _re:
+                logger.warning(f"[preview] rescheduling probe failed: {_re}")
+
         # Score-desc -> 30-min bucket cap -> chronological.  Without the
         # bucket-cap step the top 10 collapses onto whichever single shift
         # has the highest no-show probability (typically the late-morning
